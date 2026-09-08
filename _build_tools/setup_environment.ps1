@@ -408,7 +408,7 @@ if ($tailscaleExe) {
     }
     if ($tailscaleExe) {
         Say "Installed: $tailscaleExe"
-        Say "One-time step whenever you want remote access: open a terminal and run 'tailscale up' -- it opens a browser to sign in. Then ask Jarvis 'what's my remote address' for the URL to use from your phone." "White"
+        Say "One-time steps whenever you want remote access: open a terminal and run 'tailscale up' -- it opens a browser to sign in. Then tell Jarvis 'set up remote https' once (needed for your phone's microphone to work on the page -- plain http:// URLs get blocked from using the mic by the browser itself). After that, ask Jarvis 'what's my remote address' for the URL to use from your phone." "White"
     } else {
         Write-Host "Tailscale could not be installed automatically -- skipping, this is optional." -ForegroundColor Yellow
         Write-Host "Install it yourself later if you want remote access: https://tailscale.com/download (or 'winget install tailscale.tailscale')" -ForegroundColor Yellow
