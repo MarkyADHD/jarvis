@@ -498,6 +498,140 @@ if (window.PointerEvent) {
 </html>"""
 
 
+# Injected into the real HUD page (ai-visualizer, proxied from
+# VISUALIZER_PORT) right before its closing </body> -- see
+# _proxy_to_visualizer(). core.js has its OWN "mic" code, but it's
+# purely cosmetic: an ambient mic-level analyzer that makes a face
+# visually react to nearby sound (see core.js's micStart/micRead), not
+# a way to actually send a voice command. There was never a real
+# recorder/send path in the HUD at all. This reuses the exact same
+# recording -> /voice -> spoken-reply flow already proven working on
+# the /chat page above, as a small floating button, WITHOUT touching
+# ai-visualizer's own (third-party, AGPL) core.js.
+HUD_VOICE_INJECTION = """
+<div id="jvMicStatus" style="position:fixed;right:18px;bottom:78px;max-width:260px;
+  padding:8px 12px;border-radius:10px;background:rgba(10,14,18,.85);color:#cfd8dc;
+  font:12px 'SF Mono',Menlo,Consolas,monospace;text-align:right;opacity:0;
+  transition:opacity .3s;pointer-events:none;z-index:9998;"></div>
+<button id="jvMic" title="Hold to talk to Jarvis" style="position:fixed;right:18px;
+  bottom:18px;width:52px;height:52px;border-radius:50%;border:2px solid rgba(255,255,255,.25);
+  background:rgba(20,26,32,.85);color:#e8eef2;font-size:22px;cursor:pointer;z-index:9999;
+  display:flex;align-items:center;justify-content:center;">&#127908;</button>
+<audio id="jvReplyAudio" playsinline></audio>
+<script>
+(function () {
+  const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+  const replyAudio = document.getElementById("jvReplyAudio");
+  let audioUnlocked = false;
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+    replyAudio.src = SILENT_WAV;
+    replyAudio.play().catch(() => {});
+  }
+  document.body.addEventListener("pointerdown", unlockAudio, { once: true });
+  document.body.addEventListener("touchstart", unlockAudio, { once: true });
+
+  const params = new URLSearchParams(location.search);
+  const key = params.get("key") || localStorage.getItem("jarvis_key") || "";
+  if (key) localStorage.setItem("jarvis_key", key);
+
+  const mic = document.getElementById("jvMic");
+  const status = document.getElementById("jvMicStatus");
+  let statusHideT = null;
+  function showStatus(text) {
+    status.textContent = text;
+    status.style.opacity = "1";
+    clearTimeout(statusHideT);
+    statusHideT = setTimeout(() => { status.style.opacity = "0"; }, 5000);
+  }
+
+  let recorder = null, chunks = [], recording = false;
+
+  async function startRecording() {
+    if (recording) return;
+    unlockAudio();
+    mic.style.borderColor = "#ff3b5c";
+    if (!window.isSecureContext) {
+      showStatus("Needs HTTPS for mic access.");
+      mic.style.borderColor = "rgba(255,255,255,.25)";
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showStatus("This browser doesn't expose microphone access.");
+      mic.style.borderColor = "rgba(255,255,255,.25)";
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunks = [];
+      const mime = ["audio/mp4", "audio/webm", "audio/aac"].find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
+      recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        sendVoice(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+      };
+      recorder.start();
+      recording = true;
+      showStatus("Listening...");
+    } catch (err) {
+      showStatus("Mic access failed: " + (err && err.name ? err.name : String(err)));
+      mic.style.borderColor = "rgba(255,255,255,.25)";
+    }
+  }
+
+  function stopRecording() {
+    mic.style.borderColor = "rgba(255,255,255,.25)";
+    if (!recording) return;
+    recording = false;
+    try { recorder.stop(); } catch (err) {}
+  }
+
+  async function sendVoice(blob) {
+    showStatus("Thinking...");
+    try {
+      const r = await fetch("/voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream", "X-Jarvis-Token": key },
+        body: blob,
+      });
+      if (r.status === 403) {
+        showStatus("Wrong or missing key -- open the link Mark gave you again.");
+        return;
+      }
+      const data = await r.json();
+      if (!data.transcript) {
+        showStatus("(didn't catch that)");
+        return;
+      }
+      showStatus(data.reply || "(no reply)");
+      if (data.audio_b64) {
+        replyAudio.src = "data:audio/wav;base64," + data.audio_b64;
+        replyAudio.play().catch(() => {});
+      }
+    } catch (err) {
+      showStatus("Connection failed -- make sure Tailscale is connected.");
+    }
+  }
+
+  if (window.PointerEvent) {
+    mic.addEventListener("pointerdown", (e) => { e.preventDefault(); startRecording(); });
+    mic.addEventListener("pointerup", (e) => { e.preventDefault(); stopRecording(); });
+    mic.addEventListener("pointercancel", stopRecording);
+    mic.addEventListener("pointerleave", stopRecording);
+  } else {
+    mic.addEventListener("mousedown", startRecording);
+    mic.addEventListener("mouseup", stopRecording);
+    mic.addEventListener("mouseleave", stopRecording);
+    mic.addEventListener("touchstart", (e) => { e.preventDefault(); startRecording(); });
+    mic.addEventListener("touchend", (e) => { e.preventDefault(); stopRecording(); });
+  }
+})();
+</script>
+"""
+
+
 class Handler(BaseHTTPRequestHandler):
     def _authorized(self) -> bool:
         return self.headers.get("X-Jarvis-Token", "") == TOKEN
@@ -543,8 +677,21 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with urllib.request.urlopen(url, timeout=5) as resp:
                 body = resp.read()
+                content_type = resp.headers.get("Content-Type", "application/octet-stream")
+
+                # Only the actual HTML page gets the voice-mic button
+                # injected -- every other proxied response (JSON state
+                # polling, JS/image assets) must pass through byte-
+                # identical, or ai-visualizer's own JS could break on a
+                # response it doesn't expect to be modified.
+                if self.path.split("?")[0] == "/" and "text/html" in content_type:
+                    text = body.decode("utf-8", errors="replace")
+                    if "</body>" in text:
+                        text = text.replace("</body>", HUD_VOICE_INJECTION + "</body>", 1)
+                        body = text.encode("utf-8")
+
                 self.send_response(resp.status)
-                self.send_header("Content-Type", resp.headers.get("Content-Type", "application/octet-stream"))
+                self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
