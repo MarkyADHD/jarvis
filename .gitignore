@@ -17,6 +17,10 @@ voices/
 vosk_model/
 piper_runtime/
 voice_cache/
+*.bak_*
+piper_windows_amd64.zip
+vosk-model-*.zip
+_hud_*.png
 
 # --- Historical dev-artifact folders (superseded, see CLAUDE.md) ---
 ClaudeCodeBrainV1/
