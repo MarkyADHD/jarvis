@@ -261,6 +261,12 @@ async def _reset_brain():
         except Exception:
             pass
 
+    # Re-warm immediately in the background rather than waiting for the
+    # next real request to pay the reconnect cost live -- a broken
+    # session gets reset on every failure (see ask_sync's caller), so
+    # without this, one bad request would make the NEXT one slow too.
+    prewarm_brain_async()
+
 
 async def _ask_stream_collect(prompt: str) -> str:
     brain = await _get_brain()
@@ -376,6 +382,29 @@ def prewarm_voice_async():
     threading.Thread(
         target=_run,
         name="jarvis-kokoro-prewarm",
+        daemon=True,
+    ).start()
+
+
+def prewarm_brain_async(timeout: float = 60.0):
+    """Constructs and starts the persistent WarmBrain session in a
+    background thread, ahead of the first real request -- same reasoning
+    as prewarm_voice_async/prewarm_ptt_async above. Without this, the
+    FIRST ask_sync() call after every process start (and again after any
+    _reset_brain(), which happens whenever a request fails) pays the
+    full cost of spinning up a fresh Claude Agent SDK session live,
+    mid-conversation -- a real, user-visible "long pause" with no
+    obvious cause, since nothing about the request itself was slow.
+    """
+    def _run():
+        try:
+            _run_coro(_get_brain(), timeout=timeout)
+        except Exception:
+            pass
+
+    threading.Thread(
+        target=_run,
+        name="jarvis-brain-prewarm",
         daemon=True,
     ).start()
 

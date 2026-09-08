@@ -1413,6 +1413,35 @@ def _plain_model_retry_v3(messages, goal, name):
     return None
 
 
+# Fixed 150s timeout on claude_brain_v2.ask_sync() was cutting off
+# genuine self-edit/coding work early -- CLAUDE.md's own mandated
+# Change workflow (compile-check, run tests, broader regression tests)
+# routinely takes longer than that for anything nontrivial. When
+# ask_sync() times out, its own finally block resets the HUD's
+# "thinking" state back to idle even though the underlying tool call
+# may still be running -- looking exactly like "doesn't stay in
+# thinking mode, looks like he's doing nothing". Detecting this class
+# of request and giving it a much longer timeout fixes that without
+# slowing down the fast path: ordinary conversation keeps the original
+# 150s ceiling, so a genuinely broken/hung request still fails at a
+# reasonable time instead of always waiting the long ceiling out.
+_CODING_TASK_PATTERNS = (
+    "fix yourself", "fix your code", "repair yourself", "self repair",
+    "edit your", "edit yourself", "update your code", "update your own code",
+    "change your code", "change your own code", "add to your own code",
+    "change how you", "look at your code", "look at your own code",
+    "debug yourself", "your own code", "modify your", "modify yourself",
+    "rewrite your", "refactor your",
+)
+
+CODING_TASK_TIMEOUT_SECONDS = 600.0
+
+
+def _looks_like_coding_task(text):
+    t = str(text or "").lower()
+    return any(phrase in t for phrase in _CODING_TASK_PATTERNS)
+
+
 def ask_ai_common_v2(goal, original_func=None):
     name = refresh_spoken_name()
 
@@ -1499,7 +1528,10 @@ def ask_ai_common_v2(goal, original_func=None):
         else:
             brain_v2_prompt = goal
 
-        brain_v2_answer = claude_brain_v2.ask_sync(brain_v2_prompt)
+        if _looks_like_coding_task(goal):
+            brain_v2_answer = claude_brain_v2.ask_sync(brain_v2_prompt, timeout=CODING_TASK_TIMEOUT_SECONDS)
+        else:
+            brain_v2_answer = claude_brain_v2.ask_sync(brain_v2_prompt)
 
         if brain_v2_answer.get("ok"):
             brain_v2_reply = str(brain_v2_answer.get("result", "") or "").strip()
@@ -1938,6 +1970,11 @@ def install_v2(headless=False):
 
     try:
         claude_brain_v2.prewarm_voice_async()
+    except Exception:
+        pass
+
+    try:
+        claude_brain_v2.prewarm_brain_async()
     except Exception:
         pass
 

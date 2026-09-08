@@ -509,14 +509,14 @@ if (window.PointerEvent) {
 # the /chat page above, as a small floating button, WITHOUT touching
 # ai-visualizer's own (third-party, AGPL) core.js.
 HUD_VOICE_INJECTION = """
-<div id="jvMicStatus" style="position:fixed;right:18px;bottom:78px;max-width:260px;
-  padding:8px 12px;border-radius:10px;background:rgba(10,14,18,.85);color:#cfd8dc;
-  font:12px 'SF Mono',Menlo,Consolas,monospace;text-align:right;opacity:0;
-  transition:opacity .3s;pointer-events:none;z-index:9998;"></div>
-<button id="jvMic" title="Hold to talk to Jarvis" style="position:fixed;right:18px;
-  bottom:18px;width:52px;height:52px;border-radius:50%;border:2px solid rgba(255,255,255,.25);
-  background:rgba(20,26,32,.85);color:#e8eef2;font-size:22px;cursor:pointer;z-index:9999;
+<button id="jvMic" title="Hold to talk to Jarvis" style="position:fixed;left:56px;
+  top:100px;width:84px;height:84px;border-radius:50%;border:3px solid rgba(255,255,255,.3);
+  background:rgba(20,26,32,.85);color:#e8eef2;font-size:34px;cursor:pointer;z-index:9999;
   display:flex;align-items:center;justify-content:center;">&#127908;</button>
+<div id="jvMicStatus" style="position:fixed;left:56px;top:192px;max-width:260px;
+  padding:8px 12px;border-radius:10px;background:rgba(10,14,18,.85);color:#cfd8dc;
+  font:12px 'SF Mono',Menlo,Consolas,monospace;text-align:left;opacity:0;
+  transition:opacity .3s;pointer-events:none;z-index:9998;"></div>
 <audio id="jvReplyAudio" playsinline></audio>
 <script>
 (function () {
