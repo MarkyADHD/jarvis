@@ -521,11 +521,47 @@ HUD_VOICE_INJECTION = """
 <script>
 (function () {
   const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+
+  // ai-visualizer's own core.js creates its OWN separate Audio object
+  // for its native chat bar (a private variable inside its closure --
+  // not reachable from here). iOS/Safari only allows a media element to
+  // play without a fresh gesture once THAT SPECIFIC element has already
+  // played something during a real gesture -- core.js's chat bar never
+  // does this, so its audio.play() (called async, after a fetch, well
+  // outside the original Enter-key gesture) silently fails on iOS. Since
+  // core.js's own object can't be reached directly, this overrides the
+  // global Audio constructor instead: every `new Audio()` call anywhere
+  // on the page -- including inside core.js -- gets tracked here, and
+  // the first real tap/touch on the page primes all of them with a
+  // silent clip. core.js's own initChatBar() only constructs its Audio
+  // object asynchronously (after a /config fetch resolves), which is
+  // guaranteed to be slower than this script installing the override,
+  // so it's already in place by the time that happens.
+  const RealAudio = window.Audio;
+  const trackedAudios = [];
+  let pageUnlocked = false;
+  window.Audio = function (...args) {
+    const a = new RealAudio(...args);
+    trackedAudios.push(a);
+    if (pageUnlocked) primeOne(a);
+    return a;
+  };
+  function primeOne(a) {
+    try {
+      const prevSrc = a.src;
+      a.src = SILENT_WAV;
+      const p = a.play();
+      if (p && p.then) p.then(() => { try { a.pause(); a.src = prevSrc || ""; } catch (e) {} }).catch(() => {});
+    } catch (e) {}
+  }
+
   const replyAudio = document.getElementById("jvReplyAudio");
   let audioUnlocked = false;
   function unlockAudio() {
     if (audioUnlocked) return;
     audioUnlocked = true;
+    pageUnlocked = true;
+    trackedAudios.forEach(primeOne);
     replyAudio.src = SILENT_WAV;
     replyAudio.play().catch(() => {});
   }
@@ -679,12 +715,17 @@ class Handler(BaseHTTPRequestHandler):
                 body = resp.read()
                 content_type = resp.headers.get("Content-Type", "application/octet-stream")
 
-                # Only the actual HTML page gets the voice-mic button
-                # injected -- every other proxied response (JSON state
-                # polling, JS/image assets) must pass through byte-
-                # identical, or ai-visualizer's own JS could break on a
-                # response it doesn't expect to be modified.
-                if self.path.split("?")[0] == "/" and "text/html" in content_type:
+                # Every HTML page gets the voice-mic button injected --
+                # not just "/" (the gallery), which was the actual bug:
+                # "/" is only a face-picker; selecting a face does a
+                # real browser navigation to faces/<id>/index.html, a
+                # completely separate document that never went through
+                # the "/"-only check before, so the button only ever
+                # existed on a screen nobody actually stays on. Every
+                # OTHER proxied response (JSON state polling, JS/image
+                # assets) still passes through byte-identical -- gated
+                # on Content-Type, not path, so it can't affect them.
+                if "text/html" in content_type:
                     text = body.decode("utf-8", errors="replace")
                     if "</body>" in text:
                         text = text.replace("</body>", HUD_VOICE_INJECTION + "</body>", 1)
@@ -693,6 +734,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(resp.status)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
+                # This whole proxy is brand new and under active
+                # iteration -- a mobile browser caching an old copy of
+                # the HTML (no explicit cache headers were being sent
+                # at all before this) is a real, confirmed-easy way to
+                # see stale behavior that looks like a live bug.
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(body)
         except urllib.error.HTTPError as e:
