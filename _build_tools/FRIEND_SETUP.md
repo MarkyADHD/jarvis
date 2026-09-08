@@ -25,18 +25,15 @@ can use another path, but then expect to hunt down and fix hardcoded
 
 ## 1. Prerequisites
 
-- **Python 3.12** (from python.org — check "Add to PATH" during install)
-  — this one you need to install yourself first, nothing can do it for
-  you automatically
 - **Microsoft Edge** (used for the visual HUD window — usually already
   on Windows)
 - **[Tailscale](https://tailscale.com/download)** — only if you want to
   talk to Jarvis from your phone when away from this PC. Skip if you
   only want him running locally.
 
-Node.js and Claude Code do NOT need installing by hand — step 2 below
-handles both, including prompting you to sign in with your own Claude
-account.
+Python 3.12, Node.js, and Claude Code do NOT need installing by hand —
+step 2 below handles all three automatically, including prompting you
+to sign in with your own Claude account.
 
 ## 2. Run "Finish Setup"
 

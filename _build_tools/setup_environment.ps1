@@ -1,12 +1,13 @@
 #Requires -Version 5.1
 <#
   Post-install bootstrap for Jarvis. Handles everything that CAN be
-  automated reliably: the Python venv + package install (targeting
-  Python 3.12 specifically, verified rather than assumed to have
-  worked), eSpeak NG (the one real system-level voice dependency --
-  confirmed required, not optional, see the section below), and
-  Node.js + Claude Code install/login. backtalk's own dependencies are
-  already fully covered by requirements.txt (verified: every package
+  automated reliably: Python 3.12 itself (installed via winget if
+  missing, not just detected), the venv + package install (targeting
+  that exact 3.12, verified rather than assumed to have worked),
+  eSpeak NG (the one real system-level voice dependency -- confirmed
+  required, not optional, see the section below), and Node.js +
+  Claude Code install/login. backtalk's own dependencies are already
+  fully covered by requirements.txt (verified: every package
   backtalk's pyproject.toml declares is in there) -- its own separate
   installer is for running it standalone, not needed here at all.
 #>
@@ -80,7 +81,23 @@ function Get-RealPythonCmd {
 }
 $pyCmdParts = Get-RealPythonCmd
 if (-not $pyCmdParts) {
-    Fail "No working Python install found. `'python`' on PATH resolves to the Windows Store stub, not a real install, on a lot of machines -- that's most likely what's happening here.`nInstall Python 3.12 from https://python.org (check 'Add to PATH' during install), then run this script again."
+    # Unlike Node.js/eSpeak NG below, this was previously a hard stop --
+    # inconsistent, and the single most likely thing someone with no dev
+    # background doesn't already have. Auto-install via winget the same
+    # way, then re-detect rather than trusting the installer's own exit
+    # code alone (winget can report success while PATH still needs a
+    # fresh process to see it).
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Say "Python not found -- installing Python 3.12 via winget..."
+        winget install --id Python.Python.3.12 -e --accept-source-agreements --accept-package-agreements --silent
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                    [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $pyCmdParts = Get-RealPythonCmd
+    }
+}
+if (-not $pyCmdParts) {
+    Fail "No working Python install found and it could not be installed automatically. `'python`' on PATH resolving to the Windows Store stub instead of a real install is the most common cause.`nInstall Python 3.12 from https://python.org (check 'Add to PATH' during install), then run this script again."
 }
 function Invoke-Py {
     # Splatting $pyCmdParts[1..($pyCmdParts.Count-1)] breaks when Count
