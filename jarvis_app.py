@@ -218,7 +218,7 @@ WAKE_WORD_ALIASES = [
     "jarvus", "yarvis", "travis", "charvis", "service",
 ]
 
-CONVERSATION_TIMEOUT_SECONDS = 60
+CONVERSATION_TIMEOUT_SECONDS = 15
 
 WHISPER_MODEL_NAME = "base.en"
 WHISPER_DEVICE = "cpu"
