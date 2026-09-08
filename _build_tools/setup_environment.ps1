@@ -124,8 +124,8 @@ function Get-RealPythonCmd {
     }
     return $null
 }
-$pyCmdParts = Get-RealPythonCmd
-if (-not $pyCmdParts) {
+$pyCmdParts = @(Get-RealPythonCmd)
+if (-not $pyCmdParts[0]) {
     # Unlike Node.js/eSpeak NG below, this was previously a hard stop --
     # inconsistent, and the single most likely thing someone with no dev
     # background doesn't already have. Auto-install via winget the same
@@ -138,10 +138,10 @@ if (-not $pyCmdParts) {
         winget install --id Python.Python.3.12 -e --accept-source-agreements --accept-package-agreements --silent
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                     [System.Environment]::GetEnvironmentVariable("Path", "User")
-        $pyCmdParts = Get-RealPythonCmd
+        $pyCmdParts = @(Get-RealPythonCmd)
     }
 }
-if (-not $pyCmdParts) {
+if (-not $pyCmdParts[0]) {
     Fail "No working Python install found and it could not be installed automatically. `'python`' on PATH resolving to the Windows Store stub instead of a real install is the most common cause.`nInstall Python 3.12 from https://python.org (check 'Add to PATH' during install), then run this script again."
 }
 function Invoke-Py {
