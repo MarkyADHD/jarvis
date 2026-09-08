@@ -1,12 +1,14 @@
 #Requires -Version 5.1
 <#
-  Post-install bootstrap for Jarvis. Handles what CAN be automated
-  reliably (the Python venv + package install, Node.js + Claude Code
-  install via winget/npm, and launching `claude login` itself) and
-  gives clear, copy-pasteable next steps for the one thing that
-  genuinely can't be scripted around: backtalk's own voice-pipeline
-  installer is its own separate project and shouldn't be silently
-  reimplemented here.
+  Post-install bootstrap for Jarvis. Handles everything that CAN be
+  automated reliably: the Python venv + package install (targeting
+  Python 3.12 specifically, verified rather than assumed to have
+  worked), eSpeak NG (the one real system-level voice dependency --
+  confirmed required, not optional, see the section below), and
+  Node.js + Claude Code install/login. backtalk's own dependencies are
+  already fully covered by requirements.txt (verified: every package
+  backtalk's pyproject.toml declares is in there) -- its own separate
+  installer is for running it standalone, not needed here at all.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -148,6 +150,41 @@ if (Test-Path $reqFile) {
 
 Say ""
 Say "===================================================="
+Say "  eSpeak NG -- needed for Jarvis's voice"
+Say "===================================================="
+Say ""
+
+# Kokoro (the built-in voice) phonemizes text through espeak-ng. The
+# pip-installable espeakng-loader wheel has a known-broken build path
+# (confirmed the hard way, documented in backtalk's own
+# TROUBLESHOOTING.md) -- the actual supported path is a real system
+# install, which is not something pip/requirements.txt can ever
+# provide. Without this, voice output fails to load entirely.
+$espeakPaths = @(
+    "C:\Program Files\eSpeak NG\libespeak-ng.dll",
+    "C:\Program Files (x86)\eSpeak NG\libespeak-ng.dll"
+)
+$espeakFound = $espeakPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($espeakFound) {
+    Say "Found: $espeakFound"
+} else {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Say "eSpeak NG not found -- installing via winget..."
+        winget install --id eSpeak-NG.eSpeak-NG -e --accept-source-agreements --accept-package-agreements --silent
+        $espeakFound = $espeakPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+    if ($espeakFound) {
+        Say "Installed: $espeakFound"
+    } else {
+        Write-Host "eSpeak NG could not be installed automatically." -ForegroundColor Yellow
+        Write-Host "Voice output will fail to load until you install it yourself: https://github.com/espeak-ng/espeak-ng/releases (or 'winget install eSpeak-NG.eSpeak-NG')" -ForegroundColor Yellow
+        Write-Host "Continuing setup -- this alone won't block anything else below." -ForegroundColor Yellow
+    }
+}
+
+Say ""
+Say "===================================================="
 Say "  Claude Code -- Jarvis's brain"
 Say "===================================================="
 Say ""
@@ -208,14 +245,10 @@ if (-not $claude) {
 
 Say ""
 Say "===================================================="
-Say "  Almost done -- one manual step remains:"
+Say "  All done -- everything Jarvis needs is installed."
 Say "===================================================="
 Say ""
-Say "Voice pipeline (backtalk):" "White"
-Say "   cd `"$root\backtalk`"" "Gray"
-Say "   Follow backtalk\README.md / TROUBLESHOOTING.md for the Windows setup steps." "Gray"
-Say ""
-Say "Then launch Jarvis:" "White"
+Say "Launch Jarvis:" "White"
 Say "   $venvPath\Scripts\pythonw.exe `"$root\jarvis_app_v2.py`"" "Gray"
 Say "   (or just use the JARVIS shortcut on your Desktop / Start Menu)" "Gray"
 Say ""

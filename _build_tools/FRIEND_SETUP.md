@@ -57,20 +57,31 @@ If any of that fails partway (no internet, Node install blocked by a
 work/school PC policy, etc.), it tells you exactly what to run by hand
 to pick up where it left off.
 
-## 3. Set up the voice pipeline (backtalk)
+## 3. Voice pipeline (backtalk) — already handled
 
-```powershell
-cd backtalk
-.\install.sh   # or follow backtalk\README.md if that's a WSL/Unix script —
-                # on plain Windows PowerShell, check TROUBLESHOOTING.md
-                # in that folder for the Windows-specific steps
-```
+You do NOT need to separately set up `backtalk\` or run its own
+installer. Every package backtalk needs is already covered by step 2's
+`requirements.txt` install (verified directly: every dependency listed
+in `backtalk\pyproject.toml` is in `requirements.txt`, since that file
+was captured from a machine where backtalk already worked). The
+`backtalk\` folder's own `.venv`/install scripts are for running
+backtalk as its own standalone project — not needed here, since Jarvis
+imports it as a library into the main environment you just built.
+
+One thing that genuinely IS a separate, real system dependency:
+**eSpeak NG**, which the voice engine needs for text phonemization —
+"Finish Setup" installs this automatically via winget. If voice output
+fails to load and Finish Setup couldn't install it (no winget, no
+internet), grab it yourself from
+https://github.com/espeak-ng/espeak-ng/releases.
 
 `backtalk\backtalk.json` already has your voice and personality carried
 over. If you'd rather use ElevenLabs instead of the built-in Kokoro
 voice, add your own key and `"elevenlabs": {...}` block back into that
-file — it was intentionally left out of this export since that's a
-paid account choice, not something to inherit.
+file, and separately install `ffmpeg` (`winget install Gyan.FFmpeg`) —
+both were intentionally left out of this export since that's a paid
+account choice, not something to inherit, and ffmpeg is only needed
+for that path specifically.
 
 ## 4. First launch
 
