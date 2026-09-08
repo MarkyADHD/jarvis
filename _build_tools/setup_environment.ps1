@@ -38,22 +38,89 @@ Say "  JARVIS -- environment setup"
 Say "===================================================="
 Say ""
 
-# --- Python check ---
-$py = Get-Command python -ErrorAction SilentlyContinue
-if (-not $py) {
-    Write-Host "Python was not found on PATH." -ForegroundColor Red
-    Write-Host "Install Python 3.12 from https://python.org (check 'Add to PATH' during install), then run this script again." -ForegroundColor Yellow
+function Fail($text) {
+    Write-Host $text -ForegroundColor Red
     Read-Host "Press Enter to exit"
     exit 1
 }
-$verLine = (& python --version) 2>&1
-Say "Found: $verLine"
+
+# --- Python check ---
+# `Get-Command python` succeeding is NOT proof of a real Python install --
+# Windows ships a "python" App Execution Alias stub (at
+# %LOCALAPPDATA%\Microsoft\WindowsApps\python.exe) that satisfies this
+# check, is FIRST on PATH by default ahead of a real install, and does
+# nothing but print a Microsoft Store nag when run (exit code 9009).
+# Confirmed hitting this on the machine this project was built on, so
+# it is not an edge case -- it's the default on a lot of Windows
+# machines. The `py` launcher (py.exe, installed by the real python.org
+# installer, not the Store) is immune to this and is tried first.
+function Get-RealPythonCmd {
+    # `requirements.txt` was pinned against 3.12 -- some packages in it
+    # may not have wheels built for newer Python versions yet, which
+    # makes `pip install -r requirements.txt` fail on whichever package
+    # hits that first and abort the WHOLE batch (a real report from a
+    # real install: everything after that point, `requests` included,
+    # silently never got installed). `py -3.12` asks the launcher for
+    # that exact version if it's present, sidestepping the issue
+    # instead of gambling on whatever "python"/"py" defaults to.
+    $cmd = Get-Command py -ErrorAction SilentlyContinue
+    if ($cmd) {
+        $v = (& py -3.12 --version) 2>&1 | Out-String
+        if ($v -match "Python 3\.12") { return @("py", "-3.12") }
+    }
+    foreach ($candidate in @("py", "python")) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if (-not $cmd) { continue }
+        $v = (& $candidate --version) 2>&1 | Out-String
+        if ($v -match "Python 3\.") { return @($candidate) }
+    }
+    return $null
+}
+$pyCmdParts = Get-RealPythonCmd
+if (-not $pyCmdParts) {
+    Fail "No working Python install found. `'python`' on PATH resolves to the Windows Store stub, not a real install, on a lot of machines -- that's most likely what's happening here.`nInstall Python 3.12 from https://python.org (check 'Add to PATH' during install), then run this script again."
+}
+function Invoke-Py {
+    # Splatting $pyCmdParts[1..($pyCmdParts.Count-1)] breaks when Count
+    # is 1 -- PowerShell's `1..0` range produces (1, 0), not an empty
+    # array, so slicing "everything after index 0" needs an explicit
+    # guard rather than relying on the range operator to do it.
+    #
+    # Using the automatic $args variable rather than a declared
+    # [Parameter(ValueFromRemainingArguments)] -- that attribute needs
+    # [CmdletBinding()] to actually bind correctly; without it, a first
+    # attempt here silently ate the "--version" argument and launched
+    # an interactive Python REPL instead of printing a version string.
+    # $args needs no such ceremony and is the safer default for "just
+    # pass everything through" in a plain function.
+    # The @(...) wrapper is load-bearing: assigning an if/else
+    # expression's result directly to a variable silently unwraps a
+    # single-element array into a plain scalar string in PowerShell,
+    # which then breaks @-splatting in a way that's genuinely hard to
+    # spot -- confirmed the hard way: `py -3.12 --version` spawned an
+    # interactive REPL instead of printing a version, because the
+    # unwrapped scalar splat somehow dropped `--version` off the call
+    # entirely. Forcing the array subexpression operator here keeps it
+    # an actual array regardless of element count.
+    $pyExtra = @(if ($pyCmdParts.Count -gt 1) { $pyCmdParts[1..($pyCmdParts.Count - 1)] } else { @() })
+    & $pyCmdParts[0] @pyExtra @args
+}
+$pyVerLine = (Invoke-Py --version) 2>&1 | Out-String
+Say "Found: $($pyVerLine.Trim())"
+if ($pyVerLine -notmatch "Python 3\.12") {
+    Write-Host "Warning: this is not Python 3.12, which is what requirements.txt was tested against." -ForegroundColor Yellow
+    Write-Host "If package install fails below, installing Python 3.12 from https://python.org alongside your current version is the fix." -ForegroundColor Yellow
+}
 
 # --- venv ---
 $venvPath = Join-Path $root "venv"
-if (-not (Test-Path $venvPath)) {
+$venvPython = Join-Path $venvPath "Scripts\python.exe"
+if (-not (Test-Path $venvPython)) {
     Say "Creating virtual environment..."
-    & python -m venv $venvPath
+    Invoke-Py -m venv $venvPath
+    if (-not (Test-Path $venvPython)) {
+        Fail "Virtual environment creation failed -- $venvPython was never created. Check the output above for the real error."
+    }
 } else {
     Say "Virtual environment already exists, skipping creation."
 }
@@ -64,8 +131,19 @@ $reqFile = Join-Path $root "requirements.txt"
 if (Test-Path $reqFile) {
     Say "Installing Python packages (this can take several minutes)..."
     & $pip install -r $reqFile
+    if ($LASTEXITCODE -ne 0) {
+        Fail "pip install failed (exit code $LASTEXITCODE) -- see the pip output above for the real reason. Common causes: no internet connection, or a firewall/antivirus blocking pip. Fix that, then run this script again."
+    }
+    # pip can exit 0 while still not actually having installed everything
+    # in rare partial-failure cases -- a real import check is the only way
+    # to be sure the environment actually works, not just that pip ran.
+    & $venvPython -c "import requests" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Packages were installed but a basic import check (requests) still failed. Try running manually to see the real error:`n  $pip install -r `"$reqFile`""
+    }
+    Say "Package install verified."
 } else {
-    Write-Host "requirements.txt not found -- skipping package install." -ForegroundColor Yellow
+    Fail "requirements.txt not found next to this script -- the installed copy looks incomplete. Re-run the installer."
 }
 
 Say ""
