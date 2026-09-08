@@ -39,6 +39,7 @@ import jarvis_spotify_v2 as spotify_v2
 import jarvis_keylight_v1 as keylight_v1
 import jarvis_nanoleaf_v1 as nanoleaf_v1
 import jarvis_hue_v1 as hue_v1
+import jarvis_update_check_v1 as update_check_v1
 import jarvis_room_lights_v1 as room_lights_v1
 import jarvis_shutdown_systems_v1 as shutdown_systems_v1
 import jarvis_interrupt_v1 as interrupt_v1
@@ -471,6 +472,15 @@ def quick_handle_command_v2(command):
         claude_result = claude_v1.command_fast(c, name)
     if claude_result:
         return finish_plan_v3(claude_result, c, name, "claude")
+
+    # Checked early and ahead of generic conversation routing on purpose:
+    # a bare "yes" confirming a pending update announcement needs to land
+    # here, not get swallowed as small talk. Returns None immediately for
+    # anything that isn't an update check/confirmation, so it costs
+    # nothing on the common path.
+    update_result = update_check_v1.update_command_fast(c, name, app)
+    if update_result:
+        return finish_plan_v3(update_result, c, name, "update_check")
 
     # Core/system commands stay deterministic and fast.
     maintainer_result = maintainer_v1.maintainer_command_fast(c, name, app)
@@ -1924,6 +1934,15 @@ def install_v2(headless=False):
 
     try:
         claude_brain_v2.prewarm_ptt_async()
+    except Exception:
+        pass
+
+    try:
+        threading.Thread(
+            target=update_check_v1.background_check_loop,
+            args=(app, refresh_spoken_name),
+            daemon=True,
+        ).start()
     except Exception:
         pass
 
