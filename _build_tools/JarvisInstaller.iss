@@ -41,7 +41,7 @@ Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
 DisableWelcomePage=no
 DisableProgramGroupPage=yes
 
@@ -68,7 +68,7 @@ Name: "{group}\Finish Setup (run this first)"; Filename: "powershell.exe"; Param
 Name: "{group}\Setup Guide"; Filename: "{app}\FRIEND_SETUP.md"
 Name: "{group}\About JARVIS"; Filename: "{app}\README.md"
 Name: "{group}\Uninstall JARVIS"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
+Name: "{commondesktop}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_environment.ps1"""; Description: "Finish setup now (Python environment + Claude Code install and login -- takes a few minutes, and will ask you to sign in with your own Claude account)"; Flags: postinstall shellexec skipifsilent
