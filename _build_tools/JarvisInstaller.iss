@@ -18,7 +18,7 @@
 
 #define AppName "JARVIS"
 #define AppPublisher "MarkyADHD"
-#define AppVersion "1.6"
+#define AppVersion "1.7"
 #define ExportDir "C:\JarvisExport"
 #define ArtDir "installer_art"
 
@@ -69,9 +69,15 @@ Name: "{group}\Setup Guide"; Filename: "{app}\FRIEND_SETUP.md"
 Name: "{group}\About JARVIS"; Filename: "{app}\README.md"
 Name: "{group}\Uninstall JARVIS"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
+Name: "{commonstartup}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"; Comment: "Start Jarvis with Windows"
 
 [Run]
+; These three run in this exact order when checked, each waiting for
+; the previous one to finish (none are flagged `nowait` except the
+; final launch) -- so "Launch JARVIS now" landing after "Finish setup"
+; is not incidental: Jarvis has no venv to run in until that's done.
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_environment.ps1"""; Description: "Finish setup now (Python environment + Claude Code install and login -- takes a few minutes, and will ask you to sign in with your own Claude account)"; Flags: postinstall shellexec skipifsilent
+Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; Description: "Launch JARVIS now"; Flags: postinstall skipifsilent nowait runasoriginaluser
 Filename: "{app}\FRIEND_SETUP.md"; Description: "Open the setup guide"; Flags: postinstall shellexec skipifsilent unchecked
 
 [UninstallDelete]
