@@ -1,0 +1,8 @@
+[
+  {"function": "maintenance_web_intent_text", "input": "latest news", "expected": true},
+  {"function": "maintenance_web_intent_text", "input": "browse the web", "expected": true},
+  {"function": "maintenance_web_intent_text", "input": "turn the lights on", "expected": false},
+  {"function": "maintenance_web_intent_text", "input": "pause Spotify", "expected": false},
+  {"function": "maintenance_clean_web_reply", "input": "  Research confirms the announcement.  ", "expected": "Research confirms the announcement."},
+  {"function": "maintenance_clean_web_reply", "input": "I'M NOT SURE ON THAT ONE YET, SIR.", "expected": ""}
+]

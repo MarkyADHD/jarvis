@@ -1,0 +1,53 @@
+# --- Personal data: never tracked, ever ---
+JarvisMemory/
+.remote_chat_token
+*.log
+jarvis_live_debug.log
+*_error.txt
+*startup_error*
+
+# --- Environments (each machine builds its own) ---
+venv/
+backtalk/.venv/
+__pycache__/
+*.pyc
+
+# --- Large voice/model assets (shipped via the installer/Release, not git) ---
+voices/
+vosk_model/
+piper_runtime/
+voice_cache/
+
+# --- Historical dev-artifact folders (superseded, see CLAUDE.md) ---
+ClaudeCodeBrainV1/
+ConversationIntelligenceV4/
+IntelligenceCoreV3/
+LinkSearchV4/
+MaintainerV2/
+SearchIntelligenceV3/
+SearchResponseHygieneV5/
+ToolIntelligenceV1/
+NEW JARVIS/
+conversation_v4_backups/
+intelligence_v3_backups/
+link_search_v4_backups/
+search_intelligence_backups/
+tool_intelligence_backups/
+ui_backups/
+*_backup_*.py
+
+# --- Build output / editor profiles ---
+build/
+dist/
+_build_tools/dist/
+_build_tools/installer_art/*_preview.png
+ai-visualizer/.edge-app-profile/
+temp_screenshots/
+
+# --- Self-edit history (regenerates; not useful to track) ---
+.maintenance_v2/installations/
+.maintenance_v2/runtime.lock
+
+# --- Editor/OS noise ---
+.vscode/
+Thumbs.db

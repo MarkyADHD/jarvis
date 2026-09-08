@@ -1,0 +1,3157 @@
+<!DOCTYPE html>
+<!--
+barehands: move things on your screen with your bare hands.
+Copyright (C) 2026 Jared Rhodenizer
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>barehands</title>
+<style>
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+               background:#000; font-family:-apple-system,"SF Pro Display",sans-serif; }
+  body.overlay { background:transparent; }
+  body.keybg { /* background color set by JS from ?key= (default magenta) */ }
+  /* green-key fallback: the UI can't be green on a green key (learned live
+     2026-08-07 — the cursor got keyed out of existence). Cyan takes over. */
+  body.ui-cyan .cursor { border-color:rgba(0,229,255,0.9); background:rgba(0,229,255,0.12); }
+  body.ui-cyan .cursor.pinched { background:rgba(0,229,255,0.85); box-shadow:0 0 18px rgba(0,229,255,0.8); }
+  body.ui-cyan .cursor .dwell { background:conic-gradient(#00e5ff calc(var(--p)*360deg), transparent 0); }
+  body.ui-cyan .card, body.ui-cyan .panel { border-color:rgba(0,229,255,0.5); }
+  body.ui-cyan .card h3, body.ui-cyan .panel .bar h3, body.ui-cyan .panel .close
+    { color:#00e5ff; border-color:rgba(0,229,255,0.6); }
+  body.ui-cyan .scroll .h { color:#00e5ff; }
+  #toast { position:absolute; top:14px; right:14px; z-index:998; display:none;
+           background:rgba(0,0,0,0.7); color:#8ff0e4; padding:8px 14px;
+           border-radius:8px; font:13px "SF Mono",Menlo,monospace; }
+  /* the squeeze-hold charge glow, visible on the TRACKER too (the render
+     page has its own on-air rule): pinch + hold still = charge = open/close */
+  .card, .panel { --ch:0; }
+  body:not(.on-air) .card.grabbed, body:not(.on-air) .panel.grabbed {
+    box-shadow:0 12px 60px rgba(0,0,0,0.7),
+      0 0 calc(44px + var(--ch)*70px) rgba(111,229,214,calc(0.35 + var(--ch)*0.55)); }
+  /* THE PRESENT spotlight: one item center stage, the rest step back */
+  .dimmed { opacity:0.22 !important; filter:saturate(0.35);
+    transition:opacity 0.35s, filter 0.35s; }
+  .presented { box-shadow:0 16px 70px rgba(0,0,0,0.65),
+      0 0 70px rgba(111,229,214,0.45); }
+  /* ON-AIR (the OBS render page): backdrop-blur has nothing to sample
+     in the compositor. GLASS ERA: the near-solid slabs died (Jared's
+     8/13 call — "frankly more transparent") — true translucent glass,
+     readability carried by the halo text-shadows below. */
+  body.on-air .panel { background:linear-gradient(160deg, rgba(58,116,108,0.42), rgba(16,44,40,0.34)); backdrop-filter:none; }
+  body.on-air .card  { background:linear-gradient(160deg, rgba(60,120,112,0.38), rgba(18,48,44,0.30)); backdrop-filter:none; }
+  body.on-air .card p, body.on-air .panel .scroll {
+    text-shadow:0 1px 3px rgba(2,14,12,0.95), 0 0 10px rgba(2,14,12,0.85); }
+  body.on-air .card h3, body.on-air .panel .bar h3 {
+    text-shadow:0 1px 3px rgba(2,14,12,0.95), 0 0 14px rgba(111,229,214,0.55); }
+  /* the dwell CHARGE glow — the card announces it's about to open (the
+     audience's cue once the cursor rings are hidden) */
+  body.on-air .card, body.on-air .panel { --ch:0;
+    box-shadow:0 8px 40px rgba(0,0,0,0.55),
+      0 0 calc(24px + var(--ch)*70px) rgba(111,229,214,calc(0.10 + var(--ch)*0.75)),
+      inset 0 1px 0 rgba(191,255,245,0.35); }
+  #cam { position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+         transform:scaleX(-1); }
+  body.overlay #cam, body.keybg #cam {
+         width:2px; height:2px; opacity:0.01; pointer-events:none; }
+  /* THE GLASS ERA (2026-08-13, Jared's redesign): clean CLEAR glass —
+     low-alpha smoked fills you genuinely see through, one luminous
+     edge, a specular kiss on top. No wireframe chrome; restraint IS
+     the aesthetic. Readability rides halo text, not slab fills. */
+  .card { position:absolute; width:480px; padding:22px 24px; border-radius:16px;
+          background:linear-gradient(168deg, rgba(70,140,130,0.30), rgba(18,48,44,0.18));
+          border:1.5px solid rgba(140,240,225,0.55);
+          box-shadow:0 10px 44px rgba(0,0,0,0.40), 0 0 26px rgba(111,229,214,0.14),
+                     inset 0 1px 0 rgba(210,255,248,0.55),
+                     inset 0 -14px 30px rgba(111,229,214,0.05);
+          color:#ecfffa; user-select:none; will-change:transform;
+          transform-origin:center center; }
+  body.keybg .card, body.keybg .panel { backdrop-filter:none;
+          background:rgba(30,70,64,0.97); }
+  .card h3 { margin:0 0 8px; font-size:19px; letter-spacing:0.08em; color:#8ff0e4;
+             font-family:"SF Mono",Menlo,monospace; text-transform:uppercase; }
+  /* THE RING (naked canvas, the modelcard pattern) + THE ORBITAL
+     BLOOM orbs: the ring is the hub — tap it and your configured
+     folders bloom around it as glass orbs. */
+  .card.ringcard { width:440px; padding:0; background:transparent;
+                   border:none; box-shadow:none; backdrop-filter:none; }
+  .card.ringcard canvas { display:block; width:440px; height:440px;
+                          pointer-events:none; }
+  body:not(.on-air) .card.ringcard, .card.ringcard.grabbed,
+  body.on-air .card.ringcard {
+      box-shadow:none; border:none; background:transparent; }
+  .card.ringcard.grabbed canvas {
+      filter:brightness(calc(1.12 + var(--ch,0)*0.3)); }
+  body.on-air .card.ringcard.grabbed canvas { filter:none; }
+  .card.orb { width:150px; height:150px; border-radius:50%; padding:0;
+      display:flex; flex-direction:column; align-items:center;
+      justify-content:center; text-align:center; gap:2px; }
+  .card.orb h3 { margin:0; font-size:16px; }
+  .card.orb p { font-size:11.5px; color:#a8d8cf; margin:0; }
+  .card.imgcard { padding:6px; width:auto; overflow:hidden;
+      border-color:rgba(111,229,214,0.5);
+      box-shadow:0 8px 40px rgba(0,0,0,0.55), 0 0 30px rgba(111,229,214,0.20),
+                 inset 0 1px 0 rgba(191,255,245,0.35); }
+  .card.imgcard img { display:block; max-width:32vw; max-height:44vh;
+                      border-radius:10px; pointer-events:none; }
+  /* MATERIALIZE-AS-LIGHT (Jared's call 8/9): images ARRIVE as hologram
+     — teal monochrome light + one scan sweep — then resolve to their
+     TRUE colors. Theater at the edges, truth in the content (evidence
+     stays evidence; the folder law's spirit for pixels). */
+  .card.imgcard img, .card.imgcard video { transition:filter 0.5s ease-out; }
+  .card.imgcard.mat img, .card.imgcard.mat video {
+      filter:brightness(1.55) saturate(0.2) sepia(1) hue-rotate(115deg)
+             saturate(2.4) drop-shadow(0 0 22px rgba(111,229,214,0.85)); }
+  .card.imgcard.mat::after { content:""; position:absolute; left:0; right:0;
+      height:16%; top:-20%; background:linear-gradient(180deg, transparent,
+      rgba(191,255,245,0.75), transparent);
+      animation:matscan 0.6s linear; pointer-events:none; }
+  @keyframes matscan { from { top:-20%; } to { top:110%; } }
+  /* THE FX LAYER (2026-08-08, Jared's idea: "throw me a fireball") —
+     anything in media/fx/ (or any .webm) renders NAKED: no chip, no
+     border, no shadow — a floating OBJECT with full physics. Alpha
+     PNGs float; alpha WebMs loop silently. */
+  .card.fxcard { padding:0; background:transparent; border:none;
+                 box-shadow:none; backdrop-filter:none; }
+  .card.fxcard img, .card.fxcard video { display:block; max-width:36vw;
+                 max-height:52vh; border-radius:0; pointer-events:none; }
+  /* kill EVERY rectangular glow layer on fx, both pages — the tracker's
+     grab-glow and the render's always-on air-glow both paint box-shadows
+     at higher specificity than the base fx class (the fireball's green
+     halo+frame bug, Jared's catch 8/8). The object's own alpha
+     silhouette carries the grab cue via drop-shadow instead. */
+  body:not(.on-air) .card.fxcard, body:not(.on-air) .card.fxcard.grabbed,
+  body.on-air .card.fxcard, .card.fxcard.grabbed {
+      box-shadow:none; border:none; background:transparent; }
+  /* grab cue: the object FLARES in the hand (brightness+saturation) —
+     drop-shadow was the "green shadow behind it" bug: generated flames
+     carry a wide semi-alpha haze and the shadow glows through all of it.
+     On-air: no cue at all — bare-hands invisible magic. */
+  .card.fxcard.grabbed,
+  body:not(.on-air) .card.fxcard.grabbed {
+      filter:brightness(1.18) saturate(1.2); }
+  body.on-air .card.fxcard.grabbed { filter:none; }
+  /* BUILD 1 — 3D HOLOGRAMS (2026-08-09, gestures at 1.4): a model
+     renders NAKED like fx — transparent WebGL canvas, ZERO chrome (the
+     1.1 handle-bar zone died to the no-small-targets law; the base bar
+     killed at 1.3, Jared's call). Pinch = move; hold-still latches
+     spin — the charge cue is the MODEL brightening via --ch; two hands
+     = carry + twist-roll + scale (the 1.3 gimbal was rejected, one
+     round). Folder = render law: holo/ = blue wire, else solid. Fixed
+     480px both pages (the v20.4 law: identical geometry = 1:1). */
+  .card.modelcard { padding:0; background:transparent; border:none;
+                    box-shadow:none; backdrop-filter:none; width:480px; }
+  .card.modelcard canvas { display:block; width:480px; height:480px;
+                    pointer-events:none; }
+  /* (the v1 holo CSS drop-shadow retired at 2.0 — the ghost-glass
+     shader + its bloom rig carry the glow now) */
+  body:not(.on-air) .card.modelcard, body:not(.on-air) .card.modelcard.grabbed,
+  body.on-air .card.modelcard, .card.modelcard.grabbed {
+      box-shadow:none; border:none; background:transparent; }
+  .card.modelcard.grabbed canvas {
+      filter:brightness(calc(1.18 + var(--ch,0)*0.4)) saturate(1.15); }
+  /* ON-AIR: no grab/charge cue on models — the fx precedent (bare-hands
+     invisible magic; the tracker stays Jared's confidence monitor). */
+  body.on-air .card.modelcard.grabbed canvas { filter:none; }
+  /* THE BROWSER PANES: tap an orb = a tall glass pane with an
+     indented file tree; folders unfold IN PLACE; rows are fat tap
+     zones. */
+  .panel.browser { width:560px; height:720px; }
+  .brow { display:flex; align-items:center; gap:12px; min-height:68px;
+          border-bottom:1px solid rgba(111,229,214,0.12); font-size:18px; }
+  .brow .bico { color:#8ff0e4; width:28px; text-align:center; flex:none;
+                font-size:20px; }
+  .brow.dir .btxt { color:#8ff0e4; font-weight:600; letter-spacing:0.02em; }
+  .brow.note .btxt, .brow.prop .btxt, .brow.widget .btxt { color:#ecfffa; }
+  .brow .btxt { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* THE TAP FLASH (2026-08-13, the mirror-doctrine softener): the row
+     you tap pulses full-width on BOTH pages. Rows span the pane and
+     vertical never mirrors, so the pulse sits directly under the
+     on-air fingertip even though horizontal touch offsets flip
+     (the mirror doctrine). Also plain good feedback. */
+  .brow.flash { animation:rowflash 0.6s ease-out; }
+  @keyframes rowflash {
+    from { background:rgba(140,240,225,0.4); }
+    to   { background:transparent; } }
+  .card p  { margin:0; font-size:17px; line-height:1.45; color:#dcf5ee; text-shadow:0 1px 3px rgba(3,18,16,0.55); }
+  .card p:empty { display:none; }
+  .card.grabbed, .panel.grabbed { border-color:#8ff0e4;
+          box-shadow:0 12px 60px rgba(0,0,0,0.7), 0 0 44px rgba(111,229,214,0.35); }
+  /* v20.4: FIXED px (the 44vw×70vh of a 1920×1080 OBS canvas) so tracker
+     and render wrap text identically — same content height on both sides
+     makes the fractional scroll a true 1:1 (hand speed = on-air speed) */
+  .panel { position:absolute; width:845px; height:756px; border-radius:18px;
+           background:linear-gradient(172deg, rgba(52,108,100,0.36), rgba(14,40,36,0.24));
+           border:1.5px solid rgba(140,240,225,0.6); color:#ecfffa;
+           box-shadow:0 16px 70px rgba(0,0,0,0.5), 0 0 50px rgba(111,229,214,0.16),
+                      inset 0 1px 0 rgba(210,255,248,0.55);
+           display:flex; flex-direction:column; will-change:transform; }
+  .panel .bar { padding:42px 16px; border-bottom:1px solid rgba(111,229,214,0.3);   /* v3.8: THE GRIP BAR everywhere — notes + folders (grab = move, tap = close) */
+                display:flex; justify-content:space-between; align-items:center; }
+  .panel .bar h3 { margin:0; font-size:14px; color:#8ff0e4; letter-spacing:0.08em;
+                   font-family:"SF Mono",Menlo,monospace; text-transform:uppercase; }
+  .panel .close { width:30px; height:30px; border-radius:50%; text-align:center;
+                  line-height:28px; border:1.5px solid rgba(111,229,214,0.65);
+                  color:#8ff0e4; font-size:15px; }
+  .panel .body { flex:1; overflow:hidden; padding:14px 20px; }
+  .panel .scroll { transition:none; font-size:14.5px; line-height:1.5; color:#dcf5ee; text-shadow:0 1px 3px rgba(3,18,16,0.55);
+                   white-space:pre-wrap; font-family:-apple-system,sans-serif; }
+  .panel .scroll b { color:#fff; } .panel .scroll .h { color:#8ff0e4; font-weight:700; }
+  .cursor { position:absolute; width:28px; height:28px; margin:-14px 0 0 -14px;
+            border-radius:50%; border:2.5px solid rgba(111,229,214,0.9);
+            background:rgba(111,229,214,0.12); pointer-events:none; z-index:999; }
+  .cursor.pinched { background:rgba(111,229,214,0.85); transform:scale(0.62);
+                    box-shadow:0 0 18px rgba(111,229,214,0.8); }
+  .cursor .dwell { position:absolute; inset:-7px; border-radius:50%;
+                   background:conic-gradient(#8ff0e4 calc(var(--p)*360deg), transparent 0);
+                   -webkit-mask:radial-gradient(circle, transparent 58%, black 60%);
+                   opacity:0.95; }
+  #hint { position:absolute; bottom:14px; left:0; right:0; text-align:center;
+          color:rgba(230,255,240,0.7); font-size:13.5px; z-index:998;
+          text-shadow:0 1px 6px rgba(0,0,0,0.8); }
+  body.overlay #hint, body.greenkey #hint { display:none; }
+  #debug { position:absolute; top:12px; left:12px; z-index:998; display:none;
+           background:rgba(0,0,0,0.65); color:#8ff0e4; padding:10px 12px;
+           border-radius:8px; font:12px "SF Mono",Menlo,monospace; white-space:pre; }
+  /* GLASS ERA: the item layer is a real 3D SPACE — every card, panel,
+     and widget can rotate in Z (hold-latch); default pose is flat.
+     (The 8/11 depth-mask person-segmenter that masked this layer was
+     fully removed 2026-08-13 — the line was killed 8/11 but its
+     tracker half survived the baseline; Jared field-caught it.) */
+  #behind { position:fixed; inset:0; z-index:1; perspective:1200px; }
+  /* (an earlier whole-screen voice-pulse border was removed —
+     THE RING is the assistant's presence now.) */
+  #boot { position:absolute; inset:0; display:flex; align-items:center;
+          justify-content:center; color:#8ff0e4; text-align:center;
+          font:16px "SF Mono",Menlo,monospace; z-index:1000; background:#000;
+          flex-direction:column; gap:12px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<!-- Opened by double-clicking the file instead of through the server? Everything
+     client-side still works (render, camera, gesture math), so the page LOOKS
+     alive, but every /orb /tree /note /state call dies silently: you can pinch
+     and rotate, and nothing will ever OPEN. Field-caught 2026-08-17 after a user
+     lost a day to it. Say so plainly instead of letting the next person chase
+     tap thresholds. -->
+<script>
+if (location.protocol === "file:") {
+  document.documentElement.innerHTML =
+    '<body style="margin:0;background:#04191c;color:#dff3ee;font:15px/1.65 ui-monospace,Menlo,monospace;' +
+    'display:flex;align-items:center;justify-content:center;height:100vh;padding:24px;text-align:left">' +
+    '<div style="max-width:620px">' +
+    '<div style="font-size:22px;letter-spacing:.18em;color:#6fe3c9;margin-bottom:18px">BAREHANDS NEEDS ITS SERVER</div>' +
+    '<p>You opened this file directly, so there is no server behind it. The camera and the gestures will still work, ' +
+    'but nothing will ever <b>open</b>: tapping a card asks the server for the file, and there is nothing to ask.</p>' +
+    '<p style="margin-top:16px">Start it from the barehands folder:</p>' +
+    '<pre style="background:#052227;border:1px solid #14484f;padding:12px 14px;border-radius:8px;color:#9ff0dd">' +
+    'python3 server.py      <span style="color:#6b9c96"># Windows: python server.py</span></pre>' +
+    '<p style="margin-top:14px">Then open this in Chrome:</p>' +
+    '<pre style="background:#052227;border:1px solid #14484f;padding:12px 14px;border-radius:8px;color:#9ff0dd">' +
+    'http://127.0.0.1:8794/stage.html</pre>' +
+    '<p style="margin-top:18px;color:#7fb3ab">If you changed "port" in barehands.json, use that port instead.</p>' +
+    '</div></body>';
+  throw new Error("barehands: opened over file://, server required");
+}
+// First-run watchdog: the hand tracker and the 3D library arrive from CDNs,
+// so with no internet the boot screen sits forever with no error. Say so.
+setTimeout(function () {
+  var b = document.getElementById("boot");
+  if (b && b.isConnected) b.innerHTML +=
+    '<span style="color:#7fb3ab;font-size:12px">still loading? the first run downloads the hand tracker and needs internet once. TROUBLESHOOTING.md has more.</span>';
+}, 12000);
+</script>
+<video id="cam" autoplay playsinline muted></video>
+<div id="behind"></div>
+<div id="boot">BAREHANDS<br><span style="color:#a8d8cf;font-size:12px;letter-spacing:0.22em">by jaredrhod</span><br><span style="color:#a8d8cf;font-size:13px">loading hand tracker… allow the camera when asked</span></div>
+<div id="hint">tap the RING = orbs · tap an orb = its tree · TAP a card = open · pinch-drag = move · hold still ~1s = 3D rotate · two hands = scale · TAP an open item = close · CLAP (palms together, fingers up) = ring center-stage · CLAW: flash open, claw, aim, hold the strain 2s, SNAP = force pull · empty pinch dragged sideways = explode scrub · R respawn / C camera / D debug</div>
+<div id="debug"></div>
+<div id="toast"></div>
+
+<script type="module">
+import { HandLandmarker, FilesetResolver } from
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+// modes: ?mode=mirror (default, self-view) | overlay (transparent — OBS
+// browser sources can't open cameras reliably on macOS, kept for browsers
+// that can) | key (solid key color for window-capture + chroma; ?key=
+// magenta|green|blue|#hex, DEFAULT MAGENTA so the brand-green UI survives
+// the key — keying green ate the cursor on the first OBS test, 2026-08-07).
+// ?cam=<label substring> picks the tracking camera; C cycles cameras live.
+const Q = new URLSearchParams(location.search);
+// ?res=WxH — capture resolution (default 1920x1080, the tracking sweet
+// spot: MediaPipe downscales every frame to its model input anyway, so
+// higher res buys self-view sharpness, never accuracy — and costs fps
+// on weak machines; 1280x720 is the low-end saver, 3840x2160 the 4K
+// self-view). Capture res ≠ broadcast res: in an OBS rig the audience
+// sees OBS's own camera source; this only shapes the tracker's sensor.
+// ?portrait=1 — request the vertical capture instead of coercing the
+// camera into landscape (a camera flipped to portrait negotiates its
+// 9:16 mode). Composes with ?res=: portrait swaps the dimensions.
+// Everything downstream is aspect-agnostic (fractions + cover-fit):
+// shape the tracker WINDOW to match, 9:16 OBS canvas for the render.
+const PORTRAIT = Q.get("portrait") === "1";
+const RES = (() => {
+  const m = /^(\d{3,4})x(\d{3,4})$/i.exec(Q.get("res") || "");
+  return m ? [+m[1], +m[2]] : [1920, 1080];
+})();
+let MODE = Q.get("mode") || "mirror";
+if (MODE === "greenkey") { MODE = "key"; Q.set("key", "green"); }   // back-compat
+if (MODE === "overlay") {
+  document.body.classList.add("overlay");
+  document.documentElement.style.background = "transparent";
+  document.body.style.background = "transparent";
+}
+if (MODE === "key") {
+  const KEYS = { magenta: "#ff00ff", green: "#00ff00", blue: "#0000ff" };
+  const want = (Q.get("key") || "magenta").toLowerCase();
+  const color = KEYS[want] || (want.startsWith("#") ? want : "#ff00ff");
+  document.body.classList.add("keybg");
+  document.body.style.background = color;
+  if (want === "green") document.body.classList.add("ui-cyan");
+}
+
+const cam = document.getElementById("cam");
+const BEHIND = document.getElementById("behind");
+const dbg = document.getElementById("debug");
+let items = [];        // cards + panels: {el,type,x,y,scale,vx,vy,grabbedBy:[],ox,oy,flying,file,stretch,scrollY,body}
+let cursors = {};
+let SAMPLER = null;    // the pose sampler (dormant — claw/pinch tuning)
+let CLAPSAMP = null;   // the P clap recorder (v3.9.1)
+let SAMPLED = "";      // its frozen last result (D overlay)
+let landmarker = null, lastVideoTs = -1, frames = 0, fps = 0, lastFpsTs = performance.now();
+
+let UID = 1;
+
+function makeCard(def) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.innerHTML = `<h3>${escT(def.title)}</h3><p>${escT(def.body || "")}</p>`;
+  BEHIND.appendChild(el);
+  return { el, id: UID++, type: "card", def, x: 0, y: 0, scale: 1, vx: 0, vy: 0,
+           grabbedBy: [], ox: 0, oy: 0, flying: false, stretch: null };
+}
+
+// ---- FOLEY (2026-08-07): synthesized WebAudio — the objects make SOUND,
+// which is what makes invisible cards feel physical. Plays from the
+// TRACKER page through Mac audio, captured by the existing stream rig.
+// Chrome arms audio on the first user gesture (any key/click).
+// foley ships OFF by default (a field call: the sounds read as noise
+// on camera). The engine stays; &sound=1 turns it on.
+const SOUND = Q.get("sound") === "1";
+let AC = null;
+function _ac() {
+  if (!AC) { try { AC = new (window.AudioContext || webkitAudioContext)(); } catch (e) {} }
+  if (AC && AC.state === "suspended") AC.resume().catch(() => {});
+  return AC;
+}
+addEventListener("keydown", _ac); addEventListener("click", _ac);
+
+function _noise(dur, fLo, fHi, gain, sweepTo) {
+  if (!SOUND) return;
+  const ac = _ac(); if (!ac || ac.state !== "running") return;
+  const n = ac.sampleRate * dur, buf = ac.createBuffer(1, n, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const src = ac.createBufferSource(); src.buffer = buf;
+  const bp = ac.createBiquadFilter(); bp.type = "bandpass";
+  bp.frequency.setValueAtTime((fLo + fHi) / 2, ac.currentTime);
+  if (sweepTo) bp.frequency.exponentialRampToValueAtTime(sweepTo, ac.currentTime + dur);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(gain, ac.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+  src.connect(bp); bp.connect(g); g.connect(ac.destination);
+  src.start(); src.stop(ac.currentTime + dur);
+}
+function _tone(freq, dur, gain = 0.08, type = "sine", sweepTo = 0, delay = 0) {
+  if (!SOUND) return;
+  const ac = _ac(); if (!ac || ac.state !== "running") return;
+  const t0 = ac.currentTime + delay;
+  const o = ac.createOscillator(); o.type = type;
+  o.frequency.setValueAtTime(freq, t0);
+  if (sweepTo) o.frequency.exponentialRampToValueAtTime(sweepTo, t0 + dur);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(gain, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  o.connect(g); g.connect(ac.destination);
+  o.start(t0); o.stop(t0 + dur);
+}
+const foley = {
+  grab:    () => { _noise(0.04, 900, 2200, 0.10); _tone(150, 0.06, 0.10); },
+  place:   () => _tone(120, 0.06, 0.07),
+  throw_:  () => _noise(0.22, 300, 900, 0.14, 1600),
+  void_:   () => { _noise(0.25, 500, 1400, 0.12, 180); _tone(280, 0.28, 0.09, "square", 70); },
+  arrive:  () => { _tone(523, 0.10, 0.06); _tone(659, 0.10, 0.06, "sine", 0, 0.07); _tone(784, 0.14, 0.07, "sine", 0, 0.14); },
+  yank:    () => { _tone(220, 0.12, 0.10, "sawtooth", 900); _noise(0.06, 1200, 3000, 0.08); },
+};
+
+function makeImage(src, title) {
+  // THE FX LAYER: media/fx/ = naked render (no card chrome); .webm =
+  // silent looping alpha video. Both stay type "img" so every gesture —
+  // grab, stretch, fling, give-back, flash-close — works unchanged.
+  const fx = /\/fx\//i.test(src);
+  const vid = /\.webm(\?|$)/i.test(src);
+  const el = document.createElement("div");
+  el.className = "card imgcard" + (fx || vid ? " fxcard" : "");
+  el.innerHTML = vid
+    ? `<video src="${escT(src)}" autoplay loop muted playsinline></video>`
+    : `<img src="${escT(src)}" alt="">`;
+  BEHIND.appendChild(el);
+  el.classList.add("mat");                     // arrives as light...
+  setTimeout(() => el.classList.remove("mat"), 650);   // ...resolves true
+  return { el, id: UID++, type: "img",
+           def: { title: title || "", file: "", src,
+                  fx: fx || vid ? 1 : 0, vid: vid ? 1 : 0 },
+           x: innerWidth * 0.5, y: innerHeight * 0.42, scale: 1, vx: 0, vy: 0,
+           grabbedBy: [], ox: 0, oy: 0, flying: false, stretch: null };
+}
+
+function summonWidget(w) {
+  // the assistant ring is the only built-in widget
+  if (w && w !== "ring") return null;
+  const ex = items.find(i => i.type === "widget" && i.def.w === "ring");
+  if (ex) { ex.anim = { k: "hover", t: 0 }; return ex; }
+  return makeRing();
+}
+
+// ---- THE RING — the assistant's presence as a grabbable power-core
+// ring: concentric glass rings, tick ring, wordmark core. BOTH pages
+// animate it LOCALLY from /orb (the assistant's state files) on
+// wall-clock phases — tracker and overlay pulse as one; only
+// position/scale/rotation travel the bus. States: idle breath ·
+// listening (deep blue, pulses draw INWARD — blue = the human
+// talking) · thinking (radar sweep) · speaking (the live waveform
+// drives glow/thickness/core through an auto-gain). Moods tint the
+// whole ring red/amber.
+const RING = {
+  data: { state: "idle", mood: "green", wave: null }, amp: 0, gmax: 1,
+  live: 0,
+  // palette eyedropped from the design reference (exact reference
+  // colors, SUBTLE state shifts — a deep-blue listening state was
+  // unreadable and died)
+  COLS: { idle: [140, 235, 240], listening: [120, 205, 250],
+          thinking: [170, 245, 250], speaking: [140, 235, 240] },
+  MOODT: { red: [255, 82, 82], amber: [255, 179, 71], green: null },
+};
+setInterval(async () => {
+  if (!RING.live) return;               // poll only while a ring is up
+  try {
+    const r = await fetch("/orb", { cache: "no-store" });
+    if (r.ok) RING.data = await r.json();
+  } catch (e) {}
+}, 120);
+
+function ringAmp() {
+  // the preserved aura pulse math: RMS+peak blend, auto-gain against a
+  // rolling ceiling, contrast-expanded, fast attack / musical decay
+  const d = RING.data;
+  let target = 0;
+  if (d.state === "speaking" && d.wave && d.wave.length) {
+    let s = 0, pk = 0;
+    for (const v of d.wave) { s += v * v; pk = Math.max(pk, Math.abs(v)); }
+    const raw = 0.6 * Math.sqrt(s / d.wave.length) + 0.4 * pk;
+    RING.gmax = Math.max(raw, (RING.gmax || 1) * 0.995);
+    target = Math.pow(Math.min(1, raw / Math.max(3, RING.gmax)), 2.2);
+  }
+  RING.amp += (target - RING.amp) * (target > RING.amp ? 0.6 : 0.2);
+  return RING.amp;
+}
+
+const RINGS = new Map();      // this page's ring canvases: item id -> sc
+
+function ringCanvas(el) {
+  const canvas = el.querySelector("canvas");
+  const RES = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = 440 * RES; canvas.height = 440 * RES;
+  return { canvas, ctx: canvas.getContext("2d"), RES, tapT: 0 };
+}
+
+function makeRing() {
+  const el = document.createElement("div");
+  el.className = "card ringcard";
+  el.innerHTML = `<canvas></canvas>`;
+  BEHIND.appendChild(el);
+  const it = { el, id: UID++, type: "widget",
+    def: { title: (CFG.name || "Ring"), file: "", w: "ring" },
+    x: innerWidth * 0.30, y: innerHeight * 0.45, scale: 1,
+    vx: 0, vy: 0, grabbedBy: [], ox: 0, oy: 0, flying: false, stretch: null };
+  it.anim = { k: "in", t: 0 }; it.el.style.opacity = "0.05";
+  RINGS.set(it.id, ringCanvas(el));
+  items.push(it);
+  return it;
+}
+
+function ensureRingRes(sc) {
+  // the models' adaptive-resolution law, for the ring (round 4, Jared's
+  // pixelation catch on stretch): re-rez on settle only — never mid-
+  // grip — 25% hysteresis, 2048 cap, never below the 440 base
+  if (sc.held) return;
+  const want = Math.round(Math.min(2048, Math.max(440,
+    440 * (devicePixelRatio || 1) * SS * (sc.scale || 1))));
+  if (Math.abs(want - sc.canvas.width) / (sc.canvas.width || 1) < 0.25) return;
+  sc.canvas.width = want; sc.canvas.height = want;
+  sc.RES = want / 440;
+}
+
+function drawRing(sc) {
+  // NO spin — the ring is still; ONE solid thick band + solid hot
+  // rim; SPEAKING = the band pulses HOT WHITE on the live voice.
+  // Core is CLEAR glass, wordmark + status sized to fill it.
+  const d = RING.data, st = d.state || "idle";
+  const amp = st === "speaking" ? ringAmp() : (RING.amp *= 0.9);
+  const t = Date.now() / 1000;          // wall clock: pages in sync
+  const base = RING.COLS[st] || RING.COLS.idle;
+  const tint = RING.MOODT[d.mood];
+  const c = tint ? base.map((v, i) => Math.round(v * 0.35 + tint[i] * 0.65))
+                 : base;
+  // v4: SPEAKING = the band burns toward HOT WHITE on the live voice
+  const wp = st === "speaking" ? amp : 0;
+  const bc = c.map((v, i) => Math.round(v + ([235, 250, 252][i] - v) * wp));
+  const col = a => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+  const band = a => `rgba(${bc[0]},${bc[1]},${bc[2]},${a})`;
+  const hot = a => `rgba(228,250,252,${a})`;    // the white-hot rim
+  const x = sc.ctx;
+  ensureRingRes(sc);                    // the pixelation fix (round 4)
+  const tap = Math.exp(-Math.max(0, t - sc.tapT) * 4);
+  const breath = 0.9 + 0.1 * Math.sin(t * 1.4);
+  const glow = (10 + wp * 34 + tap * 14) * breath;
+  x.setTransform(sc.RES, 0, 0, sc.RES, 0, 0);
+  x.clearRect(0, 0, 440, 440);
+  x.save();
+  x.translate(220, 220);
+  x.shadowColor = band(0.95);
+  // THE BAND — ONE solid piece, perfectly still — it PULSES HOT
+  // WHITE while the assistant speaks, riding the live waveform
+  x.shadowBlur = glow + 8;
+  x.strokeStyle = band(0.92);
+  x.lineWidth = 20 + wp * 3;
+  x.beginPath(); x.arc(0, 0, 178, 0, 7); x.stroke();
+  // solid hot rim + inner thin ring
+  x.shadowBlur = 6 + wp * 14;
+  x.strokeStyle = hot(0.85); x.lineWidth = 2.5;
+  x.beginPath(); x.arc(0, 0, 191, 0, 7); x.stroke();
+  x.shadowBlur = 6;
+  x.strokeStyle = col(0.5); x.lineWidth = 1.5;
+  x.beginPath(); x.arc(0, 0, 165, 0, 7); x.stroke();
+  // tick ring (static chrome)
+  x.shadowBlur = 0;
+  for (let i = 0; i < 48; i++) {
+    const a = i / 48 * Math.PI * 2;
+    const big = i % 4 === 0;
+    x.strokeStyle = col(big ? 0.6 : 0.3);
+    x.lineWidth = big ? 2 : 1.2;
+    x.beginPath();
+    x.moveTo(Math.cos(a) * (big ? 148 : 152), Math.sin(a) * (big ? 148 : 152));
+    x.lineTo(Math.cos(a) * 158, Math.sin(a) * 158);
+    x.stroke();
+  }
+  // state FX in the band between ticks and core
+  if (st === "listening") {             // pulses draw INWARD: receiving
+    for (let k = 0; k < 3; k++) {
+      const p = (t * 0.7 + k / 3) % 1;
+      x.globalAlpha = (1 - p) * p * 1.8;
+      x.strokeStyle = col(0.9); x.lineWidth = 2;
+      x.beginPath(); x.arc(0, 0, 158 - p * 60, 0, 7); x.stroke();
+    }
+    x.globalAlpha = 1;
+  } else if (st === "thinking") {       // radar sweep with a fading tail
+    const a0 = t * 2.8;
+    for (let i = 0; i < 7; i++) {
+      x.globalAlpha = 0.55 * (1 - i / 7);
+      x.strokeStyle = col(0.95); x.lineWidth = 10; x.shadowBlur = 12;
+      x.beginPath();
+      x.arc(0, 0, 148, a0 - (i + 1) * 0.11, a0 - i * 0.11); x.stroke();
+    }
+    x.globalAlpha = 1; x.shadowBlur = 0;
+  }
+  // THE CORE — CLEAR glass (round 4: the dark overlay died) — just the
+  // rims; the video breathes through the center
+  x.shadowBlur = glow;
+  x.strokeStyle = col(0.9); x.lineWidth = 2.5 + wp * 2;
+  x.beginPath(); x.arc(0, 0, 128, 0, 7); x.stroke();
+  x.shadowBlur = 0;
+  x.strokeStyle = col(0.3); x.lineWidth = 1;
+  x.beginPath(); x.arc(0, 0, 119, 0, 7); x.stroke();
+  // wordmark + status — sized UP (round 4: the clear core has room);
+  // dark halo shadow keeps them readable over live video
+  x.shadowColor = "rgba(2,10,10,0.9)"; x.shadowBlur = 7;
+  x.fillStyle = `rgba(235,250,250,${0.94 + wp * 0.06})`;
+  const nm = (CFG.name || "ASSISTANT").toUpperCase();
+  const fpx = nm.length <= 6 ? 27 : nm.length <= 9 ? 20 : 14;
+  x.font = `700 ${fpx}px 'SF Mono', Menlo, monospace`;
+  x.textAlign = "center"; x.textBaseline = "middle";
+  x.fillText(nm.split("").join(".") + ".", 0, -12);
+  x.globalAlpha = 0.85;
+  x.fillStyle = col(0.98);
+  x.font = "600 14px 'SF Mono', Menlo, monospace";
+  const status = { idle: "ACTIVE", listening: "LISTENING",
+                   thinking: "THINKING", speaking: "SPEAKING" }[st];
+  x.fillText((status || "ACTIVE").split("").join(" "), 0, 28);
+  x.shadowBlur = 0; x.globalAlpha = 1;
+  x.restore();
+}
+
+function renderRings() {
+  RINGS.forEach((sc, id) => {
+    if (!sc.canvas.isConnected) { RINGS.delete(id); return; }
+    // feed scale + grip for the adaptive re-rez (tracker side; the
+    // render page feeds these from the bus in renderLoop)
+    const holder = items.find(k => k.id === id);
+    if (holder) { sc.scale = holder.scale;
+                  sc.held = holder.grabbedBy.length > 0; }
+    drawRing(sc);
+  });
+  RING.live = RINGS.size;
+}
+
+// ---- 3D HOLOGRAMS —
+// GLB/glTF models as first-class board objects. three.js arrives by
+// dynamic import on the FIRST model staged (the import map in <head>
+// resolves the bare specifiers), so the page still boots offline and
+// the render page only pays the cost if a model actually appears.
+// Modes: "holo" (hologram-blue emissive wireframe) and
+// "solid" (real textures); a filename like ...-solid.glb forces solid,
+// a {"mode":"solid"} param on the command overrides either way.
+const MODEL_PX = 480;
+const MSCENES = new Map();     // tracker: item id -> live three.js bundle
+let _three = null;
+
+function isModelSrc(s) { return /\.(glb|gltf)(\?|$)/i.test(s || ""); }
+
+function modelModeFor(src, want) {
+  // Build 1.4 (Jared's design): the FOLDER is the render law, exactly
+  // like fx/ — anything in holo/ renders as the blue wire (reserved
+  // for 3D sketches/layouts); everything else renders REAL (solid).
+  // The command param still overrides for one-off forces.
+  if (want === "solid" || want === "holo") return want;
+  return /\/holo\//i.test(src || "") ? "holo" : "solid";
+}
+
+function liftTranslucentArt(obj, THREE, want) {
+  // THE GLOW LIFT: translucent-art models are authored as
+  // low-opacity veils for OPAQUE viewer backdrops (one veil-art
+  // test case: a single material at 16.5% alpha, 14 stacked
+  // shells); over live video a veil reads as
+  // nothing. Lift: opacity ~3x + the model's own color texture fed
+  // back as self-illumination so it carries its own light. Auto for
+  // any transparent material under 0.5 opacity; {"lift":0} disables,
+  // {"lift":1} forces every transparent material. Opaque models and
+  // deliberately-hidden helper materials (opacity ~0) are untouched.
+  if (want === 0) return 0;
+  // THE GLASS-WINDOW VERDICT (a real-car-model catch — the car
+  // rendered as a white ghost with an outer glow): veil-ART is
+  // MOSTLY translucent (veil art: every shell transparent); a REAL
+  // model with a few glass parts is not. One windshield used to drag
+  // the whole car through the art bloom. Now: unless lift is FORCED,
+  // auto-lift only fires when most of the model's materials are
+  // translucent candidates.
+  if (want !== 1) {
+    let cand = 0, total = 0;
+    const pre = new Set();
+    obj.traverse(n => {
+      if (!n.isMesh) return;
+      (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => {
+        if (!m || pre.has(m)) return;
+        pre.add(m);
+        total++;
+        if (m.transparent && m.opacity > 0.02 && m.opacity < 0.5) cand++;
+      });
+    });
+    if (total === 0 || cand / total < 0.5) return 0;
+  }
+  let lifted = 0;
+  const seen = new Set();
+  obj.traverse(n => {
+    if (!n.isMesh) return;
+    (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => {
+      if (!m || seen.has(m)) return;
+      seen.add(m);
+      if (!m.transparent || m.opacity <= 0.02) return;
+      if (want !== 1 && m.opacity >= 0.5) return;
+      m.opacity = Math.min(1, m.opacity * 3);
+      if (m.map) {
+        // THE MIP MURDER (proven in the headless harness, 8/9): thin-
+        // fiber art sampled at minification reads the deep mip levels,
+        // and every deep mip of a rainbow texture averages to GREY —
+        // the model erases its own colors at small sizes. No mips =
+        // the colors survive at any scale.
+        m.map.minFilter = THREE.LinearFilter;
+        m.map.needsUpdate = true;
+      }
+      if ('emissive' in m) {
+        if (m.map) { m.emissiveMap = m.map; m.emissive = new THREE.Color(0xffffff); }
+        else m.emissive.copy(m.color);
+        m.emissiveIntensity = 1.0;
+      }
+      if ('clearcoat' in m) m.clearcoat = 0;          // white gloss stack
+      if ('specularIntensity' in m) m.specularIntensity = 0;
+      if ('envMapIntensity' in m) m.envMapIntensity = 0;
+      if ('metalness' in m) m.metalness = 0;
+      m.needsUpdate = true;
+      lifted++;
+    });
+  });
+  return lifted;
+}
+
+function _bloomQuad(THREE, frag, uniforms) {
+  const s = new THREE.Scene();
+  const g = new THREE.PlaneGeometry(2, 2);
+  const m = new THREE.ShaderMaterial({ uniforms, depthTest: false, depthWrite: false,
+    vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }",
+    fragmentShader: frag });
+  s.add(new THREE.Mesh(g, m));
+  return { s, g, m, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1) };
+}
+
+function buildBloomRig(THREE, renderer, o) {
+  o = o || { k: 2.2, sat: 2.6, spread: 2.6 };
+  // THE GLOW BLOOM (harness-verified against a reference render):
+  // hand-rolled alpha-correct bloom for lifted
+  // glow models — scene to texture, half-res two-round gaussian,
+  // composite base + SATURATED glow with accumulated alpha so the haze
+  // composites over live video like real light, ACES + gamma done in
+  // the composite shader (RT renders skip three's output transforms).
+  // The stock UnrealBloomPass was rejected: it stomps the alpha
+  // channel and blacks out transparent canvases.
+  const size = new THREE.Vector2();
+  renderer.getDrawingBufferSize(size);
+  const mk = (w, h, smp) => new THREE.WebGLRenderTarget(w, h,
+    { samples: smp || 0, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+  return {
+    rtScene: mk(size.x, size.y, 4),
+    rtA: mk(size.x / 2, size.y / 2), rtB: mk(size.x / 2, size.y / 2),
+    o,
+    px: o.spread / (size.x / 2),
+    blurQ: _bloomQuad(THREE, `varying vec2 vUv; uniform sampler2D tex; uniform vec2 dir;
+void main(){ vec4 s = texture2D(tex,vUv)*0.227027;
+s+=texture2D(tex,vUv+dir*1.3846)*0.3162162; s+=texture2D(tex,vUv-dir*1.3846)*0.3162162;
+s+=texture2D(tex,vUv+dir*3.2308)*0.0702703; s+=texture2D(tex,vUv-dir*3.2308)*0.0702703;
+gl_FragColor = s; }`, { tex: { value: null }, dir: { value: new THREE.Vector2() } }),
+    compQ: _bloomQuad(THREE, `varying vec2 vUv; uniform sampler2D base;
+uniform sampler2D glow; uniform float k; uniform float sat;
+vec3 aces(vec3 c){ return clamp(c*(2.51*c+0.03)/(c*(2.43*c+0.59)+0.14), 0., 1.); }
+void main(){ vec4 b = texture2D(base,vUv); vec4 g = texture2D(glow,vUv);
+float l = dot(g.rgb, vec3(0.299,0.587,0.114));
+vec3 gs = clamp(mix(vec3(l), g.rgb, sat), 0., 8.);
+vec3 col = b.rgb + gs*k; float a = clamp(b.a + g.a*k*0.9, 0., 1.);
+col = aces(col); col = pow(col, vec3(1./2.2));
+gl_FragColor = vec4(col, a); }`,
+      { base: { value: null }, glow: { value: null },
+        k: { value: o.k }, sat: { value: o.sat } }),   // glow-lift hots = Jared's "turn them all up a LOT" (8/9)
+  };
+}
+
+function ensureModelRes(sc, scale, held) {
+  // ADAPTIVE RESOLUTION (Build 1.9, Jared's "low resolution" catch):
+  // the canvas re-renders at the size it's actually displayed — a
+  // stretched hologram renders AT screen resolution instead of blowing
+  // up a fixed 480px bitmap (and OBS's 1x-density browser stops being
+  // half the tracker's sharpness). Resizes only on SETTLE (never mid-
+  // grip — RT reallocation would hitch the stretch), 25% hysteresis,
+  // 2048 cap, never below the 480 base (minis stay supersampled).
+  if (held || !sc.bufSize) return;
+  const want = Math.round(Math.min(2048, Math.max(MODEL_PX,
+    MODEL_PX * (devicePixelRatio || 1) * SS * (scale || 1))));
+  if (Math.abs(want - sc.bufSize) / sc.bufSize < 0.25) return;
+  sc.bufSize = want;
+  sc.renderer.setPixelRatio(1);
+  sc.renderer.setSize(want, want, false);   // CSS stays 480 (stylesheet)
+  if (sc.post) {                            // bloom rig rebuilt to match
+    [sc.post.rtScene, sc.post.rtA, sc.post.rtB].forEach(rt => rt.dispose());
+    [sc.post.blurQ, sc.post.compQ].forEach(q => { q.g.dispose(); q.m.dispose(); });
+    sc.post = buildBloomRig(sc.THREE, sc.renderer, sc.post.o);
+  }
+}
+
+function renderModelScene(sc) {
+  const r = sc.renderer, p = sc.post;
+  if (sc.ghostMat)
+    // THE SCAN BEAM loop: phase climbs the model's own height per
+    // ~6s cycle (the shader wraps it — no gap, ever). Wall-clock
+    // phase so the tracker and the OBS overlay pulse in sync.
+    sc.ghostMat.uniforms.uBeam.value =
+      ((Date.now() % 6000) / 6000) * sc.ghostMat.beamSpan;
+  if (!p) { r.render(sc.scene, sc.camera); return; }
+  r.setRenderTarget(p.rtScene); r.render(sc.scene, sc.camera);
+  const bu = p.blurQ.m.uniforms;
+  bu.tex.value = p.rtScene.texture; bu.dir.value.set(p.px, 0);
+  r.setRenderTarget(p.rtA); r.render(p.blurQ.s, p.blurQ.cam);
+  bu.tex.value = p.rtA.texture; bu.dir.value.set(0, p.px);
+  r.setRenderTarget(p.rtB); r.render(p.blurQ.s, p.blurQ.cam);
+  bu.tex.value = p.rtB.texture; bu.dir.value.set(p.px * 2, 0);
+  r.setRenderTarget(p.rtA); r.render(p.blurQ.s, p.blurQ.cam);
+  bu.tex.value = p.rtA.texture; bu.dir.value.set(0, p.px * 2);
+  r.setRenderTarget(p.rtB); r.render(p.blurQ.s, p.blurQ.cam);
+  bu.tex.value = p.rtB.texture; bu.dir.value.set(p.px * 3, 0);
+  r.setRenderTarget(p.rtA); r.render(p.blurQ.s, p.blurQ.cam);
+  bu.tex.value = p.rtA.texture; bu.dir.value.set(0, p.px * 3);
+  r.setRenderTarget(p.rtB); r.render(p.blurQ.s, p.blurQ.cam);
+  p.compQ.m.uniforms.base.value = p.rtScene.texture;
+  p.compQ.m.uniforms.glow.value = p.rtB.texture;
+  r.setRenderTarget(null); r.render(p.compQ.s, p.compQ.cam);
+}
+
+function loadThree() {
+  if (!_three) _three = Promise.all([
+    import("three"),
+    import("three/addons/loaders/GLTFLoader.js"),
+    import("three/addons/environments/RoomEnvironment.js"),
+  ]).then(([T, L, E]) => ({ THREE: T, GLTFLoader: L.GLTFLoader,
+                            RoomEnvironment: E.RoomEnvironment }));
+  return _three;
+}
+
+async function buildModelScene(el, src, mm, lift) {
+  try {
+    const { THREE, GLTFLoader, RoomEnvironment } = await loadThree();
+    const canvas = el.querySelector("canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true,
+                                               antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    renderer.setSize(MODEL_PX, MODEL_PX, false);
+    // ACES film curve on the plain path (a blown-out-highlights
+    // catch): highlights roll off instead of clipping. Canvas
+    // renders only — the bloom path renders to RTs (which skip tone
+    // mapping) and does its own ACES in the composite; no double-dip.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 100);
+    camera.position.set(0, 0, 3.2);
+    const gltf = await new GLTFLoader().loadAsync(src);
+    const obj = gltf.scene;
+    let nLift = 0, ghostMat = null;
+    // SKELETON-AWARE LOAD (an AI-generated model's export-skeleton
+    // cut-off catch): skinned meshes store BIND-POSE geometry — the
+    // real shape only exists after the bones pose it. So: measure with
+    // the strings pulled, and NEVER let the culler eat a puppet (the
+    // old guard only ran when animation clips arrived — a skeleton
+    // with missing clips slipped through and vanished piecewise).
+    obj.updateMatrixWorld(true);
+    obj.traverse(n => { if (n.isSkinnedMesh) n.frustumCulled = false; });
+    const box = new THREE.Box3();
+    // THE ENVELOPE CACHE (round 4 — Jared: "slight delay... I guess
+    // that's the tradeoff"; refunded): the measured performance
+    // envelope is remembered per file, so the invisible rehearsal
+    // below runs ONCE per model per browser — every later load reads
+    // the box instantly.
+    const bkey = "barehands-box:" + src;
+    let cachedBox = null;
+    try { cachedBox = JSON.parse(localStorage.getItem(bkey) || "null"); }
+    catch (e) {}
+    if (cachedBox && cachedBox.min && cachedBox.max) {
+      box.min.fromArray(cachedBox.min);
+      box.max.fromArray(cachedBox.max);
+    } else {
+      try {
+        obj.traverse(n => {
+          if (!n.isMesh) return;
+          if (n.isSkinnedMesh) {
+            n.skeleton.update();
+            n.computeBoundingBox();
+            if (n.boundingBox)
+              box.union(n.boundingBox.clone().applyMatrix4(n.matrixWorld));
+          } else {
+            box.expandByObject(n);
+          }
+        });
+      } catch (e) {}
+      // belt + suspenders (round 2): union the skeleton-posed box with
+      // the plain measurement — whichever method sees more body wins
+      try { box.union(new THREE.Box3().setFromObject(obj)); } catch (e) {}
+      // round 3 ("it's still catching"): the ANIMATION escapes any
+      // load-pose snapshot — play every clip invisibly and union a
+      // dozen sampled frames each; the box becomes the true envelope
+      // of the whole performance
+      try {
+        if (gltf.animations && gltf.animations.length) {
+          const probe = new THREE.AnimationMixer(obj);
+          for (const clip of gltf.animations) {
+            const act = probe.clipAction(clip);
+            act.play();
+            const N = 12;
+            for (let i = 0; i <= N; i++) {
+              probe.setTime(clip.duration * i / N || 0);
+              obj.updateMatrixWorld(true);
+              obj.traverse(n => {
+                if (!n.isSkinnedMesh) return;
+                n.skeleton.update();
+                n.computeBoundingBox();
+                if (n.boundingBox)
+                  box.union(n.boundingBox.clone().applyMatrix4(n.matrixWorld));
+              });
+            }
+            act.stop();
+          }
+          probe.stopAllAction();
+        }
+      } catch (e) {}
+      try {
+        if (!box.isEmpty())
+          localStorage.setItem(bkey, JSON.stringify(
+            { min: box.min.toArray(), max: box.max.toArray() }));
+      } catch (e) {}
+    }
+    if (box.isEmpty()) box.setFromObject(obj);
+    obj.position.sub(box.getCenter(new THREE.Vector3()));
+    const bsz = box.getSize(new THREE.Vector3());
+    // THE EXPLODE RIG (inspired by a viral exploded-car web demo):
+    // the model is now centered at the origin, so
+    // every part's world center IS its outward flight direction. Parts
+    // sorted big-to-small for the stagger — panels leave first, small
+    // parts trail, which is what reads as engineered instead of
+    // detonated. Works on any parted GLB; a fused model just has one
+    // part and nothing visibly happens.
+    const exParts = [];
+    try {
+      obj.updateMatrixWorld(true);
+      const _pb = new THREE.Box3(), _pc = new THREE.Vector3();
+      obj.traverse(n => {
+        if (!n.isMesh || n.isSkinnedMesh) return;
+        try { _pb.setFromObject(n); } catch (e) { return; }
+        if (_pb.isEmpty()) return;
+        _pb.getCenter(_pc);
+        const dir = _pc.clone();
+        if (dir.length() < 1e-4) dir.set(0, 1, 0);
+        dir.normalize();
+        exParts.push({ n, home: n.position.clone(), dir,
+                       size: _pb.getSize(new THREE.Vector3()).length() });
+      });
+      exParts.sort((a, b) => b.size - a.size);
+      exParts.forEach((p, i) => {
+        p.lag = exParts.length > 1 ? 0.35 * i / (exParts.length - 1) : 0;
+      });
+    } catch (e) {}
+    const exSpread = (bsz.length() || 1) * 0.55;
+    // 1.3 fit (was 1.7): real breathing room inside the square render
+    // window, so animation strides and pose swings don't overflow its
+    // edges — models rest smaller, and stretching covers the rest
+    const fit = 1.3 / (bsz.length() || 1);
+    const group = new THREE.Group();
+    group.scale.setScalar(fit);
+    group.add(obj);
+    scene.add(group);
+    let mixer = null;
+    if (gltf.animations && gltf.animations.length) {
+      // animated GLBs: play every clip — downloaded props often
+      // split one logical animation across clips. Skinned meshes lose frustum culling (the bind-pose
+      // bounding-box vanishing bug).
+      mixer = new THREE.AnimationMixer(obj);
+      gltf.animations.forEach(cl => mixer.clipAction(cl).play());
+    }
+    if (mm === "holo") {
+      // THE GHOST GLASS (modeled on a hologram-style AI-render
+      // reference, harness-matched): fresnel rim
+      // shader — translucent teal volume, X-ray interior, silhouettes
+      // burning bright for the bloom to catch. Skinning chunks included
+      // so animated models wear it too. (Replaces the v1 triangle
+      // wireframe — dense meshes rendered as blue soup.)
+      const ghost = new THREE.ShaderMaterial({
+        uniforms: {
+          cBase: { value: new THREE.Color(0.40, 0.75, 0.71) },
+          cRim:  { value: new THREE.Color(0.75, 1.0, 0.96) },
+          rimPow: { value: 3.2 }, baseA: { value: 0.12 },
+          rimA: { value: 0.8 }, boost: { value: 1.4 },
+          uBeam: { value: 0.0 }, uBeamW: { value: 0.0375 },
+          uSpan: { value: Math.max(bsz.y * fit, 0.2) },
+        },
+        vertexShader: `
+          #include <common>
+          #include <skinning_pars_vertex>
+          varying vec3 vN; varying vec3 vV; varying float vWy;
+          void main() {
+            #include <skinbase_vertex>
+            #include <beginnormal_vertex>
+            #include <skinnormal_vertex>
+            #include <begin_vertex>
+            #include <skinning_vertex>
+            vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+            vN = normalize(normalMatrix * objectNormal);
+            vV = normalize(-mv.xyz);
+            vWy = mv.y;
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `
+          uniform vec3 cBase; uniform vec3 cRim;
+          uniform float rimPow; uniform float baseA;
+          uniform float rimA; uniform float boost;
+          uniform float uBeam; uniform float uBeamW; uniform float uSpan;
+          varying vec3 vN; varying vec3 vV; varying float vWy;
+          void main() {
+            float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), rimPow);
+            vec3 col = mix(cBase, cRim, f) * (0.5 + f * boost);
+            float a = clamp(baseA + f * rimA, 0.0, 1.0);
+            // THE SCAN BEAM v2 (Jared's tweaks 8/9: half-height band,
+            // gentle heat, and CYCLIC in space — wrapped distance over
+            // the model's own height, so as the band leaves the head
+            // its twin is already rising from the feet; a beam is
+            // always alive on the model, by construction)
+            float y = vWy + uSpan * 0.5;
+            float d = mod(y - uBeam, uSpan);
+            d = min(d, uSpan - d);
+            float b = exp(-pow(d / uBeamW, 2.0));
+            col += cRim * b * (0.3 + f * 0.7);
+            a = clamp(a + b * 0.16, 0.0, 1.0);
+            gl_FragColor = vec4(col, a);
+          }`,
+        transparent: true, depthWrite: false, side: THREE.DoubleSide });
+      obj.traverse(n => { if (n.isMesh) n.material = ghost; });
+      ghostMat = ghost;
+      ghostMat.beamSpan = Math.max(bsz.y * fit, 0.2);
+    } else {
+      // solid: environment lighting so PBR textures read true (bare
+      // directional lights leave metallic GLBs near-black).
+      // (a real-car-model catch: "very bright and blown out" —
+      // saturated car paint was reading silver-white): the
+      // full stack was overdriving PBR paint — exposure eased, key
+      // and ambient trimmed, env reflections damped on materials
+      // that carry an envMapIntensity dial.
+      renderer.toneMappingExposure = 0.82;
+      scene.environment = new THREE.PMREMGenerator(renderer)
+        .fromScene(new RoomEnvironment(), 0.04).texture;
+      scene.add(new THREE.AmbientLight(0xffffff, 0.28));
+      const key = new THREE.DirectionalLight(0xffffff, 1.1);
+      key.position.set(2, 3, 4);
+      scene.add(key);
+      obj.traverse(n => {
+        if (!n.isMesh) return;
+        const ms = Array.isArray(n.material) ? n.material : [n.material];
+        ms.forEach(m => {
+          if (m && "envMapIntensity" in m) m.envMapIntensity = 0.65;
+        });
+      });
+      nLift = liftTranslucentArt(obj, THREE, lift);
+      if (nLift && ROLE !== "render")
+        toast(`glow lift: ${nLift} material${nLift > 1 ? "s" : ""}`, 1800);
+    }
+    const post = mm === "holo"
+      ? buildBloomRig(THREE, renderer, { k: 0.85, sat: 1.0, spread: 2.2 })
+      : nLift ? buildBloomRig(THREE, renderer, { k: 2.2, sat: 2.6, spread: 2.6 })
+      : null;
+    return { renderer, scene, camera, group, canvas, mixer, post, THREE, ghostMat,
+             exParts, exSpread, exC: 0,
+             bufSize: Math.round(MODEL_PX * Math.min(devicePixelRatio || 1, 2)) };
+  } catch (e) {
+    _three = null;                          // let a retry re-import
+    if (ROLE !== "render")
+      toast("3D failed: " + (e.message || "load error"), 3000);
+    return null;
+  }
+}
+
+function disposeScene(sc) {
+  try {
+    if (sc.mixer) sc.mixer.stopAllAction();
+    if (sc.post) {
+      [sc.post.rtScene, sc.post.rtA, sc.post.rtB].forEach(rt => rt.dispose());
+      [sc.post.blurQ, sc.post.compQ].forEach(q => { q.g.dispose(); q.m.dispose(); });
+    }
+    sc.scene.traverse(n => {
+      if (n.geometry) n.geometry.dispose();
+      (Array.isArray(n.material) ? n.material : n.material ? [n.material] : [])
+        .forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+    });
+    sc.renderer.dispose();
+  } catch (e) {}
+}
+
+function makeModel(src, title, mode, lift) {
+  const mm = modelModeFor(src, mode);
+  const el = document.createElement("div");
+  el.className = "card modelcard" + (mm === "holo" ? " holo" : "");
+  el.innerHTML = `<canvas></canvas>`;
+  BEHIND.appendChild(el);
+  const it = { el, id: UID++, type: "model",
+    def: { title: title || "", file: "", src, mmode: mm, lift },
+    x: innerWidth * 0.5, y: innerHeight * 0.42, scale: 1,
+    rx: -0.15, ry: 0.6, rz: 0, rvy: 0, vx: 0, vy: 0,
+    grabbedBy: [], ox: 0, oy: 0, flying: false, stretch: null };
+  buildModelScene(el, src, mm, lift).then(sc => {
+    if (sc) {
+      sc.it = it; MSCENES.set(it.id, sc);
+      if (sc.exParts && sc.exParts.length > 2) it.exCap = 1;
+    }
+  });
+  return it;
+}
+
+function applyExplode(sc, tgt) {
+  // both pages ease toward the mirrored TARGET with the same constant,
+  // so tracker and broadcast bloom in visual lockstep (~2s to open)
+  if (!sc.exParts || !sc.exParts.length) return;
+  const cur = sc.exC || 0;
+  if (Math.abs(tgt - cur) < 0.001 && cur === 0) return;
+  sc.exC = Math.abs(tgt - cur) < 0.001 ? tgt : cur + (tgt - cur) * 0.022;
+  for (const p of sc.exParts) {
+    let f = (sc.exC - p.lag) / (1 - p.lag || 1);
+    f = Math.max(0, Math.min(1, f));
+    f = f * f * (3 - 2 * f);               // smoothstep — eased flight
+    p.n.position.copy(p.home).addScaledVector(p.dir, f * sc.exSpread);
+  }
+}
+
+function renderModels() {
+  MSCENES.forEach((sc, id) => {
+    if (!sc.it.el.isConnected) {
+      disposeScene(sc); MSCENES.delete(id); return;
+    }
+    sc.group.rotation.x = sc.it.rx || 0;
+    sc.group.rotation.y = sc.it.ry || 0;
+    sc.group.rotation.z = sc.it.rz || 0;
+    applyExplode(sc, sc.it.ex || 0);
+    if (sc.mixer) {
+      const mnow = performance.now();
+      sc.mixer.update(Math.min((mnow - (sc.mt || mnow)) / 1000, 0.05));
+      sc.mt = mnow;
+    }
+    ensureModelRes(sc, sc.it.scale, sc.it.grabbedBy.length > 0);
+    renderModelScene(sc);
+  });
+}
+
+// board commands from the server (the assistant's hands on the
+// board). The AGENCY verbs: hand = deliver an item to the user's
+// reach; yank = TAKE something back (grip-fight shake, then ripped
+// away off-screen); hover = pulse for attention.
+let lastTouchedId = null;
+
+function findItem(title) {
+  if (title) {
+    const t = title.toLowerCase();
+    const f = items.find(i => (i.def.title || "").toLowerCase().includes(t) ||
+                              (i.def.src || "").toLowerCase().includes(t));
+    if (f) return f;
+  }
+  return items.find(i => i.grabbedBy.length) ||
+         items.find(i => i.id === lastTouchedId) ||
+         items[items.length - 1];
+}
+
+function deliver(c) {
+  // GLASS ERA (Jared's law 8/13: "no more throwing me stuff from the
+  // side of the screen") — deliveries MATERIALIZE at his reach: the
+  // in-bloom (back-ease scale + 3D turn-in), zero side travel
+  c.x = innerWidth * 0.62; c.y = innerHeight * 0.46;
+  c.anim = { k: "in", t: 0 };
+  c.el.style.opacity = "0.05";
+}
+
+function give(c) {
+  // "<<do:give>>" (2026-08-14, Jared: "put something in my hand"):
+  // materialize at the reach, then the force-pull flight INTO his
+  // live hand — lands caught-and-held, the same SMACK as the claw
+  // pull. Hands off camera = the plain reach-offer above.
+  deliver(c);
+  const ci = Object.keys(cursors)[0];
+  if (ci != null) c.anim = { k: "give", t: 0, ci: +ci };
+}
+
+function applyCmds(cmds) {
+  (cmds || []).forEach(c => {
+    if (c.a === "clear") {
+      items.forEach(killItem);          // scorched earth — ring included
+    } else if (c.a === "reset") {
+      // Jared's law (2026-08-13): reset = the GATHER — board swept,
+      // THE RING materializes center stage (the arms-together state);
+      // clear = literally everything off, the ring included
+      loadTree().then(() => spawnStage(0.5, 0.42));
+    } else if (c.a === "explode" || c.a === "assemble") {
+      // THE EXPLODE verbs (2026-08-14): title-match first, else the
+      // freshest model on the board; assemble snaps the flight home
+      let t = c.title ? findItem(c.title) : null;
+      if (!t || t.type !== "model")
+        t = items.filter(k => k.type === "model" && k.el.isConnected).pop();
+      if (t) { t.ex = c.a === "explode" ? 1 : 0; lastTouchedId = t.id; }
+    } else if (c.a === "add_img" || c.a === "hand" || c.a === "give") {
+      const it = isModelSrc(c.src) ? makeModel(c.src, c.title, c.mode, c.lift)
+                                   : makeImage(c.src, c.title);
+      if (c.a === "give") give(it);
+      else if (c.a === "hand") deliver(it);
+      else { it.anim = { k: "in", t: 0 }; it.el.style.opacity = "0.05"; }
+      items.push(it);
+    } else if (c.a === "add_card" && c.title) {
+      // the note-throw: add_card carries an optional notes `file` —
+      // the delivered card flash-opens into the full note (the /note
+      // jail governs, so only configured notes folders resolve).
+      // open:1 = unfurl the panel immediately instead of the card.
+      const it = makeCard({ title: c.title, body: c.body || "",
+                            file: c.file || "" });
+      if (c.hand) deliver(it);
+      else {
+        // Optional x/y, as 0..1 fractions of the viewport -- the same
+        // convention /state already reports positions in, so what you
+        // read back is what you can send. Without them the old centre
+        // is kept, so nothing that worked before moves. Clamped, because
+        // a card at 1.4 is a card nobody can reach to drag back.
+        const nx = typeof c.x === "number" ? c.x : 0.5;
+        const ny = typeof c.y === "number" ? c.y : 0.4;
+        it.x = Math.min(0.92, Math.max(0.08, nx)) * innerWidth;
+        it.y = Math.min(0.92, Math.max(0.08, ny)) * innerHeight;
+        it.anim = { k: "in", t: 0 }; it.el.style.opacity = "0.05";
+      }
+      items.push(it);
+      if (c.open && it.def.file) openPanel(it);
+    } else if (c.a === "widget") {
+      summonWidget(c.w || "ring");
+    } else if (c.a === "scroll_note") {
+      // the assistant as teleprompter operator: glides the newest note
+      const p = items.filter(k => k.type === "panel").pop();
+      if (p && p.body) {
+        const box = p.body.parentElement.clientHeight;
+        const maxS = Math.max(0, p.body.offsetHeight - box + 40);
+        p.sTarget = c.dir === "top" ? 0 : Math.min(maxS, Math.max(0,
+          (p.sTarget ?? p.scrollY ?? 0) + (c.dir === "up" ? -1 : 1) * box * 0.8));
+      }
+    } else if (c.a === "yank") {
+      const t = findItem(c.title);
+      if (t) {
+        t.grabbedBy.forEach(i => { if (cursors[i]) cursors[i].el.classList.remove("pinched"); });
+        t.grabbedBy = []; t.el.classList.remove("grabbed");
+        t.flying = false; t.stretch = null;
+        t.anim = { k: "yank", t: 0 };
+        foley.yank();
+      }
+    } else if (c.a === "hover") {
+      const t = findItem(c.title);
+      if (t) t.anim = { k: "hover", t: 0 };
+    } else if (c.a === "present") {
+      // THE PRESENT verb: show-and-tell. Stage (or find) the thing, fly
+      // it center stage, enlarge it, dim everything else. Ends when the
+      // person grabs it, it leaves the board, or a new present/clear.
+      let t = c.title ? findItem(c.title) : null;
+      if (!t && c.src) {
+        t = isModelSrc(c.src) ? makeModel(c.src, c.title, c.mode, c.lift)
+                              : makeImage(c.src, c.title);
+      } else if (!t && c.title) {
+        t = makeCard({ title: c.title, body: c.body || "", file: c.file || "" });
+      }
+      if (t) {
+        if (!items.includes(t)) {
+          t.x = innerWidth * 0.5; t.y = innerHeight * 0.44;
+          t.el.style.opacity = "0.05";
+          items.push(t);
+        }
+        if (c.open && t.def && t.def.file) {
+          openPanel(t);
+          const p = items.filter(k => k.type === "panel").pop();
+          presentItem(p || t);
+        } else presentItem(t);
+      }
+    }
+  });
+}
+
+// ---- THE PRESENT machinery: one spotlit item, everything else dims.
+let presented = null;
+function presentItem(t) {
+  if (presented && presented !== t) endPresent();
+  presented = t;
+  const el = t.el;
+  // size-aware target scale: land filling roughly half the short axis
+  const w = el.offsetWidth || 320, h = el.offsetHeight || 220;
+  const s1 = Math.min(2.4, Math.max(1.25,
+    (Math.min(innerWidth, innerHeight) * 0.55) / Math.max(w, h)));
+  t.anim = { k: "present", t: 0, x0: t.x, y0: t.y, s0: t.scale || 1, s1 };
+  BEHIND.appendChild(el);                       // pop to the top, pull-catch style
+  el.classList.add("presented");
+  items.forEach(k => {
+    if (k !== t && k.el && k.el.isConnected) k.el.classList.add("dimmed");
+  });
+}
+function endPresent() {
+  if (!presented) return;
+  items.forEach(k => { if (k.el) k.el.classList.remove("dimmed"); });
+  presented.el.classList.remove("presented");
+  if (presented.anim && presented.anim.k === "present") presented.anim = null;
+  presented = null;
+}
+
+// ---- THE ORBITAL BLOOM: the board boots EMPTY except THE RING.
+// Tap the ring → the configured folders bloom as glass ORBS around it
+// (fat circular tap targets); tap an orb → its browser pane grows
+// FROM the orb's spot; tap the ring again → the orbs retract.
+function makeOrb(def) {
+  const el = document.createElement("div");
+  el.className = "card orb";
+  el.innerHTML = `<h3>${escT(def.title)}</h3><p>${escT(def.body || "")}</p>`;
+  BEHIND.appendChild(el);
+  return { el, id: UID++, type: "orb", def, x: 0, y: 0, scale: 1,
+           vx: 0, vy: 0, grabbedBy: [], ox: 0, oy: 0, flying: false,
+           stretch: null };
+}
+
+function ringToggle(ring) {
+  const up = items.filter(i => i.type === "orb" && i.el.isConnected);
+  if (up.length) { up.forEach(killItem); return; }
+  const defs = (CFG.orbs || []).map((o, i) => {
+    if (o.kind === "media") {
+      const p = treeCounts(PROPSTREE, true);
+      return { title: o.title || "Props",
+               body: `${p.dirs} folders · ${p.leaves} props`, orb: "props" };
+    }
+    const v = treeCounts(TREES[i], false);
+    return { title: o.title || "Notes",
+             body: `${v.dirs} folders · ${v.leaves} notes`, orb: i };
+  });
+  const side = ring.x < innerWidth / 2 ? 1 : -1;   // bloom toward center
+  defs.forEach((def, i) => {
+    def.ang = (i - (defs.length - 1) / 2) *
+              (defs.length > 3 ? 0.72 : 0.96);     // even fan, any count
+    def.side = side;
+    const o = makeOrb(def);
+    // the ORBITAL CONSTRAINT in physics() owns their position from
+    // here — spawn at the current target so the bloom lands true
+    const R = 200 * (ring.scale || 1) + 130;
+    o.x = ring.x + side * Math.cos(def.ang) * R;
+    o.y = ring.y + Math.sin(def.ang) * R;
+    o.anim = { k: "in", t: 0, d: i * 0.07 };       // staggered bloom
+    o.el.style.opacity = "0.05";
+    items.push(o);
+  });
+}
+
+let CFG = { name: "Assistant", orbs: [] };
+let TREES = [], PROPSTREE = null;
+async function loadTree() {
+  // barehands.json drives everything: the ring's name and one orb per
+  // configured folder (kind "notes" = a markdown tree, "media" = props)
+  try { const r = await fetch("/config"); if (r.ok) CFG = await r.json(); }
+  catch (e) {}
+  TREES = [];
+  for (let i = 0; i < (CFG.orbs || []).length; i++) {
+    TREES[i] = null;
+    if (CFG.orbs[i].kind === "media") continue;
+    try { const r = await fetch("/tree?orb=" + i);
+          if (r.ok) TREES[i] = await r.json(); }
+    catch (e) {}
+  }
+  try { const r = await fetch("/props"); if (r.ok) PROPSTREE = await r.json(); }
+  catch (e) {}
+}
+
+function treeCounts(d, isProps) {
+  let dirs = 0, leaves = 0;
+  const walk = t => {
+    dirs += t.dirs.length;
+    leaves += (isProps ? t.items : t.notes).length;
+    t.dirs.forEach(walk);
+  };
+  if (d) walk(d);
+  return { dirs, leaves };
+}
+
+function spawnStage(cx = 0.30, cy = 0.45) {
+  // the default stage: EMPTY glass except THE RING (tap it and the
+  // configured orbs bloom). The clap passes 0.5 — the ring
+  // materializes center stage.
+  items.forEach(killItem);
+  const ring = makeRing();
+  ring.x = innerWidth * cx; ring.y = innerHeight * cy;
+}
+
+// ---- THE BROWSER PANES (shelf v3): one pane per kind, an indented
+// tree that unfolds in place. Rows = fat tap zones; pinch-drag =
+// scroll (the panel machinery verbatim); hold-still = move; flash =
+// close. The scatter-bloom system this replaced is gone.
+function escT(t) {
+  return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                  .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function browserRows(b) {
+  const out = [];
+  const walk = (d, path, depth, isProps) => {
+    d.dirs.forEach(sub => {
+      const key = path + "/" + sub.name;
+      const open = b.expanded.has(key);
+      out.push({ d: depth, t: sub.name, k: "dir", o: open ? 1 : 0, key });
+      if (open) walk(sub, key, depth + 1, isProps);
+    });
+    (isProps ? d.items : d.notes).forEach(x => {
+      if (isProps) out.push({ d: depth, t: x.split("/").pop(), k: "prop", f: x });
+      else out.push({ d: depth, t: x.title, k: "note", f: x.file });
+    });
+  };
+  if (b.bkind === "props" && PROPSTREE) walk(PROPSTREE, "", 0, true);
+  else if (typeof b.bkind === "number" && TREES[b.bkind])
+    walk(TREES[b.bkind], "", 0, false);
+  return out;
+}
+
+function browserRowsHTML(tuples) {
+  const ICO = { dir0: "▸", dir1: "▾", note: "▤", prop: "▦", widget: "▣" };
+  return tuples.map(([d, t, k, o], i) =>
+    `<div class="brow ${k}" data-i="${i}" style="padding-left:${18 + d * 26}px">` +
+    `<span class="bico">${k === "dir" ? ICO["dir" + o] : ICO[k]}</span>` +
+    `<span class="btxt">${escT(t)}</span></div>`).join("");
+}
+
+function browserRefresh(b) {
+  b.rows = browserRows(b);
+  b.rowTuples = b.rows.map(r => [r.d, r.t, r.k, r.o || 0]);
+  b.rowsV = (b.rowsV || 0) + 1;
+  b.body.innerHTML = browserRowsHTML(b.rowTuples);
+  const box = b.body.parentElement.clientHeight;
+  const maxS = Math.max(0, b.body.offsetHeight - box + 40);
+  b.scrollY = Math.min(b.scrollY || 0, maxS);
+  b.body.style.transform = `translateY(${-b.scrollY}px)`;
+}
+
+// THE PANE MUST NOT LAND ON THE RING. Growing it from the orb's spot is
+// right and stays, but the orbs bloom about 330px out while this pane is
+// 560 wide -- so centring on an orb reliably parks it ON the ring, hiding
+// the very thing you tapped to get here and leaving no way back without
+// dragging the pane off it first.
+//
+// So the pane is pushed along whichever side of the ring the orb was on,
+// until its near edge clears the ring's own radius. Nearest clearing side
+// wins, so it still grows in the direction you reached. If neither side
+// can clear it -- a narrow window with the ring in the middle -- the
+// roomier side is taken, which is the least bad of two bad options rather
+// than a silent failure.
+const BROWSER_HALF_W = 280;            // .panel.browser is 560 wide
+const BROWSER_HALF_H = 360;            // ...and 720 tall
+const RING_RADIUS = 220;               // the ring canvas is 440 square
+
+function browserClampX(v) {
+  return Math.min(Math.max(v, BROWSER_HALF_W + 20),
+                  innerWidth - BROWSER_HALF_W - 20);
+}
+
+function browserX(ox) {
+  let x = ox != null ? ox : innerWidth * 0.38;
+  const ring = items.find(i => i.type === "widget" && i.def && i.def.w === "ring");
+  if (ring) {
+    const clear = RING_RADIUS * (ring.scale || 1) + BROWSER_HALF_W + 24;
+    const left = browserClampX(ring.x - clear);
+    const right = browserClampX(ring.x + clear);
+    const ok = [left, right].filter(v => Math.abs(v - ring.x) >= clear);
+    x = ok.length
+      ? ok.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a))
+      : (Math.abs(left - ring.x) > Math.abs(right - ring.x) ? left : right);
+  }
+  return browserClampX(x);
+}
+
+function browserY(oy) {
+  const y = oy != null ? oy : innerHeight * 0.46;
+  return Math.min(Math.max(y, BROWSER_HALF_H + 20),
+                  innerHeight - BROWSER_HALF_H - 20);
+}
+
+function openBrowser(kind, ox, oy) {
+  // TOGGLE: tap the orb (or summon) again = the pane recedes. Phase 2:
+  // an orb tap passes its position so the pane GROWS FROM the orb's
+  // spot (clamped fully onscreen) — the circle language never breaks.
+  const ex = items.find(i => i.type === "browser" && i.bkind === kind);
+  if (ex) { killItem(ex); return; }
+  loadTree().then(() => {
+    const label = String(kind === "props" ? "Props"
+      : ((CFG.orbs || [])[kind] || {}).title || "Notes").toUpperCase();
+    const el = document.createElement("div");
+    el.className = "panel browser";
+    el.innerHTML = `<div class="bar"><h3>${escT(label)}</h3></div>` +
+                   `<div class="body"><div class="scroll"></div></div>`;
+    BEHIND.appendChild(el);
+    const b = { el, id: UID++, type: "browser", bkind: kind,
+      def: { title: label, file: "" },
+      expanded: new Set(), rows: [], rowTuples: [], rowsV: 0,
+      x: browserX(ox), y: browserY(oy),
+      scale: 1, vx: 0, vy: 0,
+      grabbedBy: [], ox: 0, oy: 0, flying: false, stretch: null,
+      scrollY: 0, body: el.querySelector(".scroll") };
+    b.anim = { k: "in", t: 0 }; b.el.style.opacity = "0.05";
+    items.push(b);
+    browserRefresh(b);
+  });
+}
+
+function flashRow(container, i) {
+  const el = container && container.querySelector(`.brow[data-i="${i}"]`);
+  if (!el) return;
+  el.classList.remove("flash");
+  void el.offsetWidth;                  // restart the animation
+  el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 700);
+}
+
+function browserTap(b, cur) {
+  for (const rowEl of b.el.querySelectorAll(".brow")) {
+    const r = rowEl.getBoundingClientRect();
+    if (cur.y >= r.top && cur.y <= r.bottom &&
+        cur.x >= r.left && cur.x <= r.right) {
+      const row = b.rows[+rowEl.dataset.i];
+      if (!row) return;
+      // the tap flash: mark it for both pages (dir taps re-render the
+      // rows, so the local flash applies AFTER the branch runs; the
+      // tapped dir keeps its index — children insert below it)
+      b.flashI = +rowEl.dataset.i;
+      b.flashV = (b.flashV || 0) + 1;
+      setTimeout(() => flashRow(b.body, b.flashI), 0);
+      if (row.k === "dir") {
+        if (b.expanded.has(row.key)) b.expanded.delete(row.key);
+        else b.expanded.add(row.key);
+        browserRefresh(b);
+      } else if (row.k === "note") {
+        openPanel({ def: { file: row.f, title: row.t } });
+        killItem(b);   // v3.3 (his broadened rule): selecting ANYTHING
+                       // closes the whole pane — only dir taps keep it
+      } else if (row.k === "prop") {
+        const src = "/media/" + row.f;
+        const it = isModelSrc(src) ? makeModel(src, row.t)
+                                   : makeImage(src, row.t);
+        it.x = Math.min(b.x + 480, innerWidth - 240); it.y = b.y;
+        it.anim = { k: "in", t: 0 }; it.el.style.opacity = "0.05";
+        items.push(it);
+        killItem(b);   // v3.3: any selection closes the pane
+      }
+      return;
+    }
+  }
+}
+
+// minimal safe markdown-ish render: escape all HTML, then style headers/bold
+function renderNote(text) {
+  const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return esc.split("\n").map(l => {
+    if (/^#{1,6} /.test(l)) return `<span class="h">${l.replace(/^#+ /, "")}</span>`;
+    return l.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  }).join("\n");
+}
+
+async function openPanel(card) {
+  if (items.some(i => i.type === "panel" && i.def === card.def)) return;
+  let text = "(couldn't load the note)";
+  try {
+    const r = await fetch("/note?f=" + encodeURIComponent(card.def.file));
+    if (r.ok) text = await r.text();
+  } catch (e) {}
+  const el = document.createElement("div");
+  el.className = "panel";
+  el.innerHTML = `<div class="bar"><h3>${escT(card.def.file.split("/").pop().replace(".md",""))}</h3></div>` +
+                 `<div class="body"><div class="scroll">${renderNote(text)}</div></div>`;
+  BEHIND.appendChild(el);
+  const p = { el, id: UID++, type: "panel", def: card.def, x: innerWidth * 0.5,
+              y: innerHeight * 0.44, scale: 1, vx: 0, vy: 0, grabbedBy: [],
+              ox: 0, oy: 0, flying: false, stretch: null, scrollY: 0,
+              body: el.querySelector(".scroll") };
+  items.push(p);
+}
+
+function toast(msg, ms = 2500) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.style.display = "none", ms);
+}
+
+// ---- camera selection: ?cam=<label substring> > saved choice > default.
+// C cycles live. Multiple cameras are the RIG DESIGN: track on a second
+// camera mounted at the main lens while OBS films with the first — no
+// device contention, ever (Jared's multi-cam question, 2026-08-07).
+let camDevices = [], camIdx = -1;
+
+async function startCam(deviceId) {
+  if (cam.srcObject) cam.srcObject.getTracks().forEach(t => t.stop());
+  const IW = PORTRAIT ? Math.min(...RES) : Math.max(...RES);
+  const IH = PORTRAIT ? Math.max(...RES) : Math.min(...RES);
+  const video = { width: { ideal: IW }, height: { ideal: IH } };
+  if (deviceId) video.deviceId = { exact: deviceId };
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+  } catch (e) {
+    // THE RESILIENT BOOT (2026-08-13 night — the tracking camera
+    // powered down off the bus and the failed default request bricked
+    // the ENTIRE stage boot): one dead camera must never kill the
+    // show. Fall through every camera the OS still offers and take
+    // the first that opens; only die if NONE do. C still cycles.
+    const devs = (await navigator.mediaDevices.enumerateDevices())
+      .filter(d => d.kind === "videoinput");
+    for (const d of devs) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: d.deviceId },
+                   width: { ideal: IW }, height: { ideal: IH } },
+          audio: false });
+        break;
+      } catch (e2) {}
+    }
+    if (!stream) throw e;
+  }
+  cam.srcObject = stream;
+  await new Promise(r => cam.onloadedmetadata = r);
+  camDevices = (await navigator.mediaDevices.enumerateDevices())
+    .filter(d => d.kind === "videoinput");
+  const live = stream.getVideoTracks()[0];
+  camIdx = camDevices.findIndex(d => d.label === live.label);
+  toast(`camera: ${live.label || "default"}`);
+}
+
+async function pickInitialCam() {
+  // permission first (labels are blank until granted), then re-pick by name
+  await startCam(null);
+  const want = Q.get("cam") || localStorage.getItem("stage-cam") || "";
+  if (want) {
+    const hit = camDevices.find(d =>
+      d.label.toLowerCase().includes(want.toLowerCase()) || d.deviceId === want);
+    if (hit && camDevices[camIdx] !== hit) await startCam(hit.deviceId);
+  }
+}
+
+async function cycleCam() {
+  if (camDevices.length < 2) { toast("only one camera found"); return; }
+  const next = camDevices[(camIdx + 1) % camDevices.length];
+  await startCam(next.deviceId);
+  localStorage.setItem("stage-cam", next.deviceId);
+  lastVideoTs = -1;
+}
+
+addEventListener("keydown", e => {
+  // live respawn: re-read the notes AND props trees from disk before
+  // redrawing — a freshly dropped file appears on a plain R press
+  if (e.key === "r" || e.key === "R") loadTree().then(() => spawnStage());
+  if (e.key === "d" || e.key === "D") dbg.style.display = dbg.style.display === "block" ? "none" : "block";
+  if (e.key === "c" || e.key === "C") cycleCam();
+  if (e.key === "p" || e.key === "P") {
+    SAMPLER = { until: performance.now() + 4000, r: [], h8: [], h12: [], h16: [], h20: [], s: [], a: [] };
+    toast("OMNI sampler: hold the pose for 4 seconds…", 4000);
+  }
+});
+
+function toScreen(lm) {
+  const vw = cam.videoWidth, vh = cam.videoHeight;
+  const scale = Math.max(innerWidth / vw, innerHeight / vh);
+  const dw = vw * scale, dh = vh * scale;
+  const ox = (innerWidth - dw) / 2, oy = (innerHeight - dh) / 2;
+  return { x: ox + (1 - lm.x) * dw, y: oy + lm.y * dh };
+}
+
+let lastClearT = 0, lastResetT = 0;   // clear/reset cooldowns (wipe + clap)
+const clap = { hist: [] };            // inter-hand distance samples (v3)
+
+function getCursor(i) {
+  if (!cursors[i]) {
+    const el = document.createElement("div");
+    el.className = "cursor";
+    el.innerHTML = `<div class="dwell" style="--p:0"></div>`;
+    document.body.appendChild(el);
+    cursors[i] = { el, ring: el.querySelector(".dwell"), x: innerWidth / 2,
+                   y: innerHeight / 2, pinched: false, history: [],
+                   palmOpen: false, softOpen: false, lastOpenT: 0,
+                   lastSoftT: 0, wipe: null,
+                   pinchT: 0, ghost: false };
+  }
+  return cursors[i];
+}
+
+function dropCursor(i) {
+  const cur = cursors[i];
+  if (!cur) return;
+  items.forEach(c => { const k = c.grabbedBy.indexOf(i); if (k >= 0) endGrab(c, i, cur); });
+  cur.el.remove();
+  delete cursors[i];
+}
+
+function hitTest(cur) {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const c = items[i], r = c.el.getBoundingClientRect();
+    if (cur.x > r.left - 24 && cur.x < r.right + 24 &&
+        cur.y > r.top - 24 && cur.y < r.bottom + 24) return c;
+  }
+  return null;
+}
+
+// v13: zoneOf died — POINTING scrolls (a different hand shape), so a
+// pinch ANYWHERE on anything is always grab/move/flick. No intent lock,
+// no zones, no direction juries. The conflict didn't get solved; it got
+// dissolved (Jared's design).
+
+function beginGrab(c, i, cur) {
+  c.flying = false;
+  c.anim = null;                                     // a grab beats an animation
+  c.grabbedBy.push(i);
+  lastTouchedId = c.id;
+  cur.grabT = performance.now();
+  // FOLEY SCOPE (Jared's rule 2026-08-07): sound belongs to MOVING the
+  // widgets — opened panels are silent territory (the scroll-thup disease)
+  if (c.type !== "panel") foley.grab();
+  c.el.classList.add("grabbed");
+  BEHIND.appendChild(c.el);                   // bring to front
+  if (c.grabbedBy.length === 1) {
+    c.ox = c.x - cur.x; c.oy = c.y - cur.y;
+    // v16 — JARED'S SPEC (design #7, his own): on a NOTE, pinch = SCROLL
+    // by default (the day-one mechanics); holding the pinch ~2s roughly
+    // still (80px tremor room, timer re-anchors on drift instead of
+    // punishing) PROMOTES to move — the note glows and latches to the
+    // hand. Cards move immediately as always.
+    if (c.type === "orb") {
+      // bloom orbs are pinned TAP targets (Phase 2): pinchable, a quick
+      // release opens their pane, but they never move — transient furniture
+      c.mode = "pinned";
+      c.tapX = cur.x; c.tapY = cur.y;
+    } else if (c.type === "panel" || c.type === "browser") {
+      // v3.3/v3.8 (Jared: "I need a dedicated place I can grab...
+      // make the same rules apply to notes"): THE GRIP BAR on notes
+      // AND folder panes — pinch the title bar = immediate MOVE, no
+      // scroll-hold wait; quick tap there = CLOSE (endGrab). Below
+      // the bar = scroll (+ rows on folder panes).
+      const barEl = c.el.querySelector(".bar");
+      const barR = barEl && barEl.getBoundingClientRect();
+      if (barR && cur.y >= barR.top && cur.y <= barR.bottom &&
+          cur.x >= barR.left && cur.x <= barR.right) {
+        c.mode = "move"; c.barGrab = true;
+        c.holdX = cur.x; c.holdY = cur.y; c.holdT = performance.now();
+      } else {
+        c.mode = "scroll"; c.barGrab = false;
+        c.scroll0 = c.scrollY || 0; c.grabY0 = cur.y;
+        c.holdX = cur.x; c.holdY = cur.y; c.holdT = performance.now();
+      }
+      c.tapX = cur.x; c.tapY = cur.y;   // tap discrimination
+    } else if (c.type === "model") {
+      // Build 1.1 (Jared's field call 8/9: the 180×9px handle bar broke
+      // the v9 no-small-targets law — 2px tall on a shelf mini). Pinch
+      // = MOVE like any card; HOLD ~1s roughly still = latch into
+      // SPIN-in-place (the note panel's promotion machinery, flipped).
+      c.mode = "move";
+      c.holdX = cur.x; c.holdY = cur.y; c.holdT = performance.now();
+      c.tapX = cur.x; c.tapY = cur.y;   // v3.1: tap-close discrimination
+    } else if (c.type === "widget") {
+      // the ring: carried like a card; a quick tap blooms the orbs
+      c.mode = "move";
+      c.holdX = cur.x; c.holdY = cur.y; c.holdT = performance.now();
+      c.tapX = cur.x; c.tapY = cur.y;   // ring-tap discrimination
+    } else {
+      // GLASS ERA: every movable item arms the hold-to-rotate timer
+      c.mode = "move";
+      c.holdX = cur.x; c.holdY = cur.y; c.holdT = performance.now();
+      c.tapX = cur.x; c.tapY = cur.y;   // v3: card tap-open discrimination
+    }
+  } else if (c.grabbedBy.length === 2 && c.mode !== "pinned") {
+    // v3 (Jared's ruling 2026-08-14): two hands = SCALE ONLY — the
+    // twist-roll died with the vocabulary redesign ("leave 2 hands for
+    // scaling"; one-hand latch owns all rotation)
+    const a = cursors[c.grabbedBy[0]], b = cursors[c.grabbedBy[1]];
+    c.stretch = { d0: Math.hypot(a.x - b.x, a.y - b.y), s0: c.scale };
+    c.mode = "stretch";
+  }
+}
+
+function endGrab(c, i, cur) {
+  c.grabbedBy = c.grabbedBy.filter(k => k !== i);
+  if (c.grabbedBy.length === 1) {
+    c.stretch = null;
+    const rem = cursors[c.grabbedBy[0]];
+    if (rem) { c.ox = c.x - rem.x; c.oy = c.y - rem.y; c.mode = "move";
+               c.holdX = rem.x; c.holdY = rem.y;
+               c.holdT = performance.now(); }
+  }
+  if (c.grabbedBy.length === 0) {
+    c.el.classList.remove("grabbed");
+    c.stretch = null;
+    const h = cur.history;
+    c.hch = 0;                          // hold-charge / movable glow ends
+    // shelf v3: a quick, near-still release on a browser row = the TAP
+    // (folders unfold, notes open, props stage, widgets summon)
+    if (c.type === "browser" && c.mode === "scroll") {
+      const bMs = performance.now() - (cur.grabT || 0);
+      const bTrav = Math.hypot(cur.x - (c.tapX || cur.x),
+                               cur.y - (c.tapY || cur.y));
+      if (bMs < 350 && bTrav < 24) browserTap(c, cur);
+    }
+    // v3.3/v3.8: a quick tap on the GRIP BAR closes — notes and
+    // folder panes alike
+    if ((c.type === "browser" || c.type === "panel") && c.barGrab &&
+        !cur.probKill) {
+      const gMs = performance.now() - (cur.grabT || 0);
+      const gTrav = Math.hypot(cur.x - (c.tapX || cur.x),
+                               cur.y - (c.tapY || cur.y));
+      if (gMs < 350 && gTrav < 24) killItem(c);
+      c.barGrab = false;
+    }
+    // GESTURE v3 (2026-08-14, Jared's spec — "make it a single pinch"):
+    // THE TAP OPENS — a quick, near-still release on a file-card
+    // unfurls its note. Same tap idiom rows and widget buttons already
+    // use; the double flash is dead.
+    const pullFresh = performance.now() - (c.pullT || 0) < 800 ||
+                      cur.probKill;
+    if (c.type === "card" && c.def.file && !pullFresh) {
+      const tMs = performance.now() - (cur.grabT || 0);
+      const tTrav = Math.hypot(cur.x - (c.tapX || cur.x),
+                               cur.y - (c.tapY || cur.y));
+      if (tMs < 300 && tTrav < 26) openPanel(c);
+    }
+    // GESTURE v3.1 (2026-08-14, the crush is DEAD — "that is happening
+    // too naturally"): THE TAP IS SYMMETRIC — tap opens closed things,
+    // tap CLOSES open things. Quick near-still release on a note,
+    // image, or hologram = it recedes. Widgets/rows/orbs keep their own
+    // tap meanings; a fresh force-pull catch can't be tap-killed.
+    // v3.8: notes close at the BAR only (matching folders) — a body
+    // tap can't kill a note mid-read; images/models keep tap-anywhere
+    if ((c.type === "img" || c.type === "model")
+        && !pullFresh && !c.flying) {
+      const xMs = performance.now() - (cur.grabT || 0);
+      const xTrav = Math.hypot(cur.x - (c.tapX || cur.x),
+                               cur.y - (c.tapY || cur.y));
+      if (xMs < 300 && xTrav < 26) killItem(c);
+    }
+    // PHASE 2 quick-tap releases: the RING toggles its orbital bloom;
+    // an ORB grows into its browser pane (same discrimination gate as
+    // the browser-row tap: short grip, near-zero travel)
+    {
+      const qMs = performance.now() - (cur.grabT || 0);
+      const qTr = Math.hypot(cur.x - (c.tapX ?? cur.x),
+                             cur.y - (c.tapY ?? cur.y));
+      if (qMs < 350 && qTr < 24) {
+        if (c.type === "widget" && c.def.w === "ring" &&
+            c.mode === "move") {
+          const sc = RINGS.get(c.id);
+          if (sc) sc.tapT = Date.now() / 1000;   // the ring's tap pulse
+          ringToggle(c);
+        } else if (c.type === "orb") {
+          openBrowser(c.def.orb, c.x, c.y);
+        }
+      }
+    }
+    let flung = false;
+    // v19.1 (Jared's confirm): a fling needs a REAL grip. Motion blur
+    // during a fast wave collapses the fingers into a phantom 1-3 frame
+    // "pinch" that grabbed the note and released at wave velocity —
+    // notes got yeeted off screen by a bare hand. Sub-120ms grips
+    // release in place, no throw.
+    const gripMs = performance.now() - (cur.grabT || 0);
+    // stretch releases NEVER fling (Jared's catch 8/8: "it keeps
+    // throwing it off the screen" — a two-hand rip ends with fast hand
+    // motion, which read as a flick and yeeted the freshly-enlarged
+    // prop). Any item stretched in the last 700ms sets down gently;
+    // only a deliberate one-hand flick can throw.
+    if (h.length >= 2 && gripMs >= 120 &&
+        performance.now() - (c.stretchT || 0) > 700) {
+      // v3.6 (the dead toss): endpoint velocity sampled the throw's
+      // follow-through — use PEAK velocity across the last ~200ms
+      // instead. Guard: the FINAL instant must still carry ≥40% of the
+      // peak, so a fast drag that STOPS before release places gently.
+      const tEnd = h[h.length - 1].t;
+      let vx = 0, vy = 0, pk = 0;
+      for (let k = 0; k + 1 < h.length; k++) {
+        const a2 = h[k], b2 = h[Math.min(k + 2, h.length - 1)];
+        if (a2.t < tEnd - 220 || b2.t <= a2.t) continue;
+        const d2 = (b2.t - a2.t) / 1000;
+        const x2 = (b2.x - a2.x) / d2, y2 = (b2.y - a2.y) / d2;
+        const s2 = Math.hypot(x2, y2);
+        if (s2 > pk) { pk = s2; vx = x2; vy = y2; }
+      }
+      const la = h[Math.max(0, h.length - 3)], lb = h[h.length - 1];
+      const ldt = (lb.t - la.t) / 1000;
+      const lastS = ldt > 0
+        ? Math.hypot(lb.x - la.x, lb.y - la.y) / ldt : 0;
+      // v3.9.16 (his correction: "I also like tossing things between
+      // both hands back and forth" — the v3.9.14 exit-bound rule
+      // killed mid-screen tosses and died within the hour; 1800 was
+      // too sticky besides): the intent-teller is FOLLOW-THROUGH — a
+      // real throw carries its speed INTO the release (≥50% of peak),
+      // a drag's echoes have decayed by then. Speed bar at 1500,
+      // thrown anywhere he likes — including hand to hand.
+      {
+        if (pk > 1300 && lastS > pk * 0.4) {   // v3.9.25: throw bar eased
+          // v16: on a note in SCROLL mode only a clearly HORIZONTAL fling
+          // closes (vertical fast releases are just energetic scrolling);
+          // in promoted MOVE mode (and on cards) any fling tosses it.
+          // (the v15 page-turn was removed — Jared rejected it.)
+          // Build 1: a rotate-release NEVER flings the hologram — the
+          // energy became spin momentum during the drag instead.
+          if ((c.type === "model" && c.mode === "rotate") ||
+              (c.type === "widget" && c.mode !== "move") ||
+              c.mode === "pinned") {
+            /* spin, not toss / taps, slides + pinned furniture never fling */
+          } else if ((c.type !== "panel" && c.type !== "browser") ||
+              c.mode !== "scroll" ||
+              Math.abs(vx) > Math.abs(vy) * 1.2) {
+            c.vx = vx; c.vy = vy; c.flying = true; flung = true;
+          }
+        }
+      }
+    }
+    // foley: cards/images only (panels silent), and quick taps don't thup
+    if (c.type !== "panel") {
+      if (flung) foley.throw_();
+      else if (performance.now() - (cur.grabT || 0) > 250) foley.place();
+    }
+  }
+}
+
+function killItem(c) {
+  // graceful exit: recede into the screen (scale down + fade), then die —
+  // the z-axis illusion (Jared's ask, v10). Replaces every instant remove.
+  if (!c.el.isConnected || (c.anim && c.anim.k === "out")) return;
+  c.grabbedBy = [];
+  c.el.classList.remove("grabbed");
+  c.flying = false;
+  c.anim = { k: "out", t: 0 };
+}
+
+function physics(dt) {
+  items = items.filter(c => c.el.isConnected || c.flying);
+  // THE ORBITAL CONSTRAINT (round 5, Jared's law: the orbs keep a
+  // CONSTANT clearance from the ring's EDGE wherever it is and
+  // whatever size it is — satellites, riding moves + stretches live)
+  const sun = items.find(i => i.type === "widget" &&
+                              i.def.w === "ring" && i.el.isConnected);
+  items.forEach(o => {
+    if (o.type !== "orb" || !o.el.isConnected) return;
+    if (!sun) { killItem(o); return; }       // no ring, no bloom
+    const R = 200 * (sun.scale || 1) + 130;  // rim + gap + orb radius
+    const tx = Math.min(innerWidth - 90, Math.max(90,
+      sun.x + o.def.side * Math.cos(o.def.ang) * R));
+    const ty = Math.min(innerHeight - 90, Math.max(90,
+      sun.y + Math.sin(o.def.ang) * R));
+    const k = Math.min(1, dt * 10);
+    o.x += (tx - o.x) * k; o.y += (ty - o.y) * k;
+  });
+  // the spotlight ends itself: a grab or the item leaving the board
+  if (presented && (!presented.el.isConnected || presented.grabbedBy.length))
+    endPresent();
+  items.forEach(c => {
+    if (c.anim) {                     // the assistant's agency animations
+      const a = c.anim; a.t += dt;
+      if (a.k === "in") {             // THE MATERIALIZE (GLASS ERA):
+        // born in place — back-ease bloom + a slight 3D turn-in,
+        // the sci-fi materialize (replaces every edge-throw delivery)
+        const p = Math.min(Math.max((a.t - (a.d || 0)) / 0.5, 0), 1);
+        const c1 = 1.30158, c3 = c1 + 1;
+        const e = 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+        c.inS = 0.5 + 0.5 * e;
+        if (c.type !== "model") c.ry = -0.35 * (1 - e);
+        c.el.style.opacity = String(0.05 + 0.95 * p);
+        if (p >= 1) { c.anim = null; c.inS = 1; c.el.style.opacity = "";
+                      if (c.type !== "model") c.ry = 0; }
+      } else if (a.k === "out") {     // pushed OUT: recede + fade, then gone
+        const p = Math.min(a.t / 0.35, 1);
+        c.inS = 1 - 0.7 * p * p;
+        c.el.style.opacity = String(1 - p);
+        if (p >= 1) { c.el.remove(); c.anim = null; }
+      } else if (a.k === "yank") {    // grip-fight shake, then ripped away
+        if (a.t < 0.18) {
+          c.jx = (Math.random() - 0.5) * 14; c.jy = (Math.random() - 0.5) * 14;
+        } else {
+          c.jx = c.jy = 0;
+          c.x -= 2800 * dt;
+          c.el.style.opacity = String(Math.max(0, 1 - (a.t - 0.18) / 0.45));
+          if (c.x < -500) { c.el.remove(); c.anim = null; }
+        }
+      } else if (a.k === "hover") {   // attention pulse
+        c.hch = 0.45 + 0.35 * Math.sin(a.t * 10);
+        c.hs = 1 + 0.05 * Math.sin(a.t * 6);
+        if (a.t > 2.2) { c.anim = null; c.hs = 1; c.hch = 0; }
+      } else if (a.k === "present") { // THE PRESENT: fly to center stage
+        const p = Math.min(a.t / 0.45, 1);   // and grow into the spotlight
+        const e = 1 - Math.pow(1 - p, 3);
+        c.x = a.x0 + (innerWidth * 0.5 - a.x0) * e;
+        c.y = a.y0 + (innerHeight * 0.44 - a.y0) * e;
+        c.scale = a.s0 + (a.s1 - a.s0) * e;
+        c.el.style.opacity = "";
+        if (p >= 1) c.anim = null;    // the spotlight classes hold until endPresent
+      } else if (a.k === "give") {    // bloom in, then hand off to the
+        const p = Math.min(a.t / 0.3, 1);            // pull flight — the
+        const e = 1 - Math.pow(1 - p, 3);            // delivered-INTO-
+        c.inS = 0.5 + 0.5 * e;                       // the-hand verb
+        c.el.style.opacity = String(0.05 + 0.95 * p);
+        if (c.type !== "model") c.ry = -0.35 * (1 - e);
+        if (p >= 1) {
+          if (c.type !== "model") c.ry = 0;
+          c.el.style.opacity = "1";
+          c.anim = cursors[a.ci]     // hand gone mid-bloom = stay at
+            ? { k: "pull", t: 0, x0: c.x, y0: c.y, ci: a.ci }
+            : null;                  // the reach (the offer fallback)
+        }
+      } else if (a.k === "pull") {    // THE FORCE PULL flight — ease-in
+        const p = Math.min(a.t / 0.32, 1);
+        const e = p * p;              // accelerates: ripped, not floated
+        const cc = cursors[a.ci];
+        const tx = cc ? cc.x : a.x0, ty = cc ? cc.y : a.y0;
+        const ddx = tx - a.x0, ddy = ty - a.y0;
+        const dd = Math.hypot(ddx, ddy) || 1;
+        // a slight arc that dies at the hand
+        const bow = Math.sin(Math.PI * p) * Math.min(90, dd * 0.12);
+        c.x = a.x0 + ddx * e - (ddy / dd) * bow;
+        c.y = a.y0 + ddy * e + (ddx / dd) * bow;
+        if (p >= 1) {
+          c.anim = null;
+          const cc2 = cursors[a.ci];
+          if (cc2) {                  // SMACK — caught, and HELD
+            c.grabbedBy = [a.ci];
+            c.pullT = performance.now();   // v3.1: tap guards skip a fresh catch
+            c.mode = "move"; c.ox = 0; c.oy = 0;
+            c.holdX = cc2.x; c.holdY = cc2.y;
+            c.holdT = performance.now();
+            cc2.grabT = performance.now();
+            c.el.classList.add("grabbed");
+            BEHIND.appendChild(c.el);
+          }
+          c.hch = 0;
+        }
+      } else if (a.k === "snap") {    // panel glides home after a page turn
+        const p = Math.min(a.t / 0.3, 1), e = 1 - Math.pow(1 - p, 3);
+        c.x = a.x0 + (a.x1 - a.x0) * e; c.y = a.y0 + (a.y1 - a.y0) * e;
+        if (p >= 1) c.anim = null;
+      }
+    }
+    if (c.sTarget != null && c.body) {  // smooth page glide
+      c.scrollY = (c.scrollY || 0) + (c.sTarget - c.scrollY) * Math.min(1, dt * 8);
+      if (Math.abs(c.sTarget - c.scrollY) < 1) { c.scrollY = c.sTarget; c.sTarget = null; }
+      c.body.style.transform = `translateY(${-c.scrollY}px)`;
+    }
+    if (c.flying) {
+      c.x += c.vx * dt; c.y += c.vy * dt;
+      c.vx *= 0.98; c.vy *= 0.98;
+      if (c.x < -600 || c.x > innerWidth + 600 ||
+          c.y < -600 || c.y > innerHeight + 600) {
+        c.el.style.opacity = "0"; c.flying = false;
+        if (c.type !== "panel") foley.void_();
+        setTimeout(() => c.el.remove(), 300);
+      }
+    }
+    if (c.type === "model" && !(c.grabbedBy.length &&
+        (c.mode === "rotate" || c.mode === "stretch"))) {
+      // Build 1: spin momentum decays toward the stately idle turn —
+      // a hologram that sits dead-still reads as a picture. (1.3: the
+      // idle pauses during the gimbal grip too — it was creeping the
+      // yaw while Jared held a precise two-hand pose.)
+      c.rvy = (c.rvy || 0) * Math.pow(0.15, dt);
+      c.ry = (c.ry || 0) + ((c.rvy || 0) + 0.12) * dt;
+    }
+    c.el.style.setProperty("--ch", c.hch || 0);   // hover charge glow
+    const w = c.el.offsetWidth, h = c.el.offsetHeight;
+    // GLASS ERA: items pose in real 3D (models rotate INSIDE their
+    // three.js scene — their el stays flat, no double-spin)
+    const r3 = c.type !== "model" && (c.rx || c.ry || c.rz)
+      ? ` rotateX(${c.rx || 0}rad) rotateY(${c.ry || 0}rad) rotateZ(${c.rz || 0}rad)`
+      : "";
+    c.el.style.transform =
+      `translate(${c.x - w / 2 + (c.jx || 0)}px, ${c.y - h / 2 + (c.jy || 0)}px)` +
+      r3 + ` scale(${c.scale * (c.hs || 1) * (c.inS || 1)})`;
+  });
+}
+
+async function boot() {
+  await pickInitialCam();
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath:
+      "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU" },
+    numHands: 2, runningMode: "VIDEO",
+    // phantom-hand filter (a real-room catch: debug showed a hand with
+    // none in frame — a busy background is full of hand-shaped clutter
+    // and the 0.5 defaults hallucinate there; a ghost hand can grab items
+    // and false-trigger gestures). 0.65 helped but the ghost
+    // survived → 0.7. Ease back toward 0.65 if real-hand pickup ever
+    // feels laggy; past 0.75 real tracking suffers.
+    minHandDetectionConfidence: 0.7,
+    // v3.9.9 (his blur diagnosis: fast hands smear and get DROPPED,
+    // and re-acquisition eats the frames that felt like grab-lag):
+    // KEEP-tracking eased to 0.5 so a latched hand rides through blur;
+    // fresh DETECTION stays 0.7 — the busy-background ghost wall holds.
+    minHandPresenceConfidence: 0.5 });
+  document.getElementById("boot").remove();
+  await loadTree();
+  spawnStage();
+  toast("barehands v1.0", 2000);  // build fingerprint
+  let lastT = performance.now();
+
+  function frame(now) {
+    const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now;
+    if (cam.currentTime !== lastVideoTs) {
+      lastVideoTs = cam.currentTime;
+      const res = landmarker.detectForVideo(cam, now);
+      const seen = new Set();
+      (res.landmarks || []).forEach((lms, i) => {
+        seen.add(i);
+        const cur = getCursor(i);
+        const tip = toScreen(lms[8]), thumb = toScreen(lms[4]);
+        const span = Math.hypot(lms[0].x - lms[9].x, lms[0].y - lms[9].y);
+        // v3.9.3: palm-axis upness (1 = fingers straight up) — the clap
+        // only listens to prayer-vertical hands (Jared's rule)
+        cur.handUp = span > 0 ? (lms[0].y - lms[9].y) / span : 0;
+        const _w = toScreen(lms[0]), _m = toScreen(lms[9]);
+        cur.wristX = _w.x; cur.wristY = _w.y;   // v3.9.7: the prayer read
+        cur.mcpX = _m.x; cur.mcpY = _m.y;
+        const gap = Math.hypot(lms[4].x - lms[8].x, lms[4].y - lms[8].y);
+        const ratio = span > 0 ? gap / span : 1;
+        const px = (tip.x + thumb.x) / 2, py = (tip.y + thumb.y) / 2;
+        cur.x += (px - cur.x) * 0.45; cur.y += (py - cur.y) * 0.45;
+        cur.history.push({ x: cur.x, y: cur.y, t: now });
+        if (cur.history.length > 10) cur.history.shift();   // v3.6: peak-fling window
+
+        const wasPinched = cur.pinched;
+        // v3.6.1 (his catch: "it is treating a closed fist like a
+        // pinch") — a fist wraps the thumb onto the index tip, so the
+        // gap test alone can't tell touch from clench. The tell: a
+        // fist folds ALL fingers; a deliberate pinch leaves the other
+        // three readable. Fresh grabs demand a non-fist; a hand
+        // already HOLDING is exempt (the force-pull carry is a fist).
+        const W0 = lms[0];
+        const extArr = [[8, 5], [12, 9], [16, 13], [20, 17]].map(([t, m]) =>
+          Math.hypot(lms[t].x - W0.x, lms[t].y - W0.y) >
+          1.45 * Math.hypot(lms[m].x - W0.x, lms[m].y - W0.y));
+        const extFingers = extArr.filter(Boolean).length;
+        const holdingI = items.some(k => k.grabbedBy.includes(i));
+        // v3.7 — FITTED FROM HIS PINCH CORPUS (3 correct / 3 fists,
+        // 2026-08-14 afternoon): the correct pinch is the OK-SIGN —
+        // index curled onto the thumb while middle/ring/pinky ARCH OUT
+        // past the knuckle circle (f12 ≥1.44 / f16 ≥1.52 / f20 ≥1.59
+        // in every correct sample); every fist folds them in (max
+        // 1.24). Cut mid-canyon. The v3.6.2 circle and v3.6.3 wrapped-
+        // thumb theories are DEAD — the thumb gate was rejecting a
+        // CORRECT pinch (t 0.58 vs its 0.6 bar), and occlusion blinded
+        // the circle. The force-pull carry stays exempt via holdingI.
+        const fR = (t, m) => {
+          const td = Math.hypot(lms[t].x - W0.x, lms[t].y - W0.y);
+          const md = Math.hypot(lms[m].x - W0.x, lms[m].y - W0.y);
+          return md > 0 ? td / md : 9;
+        };
+        // v3.8.2 — THE CONTRAST LAW (6 correct / 6 impostor corpus;
+        // his low-arch correct pinch landed INSIDE an impostor's arch
+        // range, ending absolute-height gating): the OK-sign's true
+        // signature is index-vs-the-rest CONTRAST — the index curls IN
+        // to the thumb while middle/ring/pinky stay out. Arch delta
+        // (backMean − f8) ≥ 0.28 in every correct sample, ≤ 0.07 in
+        // every impostor incl. both near-pinches. Cut at 0.18, with a
+        // 1.30 back-arch floor as the fist wall. The EMA sustained
+        // read stays — lucky frames still buy nothing.
+        const f8v = fR(8, 5);
+        const backMean = (fR(12, 9) + fR(16, 13) + fR(20, 17)) / 3;
+        // v3.8.4 — TWO ORIENTATION REGIMES (his profiled-pinch sample:
+        // aspect 1.63 / thumb-dist 1.18 vs 2.1-5.5 / 0.4-0.7 in ALL
+        // frontal samples — a rotated palm compresses the arch ratios
+        // and the contrast law's numbers don't transfer). The regime
+        // self-announces via palm aspect; in PROFILE the thumb is the
+        // judge — a profile pinch rides it far off the knuckle row
+        // (1.16+), every fist ever sampled wraps it tight (≤0.72).
+        const palmW = Math.hypot(lms[5].x - lms[17].x,
+                                 lms[5].y - lms[17].y);
+        const aspect = palmW > 0 ? span / palmW : 9;
+        const tRel = span > 0 ? Math.hypot(
+          lms[4].x - lms[13].x, lms[4].y - lms[13].y) / span : 0;
+        // v3.8.5 (his mid-aspect catch: a contrast-perfect pinch at
+        // aspect 1.93 got shunted into the profile lane and judged by
+        // the wrong rule — the regimes OVERLAP in the middle): EITHER
+        // signature admits — contrast (frontal) OR far-thumb (profile).
+        // Every correct sample passes at least one; every impostor
+        // sampled passes neither.
+        const okBack = (backMean - f8v > 0.18 && backMean > 1.30) ||
+                       (aspect < 2.0 && tRel > 0.95);
+        // v3.8.3 (his tap report: drag fixed, tap still flaky) — the
+        // EMA charged too slow for a snap-tap (~6 frames): rate up to
+        // 0.30 = three clean consecutive frames (~100ms) to trust,
+        // which every real tap has; one or two lucky impostor frames
+        // still fall short of the 0.55 bar.
+        cur.okEma = 0.70 * (cur.okEma || 0) + 0.30 * (okBack ? 1 : 0);
+        // v3.8.6 (his call: "as soon as my index and thumb touch that
+        // pinch should activate") — instant path: TWO consecutive
+        // clean frames (this one + the last, 33ms — the camera's own
+        // floor) enter immediately; the charged-EMA path still serves
+        // hands whose approach was messy. Single lucky frames still
+        // buy nothing.
+        const okNow = okBack && cur.okPrev;
+        cur.okPrev = okBack;
+        // v3.9.8 (his mid-drag fling report: fast dragging smears the
+        // fingers, the gap falsely inflates past the release bar for a
+        // frame, and the phantom release fires at drag velocity = a
+        // toss he never threw): SPEED-AWARE RELEASE — a fast-moving
+        // hand must open FULLY (0.85) to release; a slow hand releases
+        // at 0.55 as before. Real throws open wide naturally.
+        let hspd = 0;
+        const hh0 = cur.history;
+        if (hh0.length >= 2) {
+          const p0 = hh0[0], p1 = hh0[hh0.length - 1];
+          const pdt = (p1.t - p0.t) / 1000;
+          if (pdt > 0) hspd = Math.hypot(p1.x - p0.x, p1.y - p0.y) / pdt;
+        }
+        // v3.9.25 (still too sticky): the fast-release bar eased
+        // 0.85→0.70 — blur under-reads a throwing hand's open, and the
+        // 2-frame sustain already guards the phantom spikes
+        const relBar = hspd > 800 ? 0.70 : 0.55;
+        // v3.9.9: at speed, a release must be SEEN OPEN two frames
+        // running — a single blur spike can't fake a throw
+        const openRead = ratio >= relBar;
+        const relOk = hspd > 800 ? (openRead && cur.openPrev) : openRead;
+        cur.openPrev = openRead;
+        // v3.9.12 (his second left-hand reading topped 0.28 — riding
+        // whatever ceiling gets set): the gap number is so angle-
+        // polluted that his TOUCHING left hand reads WIDER (0.24 med)
+        // than the not-touching near-pinch ever did (0.16) — r cannot
+        // order touch vs close across poses. The CONTRAST LAW is the
+        // real touch enforcement; the gap ceiling steps back to a
+        // margin role. v3.9.13: parked at 0.38 — its NATURAL LIMIT,
+        // one notch under the claw's 0.45 mouth floor (a forming claw
+        // must never read as a pinch). This ceiling cannot rise
+        // further; any future "pinch not taking" is signature or
+        // timing, never gap.
+        // v3.9.24 = the v3.9.22 state RESTORED (the coupling-law
+        // experiment lived twenty minutes — Jared: "put it back how it
+        // was"): regime-aware ceiling — frontal touch range 0.22,
+        // rotated-palm allowance 0.38.
+        // v3.9.27 = the two-band ceiling RESTORED (the gap ladder
+        // lived one round — Jared: "put it back how it was. I found
+        // the real problem").
+        // v3.9.30 — THE SANITY BOUND (Jared: "prevent it from
+        // hallucinating. If it can't SEE the two fingers pinched,
+        // don't do anything or drop it"): a hand-resting-on-the-face
+        // sample read palm aspect 7-8 — the knuckle row collapsed, a
+        // geometrically impossible hand. No REAL hand in the whole
+        // two-day corpus exceeded 5.5. Aspect > 6 = the tracker is
+        // guessing, and a guess can neither pinch nor keep a pinch.
+        // (v3.9.31: the visibility clause is GONE — the hand model
+        // carries the field but never populates it, so it read 0 on
+        // every frame and declared every real hand a hallucination)
+        const handGarbage = aspect > 6;
+        if (handGarbage) cur.probKill = true;   // garbage drops mute taps
+        // v3.9.32 (his final pinch sample: perfect signature, gap
+        // 0.22-0.30 vs the 0.22 frontal ceiling): frontal eased to
+        // 0.32 — the contrast law carries the touch duty.
+        cur.pinched = handGarbage ? false
+                    : wasPinched ? !relOk
+                                 : ratio < (aspect < 2.0 ? 0.38 : 0.32) &&
+                                   (okNow || cur.okEma > 0.55 || holdingI);
+        // v3.9.15 — PINCH PROBATION (his fold-through catch: closing a
+        // hand into a curl passes THROUGH a lawful OK-sign for two
+        // frames — index meets thumb while the back fingers are still
+        // mid-fold and arched — then hysteresis holds the bogus grab):
+        // a fresh pinch must KEEP its signature through its first
+        // 400ms; four straight signature-dead frames = silent drop.
+        // Skipped at speed (fast-drag blur would false-trip it) and
+        // for force-pull carries (holdingI grips are fist-legal).
+        if (cur.pinched && !wasPinched) { cur.badRun = 0; cur.probKill = false; }
+        else if (cur.pinched && wasPinched &&
+                 now - (cur.pinchT || 0) < 400 && hspd < 600 && !holdingI) {
+          cur.badRun = okBack ? 0 : (cur.badRun || 0) + 1;
+          if (cur.badRun >= 4) { cur.pinched = false; cur.probKill = true; }
+        } else cur.badRun = 0;
+        if (cur.pinched) cur.lastPinchT = now;   // v3.9: clap disqualifier
+        cur.el.classList.toggle("pinched", cur.pinched);
+        cur.el.style.left = cur.x + "px"; cur.el.style.top = cur.y + "px";
+
+        // ---- THE PALM ENGINE — a gesture set designed for imperfect,
+        // real-world hands: every trigger is finger EXTENSION
+        // or GROSS travel, never stillness or timing rhythms).
+        // OPEN  = pinch a note card, release into a FULL palm spread
+        // CLOSE = open-hand swipe across the screen (closes open notes)
+        // CLEAR = open palm thrust AT the camera (wipes the whole board)
+        const palmOpen = extFingers >= 4 && ratio > 0.8;
+        cur.palmOpen = palmOpen;
+        cur.softOpen = extFingers >= 3 && ratio > 0.7;  // the forgiving open read
+
+        if (cur.pinched && !wasPinched) {
+          cur.pinchT = now;
+          // v19.2 (Jared's confirm): the BIRTH-SPEED gate. Wave blur
+          // enters a phantom pinch and the 0.34-in/0.50-out hysteresis
+          // holds it for the whole sweep — long enough to beat any
+          // duration gate, grab the note, and fire the horizontal-fling
+          // close at wave velocity. The tell is the birth moment: a
+          // real pinch is born on a hand settling onto its target; a
+          // blur pinch is born mid-sweep at full speed. Born over
+          // ~900px/s = a ghost — it cannot grab at all.
+          const bh = cur.history;
+          let born = 0;
+          if (bh.length >= 2) {
+            const a = bh[0], b = bh[bh.length - 1], dt = (b.t - a.t) / 1000;
+            if (dt > 0) born = Math.hypot(b.x - a.x, b.y - a.y) / dt;
+          }
+          cur.ghost = born > 900;
+          if (!cur.ghost) {
+            const c = hitTest(cur);
+            if (c && c.grabbedBy.length < 2 && !c.grabbedBy.includes(i))
+              beginGrab(c, i, cur);
+          }
+        } else if (cur.pinched && cur.ghost) {
+          // v3.9.8 (his rush-grab report: "my hand rushes up, pinches,
+          // and it won't grab — I'm having to wait"): a pinch born at
+          // speed is ghost-flagged (the wave-blur armor) and used to
+          // stay barren until re-pinched. Now it SELF-HEALS: the
+          // moment the hand decelerates onto its target, the grab
+          // fires — no release, no wait.
+          if (hspd < 500 && !items.some(k => k.grabbedBy.includes(i))) {
+            cur.ghost = false;
+            const c = hitTest(cur);
+            if (c && c.grabbedBy.length < 2 && !c.grabbedBy.includes(i))
+              beginGrab(c, i, cur);
+          }
+        } else if (!cur.pinched && wasPinched) {
+          // GESTURE v3 (2026-08-14): the double-flash arming machinery
+          // is GONE — the tap opens AND closes (endGrab, v3.1)
+          const c = items.find(k => k.grabbedBy.includes(i));
+          if (c) endGrab(c, i, cur);
+          cur.scrub = null;
+        }
+
+        // THE EXPLODE SCRUB — hands drive it too, not just the
+        // assistant's explode/assemble verbs: an EMPTY
+        // pinch dragged sideways drives the freshest parted model's
+        // explosion by hand: right = apart, left = together. The slot
+        // was unoccupied (empty pinches did nothing), so the settled
+        // vocabulary is untouched; 30px of deliberate sideways travel
+        // must accrue before it engages, so a missed grab stays a miss.
+        if (cur.pinched && !items.some(k => k.grabbedBy.includes(i))) {
+          if (!cur.scrub) {
+            const m = items.filter(k => k.type === "model" &&
+                                        k.exCap && k.el.isConnected).pop();
+            cur.scrub = m ? { id: m.id, sx: cur.x, base: m.ex || 0,
+                              live: false } : { id: null };
+          } else if (cur.scrub.id != null) {
+            const m = items.find(k => k.id === cur.scrub.id);
+            if (m && m.el.isConnected) {
+              const dx = cur.x - cur.scrub.sx;
+              if (!cur.scrub.live && Math.abs(dx) > 30) {
+                cur.scrub.live = true;
+                cur.scrub.sx = cur.x;      // re-anchor at engage
+                toast(m.ex > 0.5 ? "scrubbing — drag left to rebuild"
+                                 : "scrubbing — drag right to open", 900);
+              }
+              if (cur.scrub.live) {
+                const MIR = -1;            // mirrored tracker: his
+                                           // rightward hand = leftward x
+                m.ex = Math.max(0, Math.min(1,
+                  cur.scrub.base + MIR * (cur.x - cur.scrub.sx) / 340));
+              }
+            }
+          }
+        } else if (!cur.pinched) cur.scrub = null;
+
+        if (!cur.pinched) {
+          // (an old open-palm wipe gesture died here — too easy to
+          // fire by accident. Clear = clap, then toss the ring. Only
+          // the open-hand clock survives — the claw's transition law
+          // feeds on it.)
+          if (cur.palmOpen || cur.softOpen) cur.lastOpenT = now;
+          if (cur.softOpen) cur.lastSoftT = now;   // the clap's open-approach read
+        }
+
+        // ---- THE FORCE PULL v6 — THE CLAW (Jared's gesture design,
+        // photo-specced 2026-08-13 night; replaces v5's two-pose scope
+        // — no flat-splay arming, ONE iconic pose does it all): the
+        // CLAW — fingers hooked, thumb opposing, a wide C-gap — AIMS
+        // through its mouth: the ray runs wrist → the thumb/index gap
+        // midpoint (the cursor), out as a narrow ~14° cone. The aimed
+        // target lights and SHAKES, ramping harder the longer the claw
+        // holds it (his spec: the strain builds; nothing ever moves
+        // until the grab). SNAPPING THE CLAW SHUT — the gap collapse,
+        // the tracker's most reliable signal — rips it in; the fist
+        // carries it; open hand releases. Claw dropped = everything
+        // settles. Parked hands can't claw; nothing fires without the
+        // deliberate snap.
+        {
+          const heldAny = items.some(k => k.grabbedBy.includes(i));
+          if (!cur.fp) cur.fp = { ph: 0, pose: 0 };
+          const fp = cur.fp;
+          // v6.1 (field round 6 — the claw never registered): the old
+          // extFingers gate read his HOOKED fingers as extended (a hook
+          // still REACHES — tips stay far from the wrist). The claw's
+          // true signature is the HOOK ITSELF: tip folded back near the
+          // knuckle radius (tip-dist / pip-dist small) while a straight
+          // finger's tip sits well beyond it. Live numbers on the D
+          // overlay so thresholds tune against Jared's real hand.
+          const hookR = (tip, pip) => {
+            // v3.3 (his false-trigger photo: EXTENDED fingers tilted at
+            // the camera foreshorten in 2D until they read as hooks):
+            // measured in 3D — MediaPipe z kills the illusion. A real
+            // hook's tip folds back toward the wrist in any orientation;
+            // an extended finger stays far in any orientation.
+            const td = Math.hypot(lms[tip].x - W0.x, lms[tip].y - W0.y,
+                                  (lms[tip].z || 0) - (W0.z || 0));
+            const pd = Math.hypot(lms[pip].x - W0.x, lms[pip].y - W0.y,
+                                  (lms[pip].z || 0) - (W0.z || 0));
+            return pd > 0 ? td / pd : 9;
+          };
+          // v3.4 THE CURL TEST (2026-08-14, fitted from his DOUBLE
+          // P-sample — real claw vs the duck-bill impostor came back
+          // IDENTICAL in every distance ratio (h8 median 1.05 vs 1.07):
+          // monocular z is too weak for distances. What separates the
+          // photos is the FOLD: a hooked finger's distal segment points
+          // back AGAINST its proximal segment (dot < 0-ish); an extended
+          // finger's segments stay aligned (dot ~ +0.9) in ANY camera
+          // orientation — angles survive the foreshortening that lies
+          // about lengths. Distance ratios stay only as loose sanity
+          // rails around his measured real-claw envelope.
+          const seg = (a, b) => {
+            const dx = lms[b].x - lms[a].x, dy = lms[b].y - lms[a].y,
+                  dz = (lms[b].z || 0) - (lms[a].z || 0);
+            const l = Math.hypot(dx, dy, dz) || 1;
+            return [dx / l, dy / l, dz / l];
+          };
+          const curl = (mcp, pip, dip, tip) => {
+            const p = seg(mcp, pip), d = seg(dip, tip);
+            return p[0] * d[0] + p[1] * d[1] + p[2] * d[2];
+          };
+          const c8 = curl(5, 6, 7, 8), c12 = curl(9, 10, 11, 12);
+          const c16 = curl(13, 14, 15, 16), c20 = curl(17, 18, 19, 20);
+          // v3.5.3 — THE PINKY VERDICT (his real-claw s-sample killed
+          // the spread theory: his hooks ride nearly together, s max
+          // 0.30 vs the 0.32 floor). The discriminator was hiding in
+          // the finger I benched two rounds ago: in ALL SEVEN real-claw
+          // samples the pinky stays out STRAIGHT (c20 median 0.43-0.89
+          // — look at the photo, it sticks out of the pose); the
+          // relaxed curl folds it (max -0.29). Index+middle+ring
+          // folded, pinky OUT, mouth open = the claw's fingerprint.
+          // (spread stays measured for the sampler, ungated.)
+          const tipGap = (a, b) => Math.hypot(
+            lms[a].x - lms[b].x, lms[a].y - lms[b].y,
+            (lms[a].z || 0) - (lms[b].z || 0));
+          const spread = span > 0
+            ? (tipGap(8, 12) + tipGap(12, 16) + tipGap(16, 20)) / (3 * span)
+            : 0;
+          // v3.5.4 (his hand-at-the-lens catch: fingers pointed INTO
+          // the camera have no readable geometry — z is weakest there
+          // and the curls come back garbage that reads folded): the 2D
+          // tell is the PALM ASPECT — palm length (0→9) foreshortens
+          // when pointing at the lens while knuckle width (5→17)
+          // doesn't. A working claw is ~parallel to the screen (you
+          // aim at ITEMS); aspect < ~1 = hand into the lens = no claw.
+
+          const h8 = hookR(8, 6), h12 = hookR(12, 10);
+          // v3.1 (his call: "when I actually make the FULL claw pose,
+          // not just a C shape"): ring + pinky must hook too — a lazy C
+          // with relaxed outer fingers no longer reads as the claw
+          const h16 = hookR(16, 14), h20 = hookR(20, 18);
+          // v6.2 HYSTERESIS (round 7 — the pose flickered in for a
+          // millisecond and died: one knife-edge threshold served both
+          // enter and hold): strict-ish to ENTER, loose to KEEP — the
+          // pinch's proven 0.34-in/0.50-out pattern, applied to the claw
+          // v6.3 — FITTED TO JARED'S MEASURED HAND (his P-sample,
+          // 2026-08-13 night: r 0.52–1.03–1.24 · h8 0.70–1.04–1.18 ·
+          // h12 0.56–0.93–1.10). The old 0.55 gap floor sat INSIDE his
+          // natural envelope (min 0.52) — the pose flickered across the
+          // boundary; hooks were never the problem. Bands now bracket
+          // his envelope with margin; snap dropped to 0.38 to keep
+          // clearance under the claw's deepest natural dip.
+          const inClaw = fp.ph > 0 || cur.fpSplay;
+          // v3.5 — FITTED TO HIS SIX-SAMPLE CORRECT-POSE CORPUS
+          // (2026-08-14 midday, both hands, all orientations): the real
+          // claw's curls vary widely EXCEPT the middle finger, which is
+          // ALWAYS folded (median never above 0.04 in six runs); the
+          // pinky often stays straight (median up to 0.89 — impostor
+          // territory) so it carries NO vote. Gate = middle finger
+          // leads (c12 < 0.35), index+middle+ring average confirms
+          // (< 0.30 — his six sample-means: -0.35..+0.26; the duck-bill
+          // sits ~+0.85), mouth + distance rails as sanity.
+          const cMean = (c8 + c12 + c16) / 3;
+          // v3.5.1 (his pointing-hand catch: index straight at 0.98,
+          // rest folded — passed the mean at 0.25): the INDEX must fold
+          // too — his real claws median ≤0.35 on c8, the pointer 0.98
+          // v3.9.18 (his four-sample evening corpus): THE MOUTH is
+          // the cut — both not-claws hold the C half-closed (max
+          // 0.53), both real claws gape wide (min 0.64). Floor raised
+          // mid-canyon to 0.58 (the v3.2 attempt at 0.60 failed
+          // because THAT corpus pinched tighter; this one does not —
+          // and the streak decay now absorbs formation dips).
+          // v3.9.19 (his ruling on the metric twin: "a claw is
+          // intentional. Bigger distance between thumb and index") —
+          // the mouth must gape DELIBERATELY wide: floor 0.72 (the
+          // twin impostor tops at 0.70; his widest claws ride 0.75+).
+          // v3.9.20: "little bit bigger" — floor to 0.80
+          const claw = ratio > (inClaw ? 0.68 : 0.80) &&
+                       ratio < (inClaw ? 1.8 : 1.45) &&
+                       c8    < (inClaw ? 0.8 : 0.6) &&
+                       c12   < (inClaw ? 0.6 : 0.35) &&
+                       // v3.9.21 (the camera-pointed hand gamed the
+                       // MEAN: its foreshortened index read -0.53 and
+                       // subsidized a dead-straight ring at 0.97 —
+                       // real claws fold the ring ≤0.40): the ring
+                       // votes alone now.
+                       c16   < (inClaw ? 0.75 : 0.55) &&
+                       cMean < (inClaw ? 0.55 : 0.30) &&
+                       c20   > (inClaw ? -0.35 : 0.1) &&
+                       aspect > (inClaw ? 0.85 : 1.05) &&
+                       h8 < (inClaw ? 1.6 : 1.5) &&
+                       h12 < (inClaw ? 1.6 : 1.5) &&
+                       h16 < (inClaw ? 1.6 : 1.5);
+          // v6.5 THE PLUNGE (round 12 — the fist missed 3-in-a-row: a
+          // real fist's thumb wraps OVER the curled fingers and the 2D
+          // tip gap often bottoms out ABOVE an absolute floor, drifting
+          // with camera angle). The robust signal is the COLLAPSE
+          // SPEED: a snap plunges the gap fast; aiming drift never
+          // does. Fire on deep-absolute OR fast-plunge-below-the-claw.
+          if (!cur.rh) cur.rh = [];
+          cur.rh.push([now, ratio]);
+          while (cur.rh.length && now - cur.rh[0][0] > 400) cur.rh.shift();
+          let rPeak = 0;
+          for (const rr of cur.rh)
+            if (now - rr[0] <= 280 && rr[1] > rPeak) rPeak = rr[1];
+          const snap = ratio < 0.34 ||
+                       (ratio < 0.48 && rPeak - ratio > 0.22);
+          cur.fpSplay = claw;                // debug-overlay telemetry
+          if (!cur.fpDbgT || now - cur.fpDbgT > 400) {
+            cur.fpDbgT = now;                // readable refresh rate
+            cur.fpDbg = `r:${ratio.toFixed(2)} ` +
+                        `c:${c8.toFixed(2)}/${c12.toFixed(2)}/` +
+                        `${c16.toFixed(2)}/${c20.toFixed(2)} ` +
+                        `s:${spread.toFixed(2)} a:${aspect.toFixed(2)}`;
+          }
+          if (SAMPLER) {                     // the P OMNI-SAMPLER
+            // (v3.9.28 — no more mode churn): records BOTH families —
+            // claw metrics (r, curls, spread, aspect) AND pinch
+            // metrics (arch ratios f*, thumb t) — toasts two lines.
+            if (now < SAMPLER.until) {
+              SAMPLER.r.push(ratio); SAMPLER.h8.push(c8);
+              SAMPLER.h12.push(c12);
+              SAMPLER.h16.push(c16); SAMPLER.h20.push(c20);
+              SAMPLER.s.push(spread); SAMPLER.a.push(aspect);
+              const fRs = (t, m) => {
+                const td = Math.hypot(lms[t].x - W0.x, lms[t].y - W0.y);
+                const md = Math.hypot(lms[m].x - W0.x, lms[m].y - W0.y);
+                return md > 0 ? td / md : 9;
+              };
+              if (!SAMPLER.f8) { SAMPLER.f8 = []; SAMPLER.f12 = [];
+                SAMPLER.f16 = []; SAMPLER.f20 = []; SAMPLER.t = []; }
+              SAMPLER.f8.push(fRs(8, 5)); SAMPLER.f12.push(fRs(12, 9));
+              SAMPLER.f16.push(fRs(16, 13)); SAMPLER.f20.push(fRs(20, 17));
+              SAMPLER.t.push(span > 0 ? Math.hypot(
+                lms[4].x - lms[13].x, lms[4].y - lms[13].y) / span : 9);
+            } else {
+              const stat = a => {
+                if (!a.length) return "-";
+                a.sort((x, y) => x - y);
+                const f = v => v.toFixed(2);
+                return f(a[0]) + "–" + f(a[Math.floor(a.length / 2)]) +
+                       "–" + f(a[a.length - 1]);
+              };
+              SAMPLED = `CLAW r ${stat(SAMPLER.r)} · c8 ` +
+                        `${stat(SAMPLER.h8)} · c12 ${stat(SAMPLER.h12)}` +
+                        ` · c16 ${stat(SAMPLER.h16)} · c20 ${stat(SAMPLER.h20)}` +
+                        ` · s ${stat(SAMPLER.s)} · a ${stat(SAMPLER.a)}\n` +
+                        `PINCH f8 ${stat(SAMPLER.f8 || [])} · f12 ` +
+                        `${stat(SAMPLER.f12 || [])} · f16 ${stat(SAMPLER.f16 || [])}` +
+                        ` · f20 ${stat(SAMPLER.f20 || [])} · t ${stat(SAMPLER.t || [])}`;
+              toast(SAMPLED, 20000);
+              SAMPLER = null;
+            }
+          }
+          const unlight = () => {
+            const t = items.find(k => k.id === fp.tId);
+            if (t && !t.grabbedBy.length) { t.jx = t.jy = 0; t.hch = 0; }
+            fp.tId = null;
+          };
+          // v3.5: a one-frame tracking hiccup used to zero the pose
+          // streak (the "only triggers sometimes") — now it decays
+          fp.pose = claw ? (fp.pose || 0) + 1 : Math.max(0, (fp.pose || 0) - 5);
+          if (fp.ph === 0) {
+            // v7 THE TRANSITION LAW (2026-08-14, Jared's field find:
+            // "anytime my hand was arched it thought I was summoning" —
+            // his relaxed post-pinch arch lives inside the claw bands).
+            // A claw is a MOVEMENT, not a shape: it only arms when the
+            // hooks formed FROM AN OPEN HAND within the last ~0.9s, and
+            // only after ~half a second of held pose (14 frames) so a
+            // drifting arch never even starts the show. The strain, the
+            // 2s law, and the plunge are untouched.
+            if (!heldAny && fp.pose >= 14 && !hitTest(cur) &&
+                now - (cur.lastOpenT || 0) < 900) {
+              fp.ph = 1; fp.lost = 0; fp.tId = null;
+            } else if (fp.pose === 20 && !heldAny &&
+                       now - (cur.lastOpenT || 0) >= 900) {
+              // the honest tell for a drift-in arch (once per run)
+              toast("claw ignored — flash OPEN first, then claw", 1300);
+            }
+          } else {
+            if (claw) fp.lost = 0;
+            else if (!fp.lost) fp.lost = now;
+            if (heldAny || (fp.lost && !snap && now - fp.lost > 300)) {
+              unlight(); fp.ph = 0;
+            } else if (snap && fp.tId != null) {   // THE SNAP — take it
+              // THE 2-SECOND STRAIN LAW (round 11, Jared's call: items
+              // were popping to his hand uncalled): nothing moves until
+              // it has SHAKEN for 2 full seconds — an early snap is a
+              // misfire and just drops the lock. The strain ramp peaks
+              // at ~2s, so fully-rattling and takeable are the same
+              // visible moment.
+              if (now - (fp.litT || 0) >= 2000) {
+                const t = items.find(k => k.id === fp.tId);
+                unlight(); fp.ph = 0;
+                if (t && !t.grabbedBy.length && t.el.isConnected) {
+                  t.hch = 0.6;
+                  t.anim = { k: "pull", t: 0, x0: t.x, y0: t.y, ci: i };
+                }
+              } else {
+                unlight(); fp.ph = 0;
+                toast("too soon — let it strain 2 seconds", 900);
+              }
+            } else if (claw) {
+              // v6.4 — the aim ray is the claw MOUTH'S NORMAL (his
+              // two-photo catch: the old wrist→cursor ray tied aim to
+              // WRIST rotation, forcing him to tip the whole hand down
+              // to aim level; his original spec was right all along —
+              // "the space between is the targeting"). Perpendicular
+              // to the thumbtip↔indextip line, signed away from the
+              // palm: the ray follows the C-shape itself, upright
+              // wrist and all.
+              const t4 = toScreen(lms[4]), t8 = toScreen(lms[8]);
+              const p5 = toScreen(lms[5]), p17 = toScreen(lms[17]);
+              const pcx = (p5.x + p17.x) / 2, pcy = (p5.y + p17.y) / 2;
+              let dx = -(t8.y - t4.y), dy = t8.x - t4.x;
+              if (dx * (cur.x - pcx) + dy * (cur.y - pcy) < 0) {
+                dx = -dx; dy = -dy;        // face away from the palm
+              }
+              const dl = Math.hypot(dx, dy) || 1;
+              dx /= dl; dy /= dl;
+              let best = null, bestScore = 1e9;
+              items.forEach(t => {
+                if (!t.el.isConnected || t.grabbedBy.length) return;
+                // v3.9.33 (Jared: "I need to be able to claw the
+                // folders"): browser panes join the claw's menu; orbs
+                // stay out (pinned furniture), notes stay out.
+                if (t.type === "orb" || t.type === "panel") return;
+                const vx = t.x - cur.x, vy = t.y - cur.y;
+                if (Math.hypot(vx, vy) < 160) return;   // close = pinch
+                const proj = vx * dx + vy * dy;
+                if (proj <= 0) return;       // behind the aim — never
+                const perp = Math.abs(vx * dy - vy * dx);
+                if (perp > proj * 0.25) return;   // the narrow cone
+                if (perp < bestScore) { bestScore = perp; best = t; }
+              });
+              if (best && best.id !== fp.tId) {
+                unlight();
+                fp.tId = best.id; fp.litT = now;   // fresh strain ramp
+                fp.readyToasted = false;
+                best.flying = false; best.anim = null;
+                toast("aiming: " + (best.def.title || (best.def.src ||
+                  best.type).split("/").pop()) + " — hold the strain",
+                  900);
+              } else if (!best && fp.tId != null) {
+                unlight();                   // swept off every target
+              }
+              const lit = items.find(k => k.id === fp.tId);
+              if (lit) {
+                // v3.2 (Jared, 8/14: "increase the intensity by 2.5 or
+                // 3x and ramp it over time... the ramp should be 4
+                // seconds" — the shake reads small on stream at 2x
+                // scale): triple peak amplitude, 4s ramp. The 2s law
+                // is untouched — snap unlocks at 2s, mid-ramp.
+                const hold = Math.min(1, (now - fp.litT) / 4000);
+                const amp = 4 + hold * 40;
+                lit.jx = (Math.random() - 0.5) * amp;
+                lit.jy = (Math.random() - 0.5) * amp;
+                lit.hch = 0.35 + hold * 0.65;
+                if (!fp.readyToasted && now - fp.litT >= 2000) {
+                  fp.readyToasted = true;    // the takeable moment
+                  toast("it's straining — SNAP to take it", 1100);
+                }
+              }
+            }
+          }
+        }
+
+        // drag / scroll / stretch
+        const held = items.find(k => k.grabbedBy.includes(i));
+        if (held) {
+          if (held.mode === "stretch" && held.stretch && held.grabbedBy.length === 2) {
+            const a = cursors[held.grabbedBy[0]], b = cursors[held.grabbedBy[1]];
+            const d = Math.hypot(a.x - b.x, a.y - b.y);
+            // v-free scale (Jared's ask 8/8: "as big or as small as I
+            // want") — ceiling 12x fills any screen; floor 0.12 keeps a
+            // shrunken item big enough to ever pinch again
+            held.scale = Math.min(12, Math.max(0.12,
+              held.stretch.s0 * (d / held.stretch.d0)));
+            held.stretchT = performance.now();   // fling suppressor (see endGrab)
+            held.x = (a.x + b.x) / 2; held.y = (a.y + b.y) / 2;
+            // v3 (Jared's ruling 2026-08-14): the two-hand TWIST-ROLL is
+            // dead — two hands = carry + SCALE only; all rotation lives
+            // in the one-hand hold-still latch.
+          } else if (held.mode === "scroll" && held.grabbedBy[0] === i) {
+            // scrolling (content follows the finger) + the hold-to-move
+            // promotion timer running underneath
+            const box = held.body.parentElement.clientHeight;
+            const maxS = Math.max(0, held.body.offsetHeight - box + 40);
+            held.scrollY = Math.min(maxS, Math.max(0,
+              held.scroll0 - (cur.y - held.grabY0) * 1.4));
+            held.body.style.transform = `translateY(${-held.scrollY}px)`;
+            const drift = Math.hypot(cur.x - held.holdX, cur.y - held.holdY);
+            if (drift > 80) {
+              // drifted out of the hold zone: re-anchor, restart the timer
+              held.holdX = cur.x; held.holdY = cur.y;
+              held.holdT = performance.now(); held.hch = 0;
+              held.scroll0 = held.scrollY; held.grabY0 = cur.y;
+            } else {
+              const p = Math.min((performance.now() - held.holdT) / 1000, 1);
+              held.hch = p;
+              if (p >= 1) {              // PROMOTED: latched to the hand
+                held.mode = "move";
+                held.ox = held.x - cur.x; held.oy = held.y - cur.y;
+                held.holdX = cur.x; held.holdY = cur.y;   // rotate chain arms
+                held.holdT = performance.now();
+                held.hch = 0.6;          // the steady "movable" glow
+              }
+            }
+          } else if (held.mode === "rotate" && held.grabbedBy[0] === i) {
+            // Build 1: orbit — hand X spins yaw, hand Y tilts pitch.
+            // GLASS ERA: UI panes clamp yaw too (past ~90° the text
+            // mirrors); models keep the free spin + release momentum
+            const ROT = 0.012;
+            let ny = held.rot0y + (cur.x - held.grabX0) * ROT;
+            if (held.type !== "model")
+              ny = Math.max(-1.2, Math.min(1.2, ny));
+            held.ry = ny;
+            held.rx = Math.max(-1.2, Math.min(1.2,
+              held.rot0x + (cur.y - held.grabY0) * ROT));
+            if (held.type === "model") {
+              const rh = cur.history;
+              if (rh.length >= 2) {
+                const ra = rh[0], rb = rh[rh.length - 1];
+                const rdt = (rb.t - ra.t) / 1000;
+                held.rvy = rdt > 0 ? ((rb.x - ra.x) / rdt) * ROT : 0;
+              }
+            }
+          } else if (held.mode === "move" && held.grabbedBy[0] === i) {
+            // GLASS ERA: the model hold-to-spin promotion, generalized
+            // to EVERY item — carried like a card; hold roughly still
+            // ~1s and it latches into 3D rotate (drift re-anchors)
+            held.x = cur.x + held.ox; held.y = cur.y + held.oy;
+            // v3: latch demands genuine stillness (80→45px) so a
+            // mid-drag hesitation can't trip 3D mode uninvited
+            const mdrift = Math.hypot(cur.x - held.holdX, cur.y - held.holdY);
+            if (mdrift > 45) {
+              held.holdX = cur.x; held.holdY = cur.y;
+              held.holdT = performance.now(); held.hch = 0;
+            } else {
+              const mp = Math.min((performance.now() - held.holdT) / 1000, 1);
+              held.hch = mp;
+              if (mp >= 1) {               // LATCHED: 3D rotate
+                held.mode = "rotate";
+                held.rot0x = held.rx || 0; held.rot0y = held.ry || 0;
+                held.grabX0 = cur.x; held.grabY0 = cur.y;
+                held.rvy = 0; held.hch = 0.6;   // steady "rotating" glow
+                toast(held.type === "model"
+                  ? "spin mode — move your hand to turn it"
+                  : "3D rotate — move your hand to turn it", 1400);
+              }
+            }
+          }
+
+        }
+        if (dbg.style.display === "block")
+          dbg.textContent = `mode ${MODE}\nfps ${fps}\nhands ${res.landmarks.length}` +
+            `\npinch ${ratio.toFixed(2)} ${cur.pinched ? "CLOSED" : "open"}` +
+            `\npalm ${cur.palmOpen ? "OPEN" : "-"}${cur.fpSplay ? " CLAW" : ""} pull ph${cur.fp ? cur.fp.ph : 0}` +
+            `\n${cur.fpDbg || ""}` + (SAMPLED ? `\n${SAMPLED}` : "");
+      });
+      Object.keys(cursors).map(Number).forEach(i => { if (!seen.has(i)) dropCursor(i); });
+
+      // ---- GESTURE v3.9: THE DELIBERATE CLAP (Jared, after false
+      // resets kept wiping his pinch tests: "that reset needs to be
+      // more deliberate!"). Three locks on top of the speed signature:
+      // (1) both hands OPEN during the WIDE approach — a pinching hand
+      // can't start a clap; openness is only waived near contact,
+      // where the blur lives; (2) MUTUAL motion — both hands must
+      // travel toward each other; one hand sweeping past a parked
+      // hand is dead; (3) any hand that pinched in the last 800ms is
+      // disqualified outright.
+      const cids = Object.keys(cursors);
+      const clapFire = () => {
+        loadTree().then(() => spawnStage(0.5, 0.42));   // the ring, center
+        lastResetT = now; clap.hist.length = 0;
+        toast("clap — ring center stage", 900);
+      };
+      const clapCool = now - lastResetT > 1500 && now - lastClearT > 2500;
+      if (cids.length === 2) {
+        const A = cursors[cids[0]], B = cursors[cids[1]];
+        const recentPinch = A.pinched || B.pinched ||
+          now - Math.max(A.lastPinchT || 0, B.lastPinchT || 0) < 800;
+        if (!items.some(k => k.grabbedBy.length) && !recentPinch) {
+          // v3.9.7 — THE PRAYER LAW (Jared's final spec: "my two palms
+          // must make contact and my fingers must be pointed UP").
+          // Pose-first, motion-demoted: fingertip touches leave the
+          // WRISTS far apart (a tent); palm contact brings wrists +
+          // knuckle rows together. Speed no longer matters — only
+          // that the hands WERE apart in the last 800ms (so resting
+          // prayer hands can't refire).
+          const wristD = Math.hypot(
+            (A.wristX || 0) - (B.wristX || 0),
+            (A.wristY || 0) - (B.wristY || 0));
+          const mcpD = Math.hypot(
+            (A.mcpX || 0) - (B.mcpX || 0),
+            (A.mcpY || 0) - (B.mcpY || 0));
+          const bothOpen =
+            (A.softOpen || now - (A.lastSoftT || 0) < 250) &&
+            (B.softOpen || now - (B.lastSoftT || 0) < 250);
+          const bothUp = (A.handUp || 0) > 0.85 && (B.handUp || 0) > 0.85;
+          clap.hist.push({ t: now, w: wristD,
+                           q: (bothOpen && bothUp) ? 1 : 0 });
+          while (clap.hist.length && now - clap.hist[0].t > 900)
+            clap.hist.shift();
+          const wasApart = clap.hist.some(
+            s => now - s.t <= 800 && s.w > innerWidth * 0.18);
+          if (wristD < innerWidth * 0.11 && mcpD < innerWidth * 0.09 &&
+              bothUp && bothOpen && wasApart && clapCool)
+            clapFire();
+        } else clap.hist.length = 0;
+      } else if (clap.hist.length) {
+        // palms merged into one detection at contact: the vanish read —
+        // honored only if the pose was QUALIFIED (open + vertical) and
+        // closing when tracking died
+        const last = clap.hist[clap.hist.length - 1];
+        if (now - last.t < 200 && last.q && last.w < innerWidth * 0.16 &&
+            clap.hist.some(s => last.t - s.t <= 800 &&
+                                s.w > innerWidth * 0.18) &&
+            clapCool) clapFire();
+        else clap.hist.length = 0;
+      }
+
+      // ---- the P CLAP recorder (v3.9.1): reports the strike anatomy
+      // in the gate's own terms so thresholds tune against HIS clap
+      if (CLAPSAMP) {
+        if (now < CLAPSAMP.until) {
+          if (cids.length === 2) {
+            const A = cursors[cids[0]], B = cursors[cids[1]];
+            CLAPSAMP.rows.push({ t: now,
+              d: Math.hypot(A.x - B.x, A.y - B.y),
+              ax: A.x, ay: A.y, bx: B.x, by: B.y,
+              o: ((A.softOpen || now - (A.lastSoftT || 0) < 250) &&
+                  (B.softOpen || now - (B.lastSoftT || 0) < 250)) ? 1 : 0,
+              u: ((A.handUp || 0) > 0.85 && (B.handUp || 0) > 0.85) ? 1 : 0,
+              p: (A.pinched || B.pinched) ? 1 : 0 });
+          }
+        } else {
+          const R = CLAPSAMP.rows; CLAPSAMP = null;
+          if (R.length < 5) {
+            toast("CLAP sample: not enough two-hand frames — keep both hands on camera", 5000);
+          } else {
+            const W = innerWidth;
+            let best = null;
+            for (let i2 = 0; i2 < R.length; i2++)
+              for (let j2 = i2 + 1;
+                   j2 < R.length && R[j2].t - R[i2].t <= 600; j2++) {
+                const closed = R[i2].d - R[j2].d;
+                if (!best || closed > best.closed)
+                  best = { closed, s: R[i2], e: R[j2] };
+              }
+            const dMax = Math.max(...R.map(r => r.d)) / W;
+            const dMin = Math.min(...R.map(r => r.d)) / W;
+            const wide = R.filter(r => r.d > W * 0.25);
+            const openPct = wide.length ? Math.round(
+              100 * wide.filter(r => r.o).length / wide.length) : -1;
+            const pinchPct = Math.round(
+              100 * R.filter(r => r.p).length / R.length);
+            let line = `CLAP dmax ${dMax.toFixed(2)}W dmin ${dMin.toFixed(2)}W`;
+            if (best && best.closed > 0) {
+              const mA = Math.hypot(best.e.ax - best.s.ax,
+                                    best.e.ay - best.s.ay) / best.closed;
+              const mB = Math.hypot(best.e.bx - best.s.bx,
+                                    best.e.by - best.s.by) / best.closed;
+              line += ` · strike ${(best.s.d / W).toFixed(2)}→` +
+                      `${(best.e.d / W).toFixed(2)}W in ` +
+                      `${Math.round(best.e.t - best.s.t)}ms · mA ` +
+                      `${mA.toFixed(2)} mB ${mB.toFixed(2)}`;
+            }
+            const upPct = wide.length ? Math.round(
+              100 * wide.filter(r => r.u).length / wide.length) : -1;
+            line += ` · open ${openPct}% · up ${upPct}% · pinch ${pinchPct}%`;
+            toast(line, 20000);
+          }
+        }
+      }
+
+      frames++;
+      if (now - lastFpsTs > 1000) { fps = frames; frames = 0; lastFpsTs = now; }
+    }
+    physics(dt);
+    renderModels();           // the 3D holograms draw their frames
+    renderRings();            // the ring draws its frames (both pages)
+    pushState(now);           // stream the scene to the OBS render page
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---- THE SPLIT (the true-transparency requirement — a chroma-key
+// screen tints the presenter's body on camera). Two pages, one scene:
+// the TRACKER (this page, default role) owns the camera + physics and
+// streams normalized scene state to /state at ~45Hz; the RENDER role
+// (?role=render, camera-free, truly transparent) mirrors it — THAT page
+// goes in an OBS browser source, which composites CSS transparency as
+// real alpha. Coordinates travel as window FRACTIONS so tracker window
+// and OBS canvas sizes may differ.
+
+let lastPush = 0;
+function pushState(now) {
+  if (now - lastPush < 22) return;
+  lastPush = now;
+  const st = {
+    cursors: Object.keys(cursors).sort().map(k => {
+      const c = cursors[k];
+      return { x: +(c.x / innerWidth).toFixed(4), y: +(c.y / innerHeight).toFixed(4),
+               p: c.pinched ? 1 : 0, d: 0 };
+    }),
+    items: items.filter(i => i.el.isConnected).map(i => {
+      // charge glow now serves the hover verb only (dwell-open retired
+      // for double-pinch, Jared's call 2026-08-07)
+      const ch = 0;
+      // v20.3: scroll travels as a FRACTION of max-scroll, not pixels —
+      // the render window's text wraps differently than the tracker's,
+      // so a pixel offset left the overlay's bottom unreachable (the
+      // same window-fraction law the v4 split gave positions)
+      let syf;
+      if ((i.type === "panel" || i.type === "browser") && i.body) {
+        const sbox = i.body.parentElement.clientHeight;
+        const smax = Math.max(0, i.body.offsetHeight - sbox + 40);
+        syf = smax ? +((i.scrollY || 0) / smax).toFixed(4) : 0;
+      }
+      return {
+        id: i.id, type: i.type,
+        title: i.type === "panel"
+               ? i.def.file.split("/").pop().replace(".md", "") : i.def.title,
+        body: (i.type === "card" || i.type === "orb") ? i.def.body : undefined,
+        src: (i.type === "img" || i.type === "model") ? i.def.src : undefined,
+        w: i.type === "widget" ? i.def.w : undefined,
+        mm: i.type === "model" ? i.def.mmode : undefined,
+        lf: i.type === "model" ? i.def.lift : undefined,
+        ex: i.type === "model" && i.ex ? +(+i.ex).toFixed(2) : undefined,
+        rx: i.type === "model" || i.rx ? +(i.rx || 0).toFixed(3) : undefined,
+        ry: i.type === "model" || i.ry ? +(i.ry || 0).toFixed(3) : undefined,
+        rz: i.type === "model" || i.rz ? +(i.rz || 0).toFixed(3) : undefined,
+        rows: i.type === "browser" ? i.rowTuples : undefined,
+        rv: i.type === "browser" ? i.rowsV : undefined,
+        fi: i.type === "browser" ? i.flashI : undefined,
+        fv: i.type === "browser" ? i.flashV : undefined,
+        fxf: i.def.fx ? 1 : undefined,
+        vd: i.def.vid ? 1 : undefined,
+        file: i.def.file,
+        x: +((i.x + (i.jx || 0)) / innerWidth).toFixed(4),
+        y: +((i.y + (i.jy || 0)) / innerHeight).toFixed(4),
+        scale: +(i.scale * (i.hs || 1) * (i.inS || 1)).toFixed(3),
+        g: i.grabbedBy.length ? 1 : 0,
+        op: i.el.style.opacity === "" ? 1 : +(+i.el.style.opacity).toFixed(2),
+        ch: +Math.max(ch, i.hch || 0).toFixed(2),
+        sy: syf,
+      };
+    }),
+  };
+  fetch("/state", { method: "POST", body: JSON.stringify(st) })
+    .then(r => r.json()).then(applyCmds).catch(() => {});
+}
+
+// (an earlier whole-screen voice-pulse aura was removed — THE RING
+// carries the assistant's presence now.)
+
+const ROLE = Q.get("role") || "stage";
+// The tracker's scene lives in MIRROR space (selfie view). OBS shows the
+// camera UN-mirrored (broadcast standard), so the render page flips X by
+// default — reach left, cursor goes left, on camera (Jared's "it's
+// backwards" catch, 2026-08-07). If your OBS camera source IS mirrored,
+// add &mirror=1 to the render URL and the flip turns off.
+const RFLIP = Q.get("mirror") === "1" ? false : true;
+const rx = f => RFLIP ? 1 - f : f;
+// &cursors=0 hides the green rings from the broadcast — bare hands only,
+// maximum sorcery (Jared's call 2026-08-07); the card's charge glow
+// carries the dwell cue instead; the tracker page stays your monitor
+const SHOW_CURSORS = Q.get("cursors") !== "0";
+// THE 2X RENDER (Jared's pixelation catch: OBS's CEF rasterizes DOM
+// cards once at layout size and bitmap-stretches them — big cards go
+// blurry; real Chrome re-rasterizes). &ss=2 + an OBS browser source at
+// 3840x2160: body zoom doubles every layout raster, JS positions
+// compensate (zoom multiplies written px), OBS downscales — cards get
+// 2x the pixels at any stretch, the glass gradient renders finer too.
+const SS = ROLE === "render" ? (parseFloat(Q.get("ss")) || 1) : 1;
+
+const rItems = {}, rCursors = {};
+async function renderLoop() {
+  try {
+    const st = await (await fetch("/state", { cache: "no-store" })).json();
+    const seen = new Set();
+    (SHOW_CURSORS ? (st.cursors || []) : []).forEach((c, i) => {
+      seen.add(i);
+      let rc = rCursors[i];
+      if (!rc) {
+        const el = document.createElement("div");
+        el.className = "cursor";
+        el.innerHTML = `<div class="dwell" style="--p:0"></div>`;
+        document.body.appendChild(el);
+        rc = rCursors[i] = { el, ring: el.querySelector(".dwell"),
+                             x: rx(c.x) * innerWidth, y: c.y * innerHeight };
+      }
+      rc.x += (rx(c.x) * innerWidth - rc.x) * 0.5;
+      rc.y += (c.y * innerHeight - rc.y) * 0.5;
+      rc.el.style.left = (rc.x / SS) + "px";
+      rc.el.style.top = (rc.y / SS) + "px";
+      rc.el.classList.toggle("pinched", !!c.p);
+      rc.ring.style.setProperty("--p", c.d || 0);
+    });
+    Object.keys(rCursors).forEach(k => {
+      if (!seen.has(+k)) { rCursors[k].el.remove(); delete rCursors[k]; } });
+
+    const ids = new Set();
+    (st.items || []).forEach(it => {
+      ids.add(it.id);
+      let ri = rItems[it.id];
+      if (!ri) {
+        let el;
+        if (it.type === "model") {
+          // Build 1: the render page runs its OWN three.js scene per
+          // hologram and lerps toward the tracker's rotation
+          el = document.createElement("div");
+          el.className = "card modelcard" + (it.mm === "holo" ? " holo" : "");
+          el.innerHTML = `<canvas></canvas>`;
+        } else if (it.type === "widget") {
+          el = document.createElement("div");    // THE RING, self-animating
+          el.className = "card ringcard";
+          el.innerHTML = `<canvas></canvas>`;
+        } else if (it.type === "orb") {
+          el = document.createElement("div");
+          el.className = "card orb";
+          el.innerHTML = `<h3>${escT(it.title)}</h3><p>${escT(it.body || "")}</p>`;
+        } else if (it.type === "browser") {
+          el = document.createElement("div");
+          el.className = "panel browser";
+          el.innerHTML = `<div class="bar"><h3>${escT(it.title)}</h3></div>` +
+                         `<div class="body"><div class="scroll"></div></div>`;
+        } else if (it.type === "img") {
+          el = document.createElement("div");
+          el.className = "card imgcard" + (it.fxf ? " fxcard" : "");
+          el.innerHTML = it.vd
+            ? `<video src="${escT(it.src)}" autoplay loop muted playsinline></video>`
+            : `<img src="${escT(it.src)}" alt="">`;
+          el.classList.add("mat");
+          setTimeout(() => el.classList.remove("mat"), 650);
+        } else if (it.type === "card") {
+          el = document.createElement("div");
+          el.className = "card";
+          el.innerHTML = `<h3>${escT(it.title)}</h3><p>${escT(it.body || "")}</p>`;
+        } else {
+          el = document.createElement("div");
+          el.className = "panel";
+          el.innerHTML =
+            `<div class="bar"><h3>${escT(it.title)}</h3></div>` +
+            `<div class="body"><div class="scroll">loading…</div></div>`;
+          fetch("/note?f=" + encodeURIComponent(it.file))
+            .then(r => r.ok ? r.text() : "(unavailable)")
+            .then(t => { const s = el.querySelector(".scroll");
+                         if (s) s.innerHTML = renderNote(t); });
+        }
+        BEHIND.appendChild(el);
+        ri = rItems[it.id] = { el, x: rx(it.x) * innerWidth,
+                               y: it.y * innerHeight, s: it.scale || 1,
+                               fv: it.fv };   // no flash replay on page load
+        if (it.type === "model")
+          buildModelScene(el, it.src, it.mm, it.lf).then(sc => { ri.msc = sc; });
+        if (it.type === "widget" && it.w === "ring")
+          RINGS.set(it.id, ringCanvas(el));   // the ring animates locally
+      }
+      ri.x += (rx(it.x) * innerWidth - ri.x) * 0.5;
+      ri.y += (it.y * innerHeight - ri.y) * 0.5;
+      ri.s += ((it.scale || 1) - ri.s) * 0.5;
+      ri.el.classList.toggle("grabbed", !!it.g);
+      ri.el.style.opacity = it.op == null ? 1 : it.op;
+      ri.el.style.setProperty("--ch", it.ch || 0);
+      const sc = ri.el.querySelector(".scroll");
+      if (sc && it.sy != null) {
+        // v20.3: fraction × THIS page's own max-scroll (see pushState);
+        // v20.4: lerped like positions — raw 45Hz steps read as jumps
+        const rbox = sc.parentElement.clientHeight;
+        const rmax = Math.max(0, sc.offsetHeight - rbox + 40);
+        ri.sy = (ri.sy || 0) + (it.sy * rmax - (ri.sy || 0)) * 0.5;
+        sc.style.transform = `translateY(${-ri.sy}px)`;
+      }
+      if (it.type === "widget" && it.w === "ring") {
+        const rsc = RINGS.get(it.id);
+        if (rsc) { rsc.scale = it.scale || 1; rsc.held = !!it.g; }
+      }
+      if (it.type === "browser" && it.rows && it.rv !== ri.rv) {
+        ri.rv = it.rv;
+        const bsc = ri.el.querySelector(".scroll");
+        if (bsc) bsc.innerHTML = browserRowsHTML(it.rows);
+      }
+      if (it.type === "browser" && it.fv && it.fv !== ri.fv) {
+        ri.fv = it.fv;                 // the tap flash, mirrored on air
+        flashRow(ri.el.querySelector(".scroll"), it.fi);
+      }
+      if (it.type === "model" && ri.msc && ri.msc.group) {
+        if (ri.mry == null) { ri.mrx = it.rx || 0; ri.mry = it.ry || 0;
+                              ri.mrz = it.rz || 0; }
+        ri.mrx += ((it.rx || 0) - ri.mrx) * 0.5;
+        ri.mry += ((it.ry || 0) - ri.mry) * 0.5;
+        ri.mrz += ((it.rz || 0) - ri.mrz) * 0.5;
+        // the mirror law for 3D (Jared's live catch, first show 8/9):
+        // positions flip into broadcast space, so orientations must
+        // too — yaw and roll negate under the mirror, pitch doesn't.
+        // Without this a model facing the presenter on the tracker
+        // faced away from them in the overlay.
+        ri.msc.group.rotation.x = ri.mrx;
+        ri.msc.group.rotation.y = RFLIP ? -ri.mry : ri.mry;
+        ri.msc.group.rotation.z = RFLIP ? -ri.mrz : ri.mrz;
+        applyExplode(ri.msc, it.ex || 0);   // THE EXPLODE, mirrored
+        if (ri.msc.mixer) {
+          const mnow = performance.now();
+          ri.msc.mixer.update(Math.min((mnow - (ri.msc.mt || mnow)) / 1000, 0.05));
+          ri.msc.mt = mnow;
+        }
+        ensureModelRes(ri.msc, it.scale || 1, !!it.g);
+        renderModelScene(ri.msc);
+      }
+      // GLASS ERA: 3D pose mirrors exactly like models — yaw + roll
+      // negate under RFLIP, pitch doesn't; lerped like positions
+      if (it.type !== "model") {
+        ri.prx = (ri.prx || 0) + ((it.rx || 0) - (ri.prx || 0)) * 0.5;
+        ri.pry = (ri.pry || 0) + ((it.ry || 0) - (ri.pry || 0)) * 0.5;
+        ri.prz = (ri.prz || 0) + ((it.rz || 0) - (ri.prz || 0)) * 0.5;
+      }
+      const p3 = it.type !== "model" && (ri.prx || ri.pry || ri.prz)
+        ? ` rotateX(${ri.prx}rad) rotateY(${RFLIP ? -ri.pry : ri.pry}rad)` +
+          ` rotateZ(${RFLIP ? -ri.prz : ri.prz}rad)`
+        : "";
+      const w = ri.el.offsetWidth, h = ri.el.offsetHeight;
+      // zoom multiplies written px, so positions divide by SS; offsetWidth
+      // reports unzoomed layout px, so the centering offset stays as-is
+      ri.el.style.transform =
+        `translate(${ri.x / SS - w / 2}px, ${ri.y / SS - h / 2}px)` +
+        p3 + ` scale(${ri.s})`;
+    });
+    Object.keys(rItems).forEach(k => {
+      if (!ids.has(+k)) {
+        if (rItems[k].msc) disposeScene(rItems[k].msc);
+        rItems[k].el.remove(); delete rItems[k]; } });
+    renderRings();               // the ring draws its own frames
+  } catch (e) {}
+  requestAnimationFrame(renderLoop);
+}
+
+if (ROLE === "render") {
+  document.body.classList.add("overlay");
+  document.body.classList.add("on-air");
+  if (SS > 1) document.body.style.zoom = SS;   // the 2x render raster
+  // the html element ALSO paints #000 behind the body — OBS composites
+  // whatever the page actually draws (the "still black" bug, 2026-08-07)
+  document.documentElement.style.background = "transparent";
+  document.body.style.background = "transparent";
+  document.getElementById("boot").remove();
+  const h = document.getElementById("hint");
+  if (h) h.remove();
+  renderLoop();
+} else {
+  boot().catch(e => {
+    document.getElementById("boot").innerHTML =
+      `STAGE FAILED TO BOOT<br><span style="color:#ff6666;font-size:13px">${e.message}</span>`;
+  });
+}
+</script>
+</body>
+</html>

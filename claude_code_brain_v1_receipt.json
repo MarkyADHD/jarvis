@@ -1,0 +1,37 @@
+{
+  "installed_at": "2026-09-07T18:00:00",
+  "method": "hand-applied patch onto live jarvis_app_v2.py (ClaudeCodeBrainV1/install_claude_code_brain_v1.py's SHA-256 gate rejected the file because it had moved on since the V4.1 baseline; a full-file payload replace would have dropped settings_v1, maintainer_v1, web_answer_v3, latest_news_web_fix and other features added after that baseline)",
+  "backup": "C:\\AI-Agent\\jarvis_app_v2_backup_before_claude_code_brain_v1_20260907_reconstructed.py",
+  "files_changed": [
+    "jarvis_app_v2.py",
+    "jarvis_claude_code_v1.py (new, copied from ClaudeCodeBrainV1/payload and fixed)",
+    "CLAUDE.md (new)"
+  ],
+  "fix_applied_to_bridge_module": "Removed --bare from the claude CLI invocation in jarvis_claude_code_v1.py. On the installed CLI (2.1.263), --bare only accepts ANTHROPIC_API_KEY/apiKeyHelper auth and never reads OAuth/keychain, so combined with this module's deliberate ANTHROPIC_API_KEY removal (to force subscription auth, not API billing) every call was failing auth silently. Replaced with --permission-prompts none, keeping --tools \"\" / --disallowedTools mcp__* for the tool-free guarantee.",
+  "integration_points_in_jarvis_app_v2.py": [
+    "import jarvis_claude_code_v1 as claude_v1",
+    "quick_handle_command_v2: claude_v1.command_fast() checked for 'claude status', 'claude mode on/off', 'diagnose yourself' before the deterministic core/system commands",
+    "_tool_registry_v1 goal planning: tool_v1.run_goal(..., model_call=claude_v1.planner_model_call if claude_v1.enabled() else None)",
+    "grounded_web_answer_v3: claude_v1.answer_grounded() tried first for web-evidence synthesis, falls back to the existing Ollama/Qwen summariser on failure/disabled",
+    "ask_ai_common_v2: claude_v1.ask_chat() tried first for normal conversation/reasoning, falls back to the existing Ollama/Qwen call on failure/disabled"
+  ],
+  "unchanged": [
+    "Spotify, Windows media, PC control, lights (room/Nanoleaf/Key Light), shutdown/control commands, direct link handling, settings, maintainer, memory, HUD, voice (Vosk STT + Piper TTS) -- none of these routes were touched"
+  ],
+  "verified": [
+    "jarvis_claude_code_v1.py and jarvis_app_v2.py both compile (py_compile)",
+    "ClaudeCodeBrainV1/test_claude_code_brain_v1.py unit tests pass (updated to assert --bare is absent instead of present)",
+    "ClaudeCodeBrainV1/test_claude_code_subscription.py smoke test passes against the real Claude Code CLI (subscription auth, no API key)",
+    "Live jarvis_app_v2.py imported end-to-end and exercised: 'claude status', 'claude mode off'/'claude mode on', and a plain chat question all routed and returned correctly through the real Claude CLI"
+  ],
+  "rollback": "Copy jarvis_app_v2_backup_before_claude_code_brain_v1_20260907_reconstructed.py back over jarvis_app_v2.py, or simply run: claude mode off (keeps Claude installed but routes everything back to the local Qwen brain).",
+  "followup_fix_2026-09-07_evening": {
+    "symptom": "User reported Jarvis felt no smarter after the install. E:\\JarvisMemory\\claude_code\\calls.jsonl showed real Claude calls succeeding early on, then failing with error 'The command line is too long.' once real memory/conversation context was attached -- every one of those failures silently fell back to the local Qwen brain by design, which is why it felt unchanged.",
+    "root_cause": "_run() in jarvis_claude_code_v1.py passed the full prompt as a positional CLI argument and the full system prompt via --system-prompt <text>. Windows caps a process's command line around 8191 characters; Jarvis's system prompt (persona + profile + memory + conversation context) and, for web answers, the prompt itself (research context) routinely exceed that.",
+    "fix": "prompt is now sent over stdin (subprocess.run(..., input=prompt)) instead of argv; system_prompt is written to a temp file under MEMORY_ROOT and passed via --system-prompt-file, deleted in a finally block after every call. Verified against the real CLI with a 34,400-character context (previously well past the failure point) -- succeeded.",
+    "verified": [
+      "test_claude_code_brain_v1.py updated: asserts the literal command line stays under 4000 chars, the prompt is delivered via stdin not argv, a 20,000-char context lands in the temp file, and the temp file is removed after the call -- PASS",
+      "Direct real-CLI test: ask_chat() with a 34,400-character context returned ok=True with a correct answer"
+    ]
+  }
+}

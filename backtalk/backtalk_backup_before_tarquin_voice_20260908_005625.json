@@ -1,0 +1,13 @@
+{
+  "agent_dir": "C:/AI-Agent",
+  "name": "Jarvis",
+  "model": "claude-sonnet-5",
+  "permission_mode": "ask",
+  "ptt_key": "home",
+  "voice": "bm_lewis",
+  "stt_model": "small.en",
+  "signals_dir": "C:/AI-Agent/backtalk",
+  "extra_dirs": ["C:/Users/babym/Jarvis Memory", "C:/", "E:/"],
+  "barehands_state_dir": "C:/AI-Agent/barehands/state",
+  "discipline_append": "Auto-memory is active in this session and that is fine, but its <cc-memory filenames=\"...\">...</cc-memory> citation markup is a text-UI convention and must NEVER be spoken or appear in your reply here. Save memories normally in the background, but when telling the user what you learned or recalled, say it in plain spoken language only, with no tags, filenames or markup of any kind."
+}

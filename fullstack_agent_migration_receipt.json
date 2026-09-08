@@ -1,0 +1,54 @@
+{
+  "stage": "2 of ~4 (core brain + voice engine + device control skill + wake-word wiring) COMPLETE",
+  "status": "the smarter brain / new voice / real device control / existing wake word are all live now via a normal Jarvis restart. Memory migration, face, and hands still pending.",
+  "stage_2_files_changed": [
+    "jarvis_claude_brain_v2.py (new): persistent background asyncio loop running backtalk's WarmBrain (tool-enabled Claude Agent SDK session) + a Kokoro Mouth singleton; exposes ask_sync() and speak_kokoro_blocking()",
+    "jarvis_app_v2.py: added speak_worker_v2() (same queue/interrupt/logging contract as jarvis_app.py's original speak_worker, Kokoro primary / Piper fallback), registered via app.speak_worker = speak_worker_v2 in install_v2() (same monkeypatch pattern already used for app.speak, app.ask_ai, etc.)",
+    "jarvis_app_v2.py: ask_ai_common_v2 now tries claude_brain_v2.ask_sync() (tool-enabled, warm, real device access via the jarvis-control skill) before the older tool-free claude_v1.ask_chat() CLI-bridge, before Qwen -- three-layer fallback",
+    "CLAUDE.md: added a persona section (calm/capable/slightly British/direct, addresses user as Sir) so the warm brain's fixed system prompt actually sounds like Jarvis, not a generic coding assistant, when talking WITH the user rather than editing code"
+  ],
+  "key_finding": "jarvis_app.py's existing wake-word loop already calls run_agent_task/quick_handle_command/ask_ai_chat/speak as bare module-global names, which jarvis_app_v2.py has been monkeypatching (app.X = X_v2) since before this session. Overriding ask_ai_common_v2's brain and speak_worker's voice engine was therefore sufficient -- traced the exact call chain in jarvis_app.py (run_agent_task -> quick_handle_command -> ask_ai_chat -> handle_plan -> speak) to confirm zero changes to the actual listening loop were needed.",
+  "verified_end_to_end_stage_2": [
+    "install_v2() correctly sets app.speak_worker to speak_worker_v2 and app.speak to speak_v2",
+    "ask_ai_common_v2('...can you turn on my lights?') correctly routed to claude_brain_v2, which used the jarvis-control skill to actually turn the lights on, then replied in-persona ('I'm Jarvis, Sir...')",
+    "Lights turned back off afterwards to leave the room as found"
+  ],
+  "how_to_use": "Just restart Jarvis normally (Launch Jarvis.bat / run_jarvis_v2.bat). No manual steps needed -- the wake word, HUD, memory, and every existing skill work exactly as before; conversational replies now come from the tool-enabled Claude brain and are spoken in the new Kokoro voice instead of Piper.",
+  "unexpected_issue_found_and_fixed": {
+    "symptom": "After restarting, the HUD took ~40s to appear (previously assumed hung, was actually just slow) and, more importantly, jarvis_app_v2.py launched via venv\\Scripts\\pythonw.exe turned out to relaunch itself as a CHILD process under a completely different interpreter -- C:\\Users\\<user>\\AppData\\Local\\Programs\\Python\\Python312\\pythonw.exe (a system-wide Python install, not the project venv) -- and that child, not the parent, is the one that actually owns the HUD window and runs the live app.",
+    "root_cause_not_fully_identified": "Traced this extensively (instrumented subprocess.Popen, checked sys._base_executable, grepped every jarvis_*.py file for Popen/pythonw/win32 process APIs) without finding the exact call site -- it does not go through subprocess.Popen, so it's likely a lower-level Windows API call or a multiprocessing-adjacent mechanism inside one of the many third-party packages. This predates today's session and is not something introduced by this migration.",
+    "practical_impact": "Whichever interpreter actually ends up running the live app needs claude-agent-sdk/kokoro/etc. installed, not just whichever one you launch with. Confirmed system Python312 could import Jarvis's OTHER existing deps (vosk, pygame) via some sys.path sharing with the venv, but claude_agent_sdk specifically failed there via a pywin32 (pywintypes) DLL registration issue that does NOT reliably cross interpreters even when pure-Python packages do.",
+    "fix": "Installed the same new package set (claude-agent-sdk, kokoro, sounddevice, soundfile, numpy, pynput, httpx, webrtcvad-wheels) directly into system Python312 via its own pip, so the import chain is self-contained there too regardless of which interpreter ends up live. Verified both interpreters can cleanly import claude_agent_sdk.ClaudeSDKClient and kokoro afterward.",
+    "still_recommended": "Worth an eventual look (not urgent) at what specifically causes the relaunch, so Jarvis can be pinned to one interpreter and startup can be faster/more predictable -- flagging for a future session rather than continuing to chase it now that the practical fix is in place."
+  },
+  "not_yet_externally_verified": "Everything was verified by calling the same functions the wake-word path uses (ask_ai_common_v2, quick_handle_command_v2, install_v2's overrides) directly, plus confirming the HUD process now has every needed package. Actually saying \"Jarvis\" out loud and hearing the new Kokoro voice / getting a tool-enabled Claude reply has NOT been verified by an actual microphone test -- that needs the user.",
+  "source_repos_reviewed": [
+    "github.com/jaredrhod/fullstack-agent (meta-installer only, no runtime code)",
+    "github.com/jaredrhod/backtalk (voice: ears.py mic capture, brain.py Claude Agent SDK session, mouth.py Kokoro TTS)",
+    "github.com/jaredrhod/ai-memory-vault (not yet integrated)",
+    "github.com/jaredrhod/ai-visualizer (not yet integrated)",
+    "github.com/jaredrhod/barehands (not yet integrated)"
+  ],
+  "prerequisites_installed": ["git (winget)", "uv (winget)", "eSpeak NG (winget, required by Kokoro TTS phonemization)"],
+  "python_packages_installed_into_existing_venv": [
+    "claude-agent-sdk", "kokoro", "sounddevice", "soundfile", "numpy", "pynput", "httpx", "webrtcvad-wheels"
+  ],
+  "files_added": [
+    "C:\\AI-Agent\\backtalk\\ (backtalk repo copied in; backtalk.json configured: agent_dir=C:/AI-Agent, name=Jarvis, model=claude-sonnet-5, permission_mode=bypassPermissions per user's choice, voice=bm_lewis local Kokoro per user's choice)",
+    "C:\\AI-Agent\\backtalk\\backtalk.json discipline_append: stops Claude's auto-memory <cc-memory> citation tags (a text-UI convention) from leaking into spoken TTS output -- found and fixed during testing",
+    "C:\\AI-Agent\\jarvis_control_cli.py: thin CLI wrapper around Jarvis's own existing quick_handle_command_v2() dispatcher, so the new tool-enabled brain can drive Spotify/media/lights/PC-control through Jarvis's already-built, already-tested handlers instead of a reimplementation",
+    "C:\\AI-Agent\\.claude\\skills\\jarvis-control\\SKILL.md: Claude Code Skill documenting when/how to call jarvis_control_cli.py"
+  ],
+  "verified_end_to_end": [
+    "Kokoro TTS (Mouth class) synthesizes and plays audio standalone",
+    "WarmBrain (persistent Claude Agent SDK session, cwd=C:/AI-Agent, bypassPermissions) connects and correctly reads Jarvis's own CLAUDE.md/project context",
+    "Voice command 'Turn the room lights on for me.' -> Claude discovered jarvis-control skill -> ran jarvis_control_cli.py via Bash -> Jarvis's existing room_lights_v1 fast path actually turned the lights on -> Claude spoke a correct confirmation",
+    "Re-tested turning lights back off after the discipline_append fix: clean spoken reply, no tag leakage"
+  ],
+  "not_yet_done": [
+    "Wiring Jarvis's EXISTING wake-word listener ('say Jarvis', in jarvis_app.py) to trigger this new brain+voice pipeline instead of manual test scripts -- next step, deferred because it means editing Jarvis's large core listening loop and deserves its own careful pass rather than being rushed in under time pressure",
+    "ai-memory-vault / Obsidian install + migrating jarvis_memory_v2's learned memory into it",
+    "ai-visualizer (new browser face)",
+    "barehands (webcam gesture control)"
+  ]
+}
