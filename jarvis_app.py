@@ -37,6 +37,7 @@ import requests
 import jarvis_interrupt_v1 as interrupt_v1
 import jarvis_code_watch_v1 as code_watch_v1
 import jarvis_network_health_v1 as network_health_v1
+import jarvis_settings_v1 as settings_v1
 
 try:
     import mss
@@ -3043,6 +3044,32 @@ def max_rain_chance_for_day(day):
     return highest
 
 
+# Countries where ordinary daily speech uses Fahrenheit + mph rather
+# than Celsius + km/h -- the US is the big one; the rest are small
+# territories that also kept Fahrenheit. Everywhere else defaults to
+# metric, which covers the overwhelming majority of countries
+# (including the UK, despite mph being used for road-speed limits
+# there -- weather itself is reported in Celsius).
+IMPERIAL_UNIT_COUNTRY_CODES = {"US", "BS", "BZ", "KY", "PW", "FM", "MH", "LR"}
+
+
+def get_unit_system():
+    """Returns "imperial" or "metric" based on the same IP-geolocated
+    (or manually set) location jarvis_settings_v1 already detects and
+    caches for the "what location are you using" feature -- reused
+    here rather than doing a second, separate geolocation lookup.
+    Defaults to metric (the global majority) if location can't be
+    determined at all."""
+    try:
+        location = settings_v1.get_saved_location()
+        if not location:
+            location = settings_v1.detect_location()
+        country_code = str((location or {}).get("country_code", "")).strip().upper()
+        return "imperial" if country_code in IMPERIAL_UNIT_COUNTRY_CODES else "metric"
+    except Exception:
+        return "metric"
+
+
 def fetch_weather_snapshot():
     """Fetches and parses current conditions + today/tomorrow's forecast
     from wttr.in -- shared by weather_fast (voice command) and the
@@ -3051,6 +3078,14 @@ def fetch_weather_snapshot():
     (WEATHER_URL has no city in it on purpose), so this already follows
     Jarvis wherever he's actually running -- no separate location lookup
     needed, and nothing about the location gets logged (stream privacy).
+
+    wttr.in's JSON response always includes BOTH unit systems
+    (temp_C/temp_F, windspeedKmph/windspeedMiles, etc.) regardless of
+    the URL's own ?m/?u flag -- that flag only affects the plain-text
+    ASCII art output, not this JSON format -- so which fields get read
+    here is entirely what decides imperial vs metric, no need to vary
+    the request itself.
+
     Returns None on any failure -- callers decide how to handle that."""
     try:
         response = requests.get(
@@ -3063,13 +3098,16 @@ def fetch_weather_snapshot():
 
         current = data.get("current_condition", [{}])[0]
         days = data.get("weather", [])
+        units = get_unit_system()
+        imperial = units == "imperial"
 
         return {
-            "temp_c": current.get("temp_C", "?"),
-            "feels_c": current.get("FeelsLikeC", "?"),
+            "units": units,
+            "temp": current.get("temp_F" if imperial else "temp_C", "?"),
+            "feels": current.get("FeelsLikeF" if imperial else "FeelsLikeC", "?"),
             "desc": get_weather_description(current),
             "humidity": current.get("humidity", "?"),
-            "wind_kmph": current.get("windspeedKmph", "?"),
+            "wind": current.get("windspeedMiles" if imperial else "windspeedKmph", "?"),
             "today": days[0] if len(days) > 0 else {},
             "tomorrow": days[1] if len(days) > 1 else {},
         }
@@ -3112,9 +3150,10 @@ def weather_summary_line():
     snap = fetch_weather_snapshot()
     if not snap:
         return None
+    temp_word = "Fahrenheit" if snap["units"] == "imperial" else "Celsius"
     return (
-        f"it's currently {snap['temp_c']} degrees Celsius and {snap['desc']}, "
-        f"feeling like {snap['feels_c']}"
+        f"it's currently {snap['temp']} degrees {temp_word} and {snap['desc']}, "
+        f"feeling like {snap['feels']}"
     )
 
 
@@ -3136,11 +3175,15 @@ def weather_fast(command):
         return {"mode": "chat", "reply": f"I couldn't get the weather right now, {spoken_name()}.", "steps": []}
 
     try:
-        temp_c = snap["temp_c"]
-        feels_c = snap["feels_c"]
+        imperial = snap["units"] == "imperial"
+        temp_word = "Fahrenheit" if imperial else "Celsius"
+        wind_word = "miles per hour" if imperial else "kilometres per hour"
+
+        temp = snap["temp"]
+        feels = snap["feels"]
         desc = snap["desc"]
         humidity = snap["humidity"]
-        wind_kmph = snap["wind_kmph"]
+        wind = snap["wind"]
         today = snap["today"]
         tomorrow = snap["tomorrow"]
 
@@ -3148,14 +3191,15 @@ def weather_fast(command):
             if not tomorrow:
                 return {"mode": "chat", "reply": f"I can't see tomorrow's weather right now, {spoken_name()}.", "steps": []}
 
-            avg = tomorrow.get("avgtempC", "?")
-            high = tomorrow.get("maxtempC", "?")
-            low = tomorrow.get("mintempC", "?")
+            avg_key, high_key, low_key = ("avgtempF", "maxtempF", "mintempF") if imperial else ("avgtempC", "maxtempC", "mintempC")
+            avg = tomorrow.get(avg_key, "?")
+            high = tomorrow.get(high_key, "?")
+            low = tomorrow.get(low_key, "?")
             rain_chance = max_rain_chance_for_day(tomorrow)
 
             return {
                 "mode": "chat",
-                "reply": f"Tomorrow looks around {avg} degrees Celsius on average, with a high of {high} and a low of {low}. Rain chance peaks around {rain_chance} percent, {spoken_name()}.",
+                "reply": f"Tomorrow looks around {avg} degrees {temp_word} on average, with a high of {high} and a low of {low}. Rain chance peaks around {rain_chance} percent, {spoken_name()}.",
                 "steps": []
             }
 
@@ -3168,19 +3212,24 @@ def weather_fast(command):
             return {"mode": "chat", "reply": reply, "steps": []}
 
         if "coat" in c or "hoodie" in c or "how cold" in c:
-            feels_number = safe_int(feels_c, 99)
-            if feels_number <= 10:
+            # Thresholds are in whichever scale is actually being
+            # spoken -- comparing a Fahrenheit reading against a
+            # Celsius-calibrated cutoff would give backwards advice
+            # (50°F is jacket weather; 50°C would be a heatwave).
+            feels_number = safe_int(feels, 99)
+            cold_cutoff, mild_cutoff = (50, 61) if imperial else (10, 16)
+            if feels_number <= cold_cutoff:
                 advice = "I would wear a coat."
-            elif feels_number <= 16:
+            elif feels_number <= mild_cutoff:
                 advice = "A hoodie or light jacket would be sensible."
             else:
                 advice = "You probably do not need a heavy coat."
-            return {"mode": "chat", "reply": f"It feels like {feels_c} degrees Celsius. {advice} {spoken_name()}.", "steps": []}
+            return {"mode": "chat", "reply": f"It feels like {feels} degrees {temp_word}. {advice} {spoken_name()}.", "steps": []}
 
         reply = (
-            f"It's currently {temp_c} degrees Celsius and {desc}. "
-            f"It feels like {feels_c}, with humidity at {humidity} percent "
-            f"and wind around {wind_kmph} kilometres per hour, {spoken_name()}."
+            f"It's currently {temp} degrees {temp_word} and {desc}. "
+            f"It feels like {feels}, with humidity at {humidity} percent "
+            f"and wind around {wind} {wind_word}, {spoken_name()}."
         )
         return {"mode": "chat", "reply": reply, "steps": []}
 
