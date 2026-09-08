@@ -85,7 +85,19 @@ function Fail($text) {
 # it is not an edge case -- it's the default on a lot of Windows
 # machines. The `py` launcher (py.exe, installed by the real python.org
 # installer, not the Store) is immune to this and is tried first.
-function Get-RealPythonCmd {
+# Strict 3.12-only lookup -- deliberately separate from the unversioned
+# fallback below. Earlier versions of this script folded both into one
+# function that returned the FIRST thing it found, version 3.12 or not --
+# which meant that on any machine that already had SOME Python on PATH
+# (3.13, most commonly), the unversioned fallback always succeeded
+# first, `$pyCmdParts[0]` was never null, and the winget-install-3.12
+# step further down (gated on "nothing found at all") never ran. The
+# script would then silently build a venv against 3.13 forever, no
+# matter how many times it was re-run, hitting the same kokoro version
+# conflict every single time. Splitting strict-3.12-only detection out
+# means the caller can tell "no 3.12" apart from "no Python at all" and
+# actually try to fix the former via winget instead of shrugging at it.
+function Get-Python312Cmd {
     # `requirements.txt` was pinned against 3.12 -- some packages in it
     # may not have wheels built for newer Python versions yet, which
     # makes `pip install -r requirements.txt` fail on whichever package
@@ -138,7 +150,10 @@ function Get-RealPythonCmd {
             if ($LASTEXITCODE -eq 0 -and "$v" -match "Python 3\.12") { return @($path) }
         } catch { }
     }
+    return $null
+}
 
+function Get-AnyPythonCmd {
     foreach ($candidate in @("py", "python")) {
         $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
         if (-not $cmd) { continue }
@@ -149,22 +164,33 @@ function Get-RealPythonCmd {
     }
     return $null
 }
-$pyCmdParts = @(Get-RealPythonCmd)
+
+$pyCmdParts = @(Get-Python312Cmd)
 if (-not $pyCmdParts[0]) {
-    # Unlike Node.js/eSpeak NG below, this was previously a hard stop --
-    # inconsistent, and the single most likely thing someone with no dev
-    # background doesn't already have. Auto-install via winget the same
-    # way, then re-detect rather than trusting the installer's own exit
-    # code alone (winget can report success while PATH still needs a
-    # fresh process to see it).
+    # Strict 3.12 wasn't found -- try to actually get it via winget
+    # BEFORE ever settling for whatever unversioned Python happens to
+    # already be on PATH. Unlike Node.js/eSpeak NG below, Python used to
+    # be a hard stop when missing entirely; now it also self-heals the
+    # much more common case of "wrong version present", not just
+    # "nothing present". Re-detect rather than trusting winget's own
+    # exit code alone (winget can report success while PATH still needs
+    # a fresh process to see it).
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($winget) {
-        Say "Python not found -- installing Python 3.12 via winget..."
+        Say "Python 3.12 not found -- installing it via winget..."
         winget install --id Python.Python.3.12 -e --accept-source-agreements --accept-package-agreements --silent
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                     [System.Environment]::GetEnvironmentVariable("Path", "User")
-        $pyCmdParts = @(Get-RealPythonCmd)
+        $pyCmdParts = @(Get-Python312Cmd)
     }
+}
+if (-not $pyCmdParts[0]) {
+    # Genuinely couldn't get 3.12 (winget missing, blocked, offline,
+    # etc.) -- fall back to whatever Python IS on PATH rather than
+    # hard-failing, same as before. The warning right after this block
+    # (pyVerLine -notmatch "Python 3\.12") already tells the user this
+    # is a fallback, not confirmation everything will work.
+    $pyCmdParts = @(Get-AnyPythonCmd)
 }
 if (-not $pyCmdParts[0]) {
     Fail "No working Python install found and it could not be installed automatically. `'python`' on PATH resolving to the Windows Store stub instead of a real install is the most common cause.`nInstall Python 3.12 from https://python.org (check 'Add to PATH' during install), then run this script again."
