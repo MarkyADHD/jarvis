@@ -1952,6 +1952,29 @@ def speak(text):
 LIVE_CODE_WATCH_INTERVAL_SECONDS = 5
 
 
+def startup_greeting():
+    """Spoken once per launch, queued early so it's one of the first
+    things heard. Weather is best-effort and deliberately isolated in
+    its own try -- fetch_weather_snapshot already catches its own
+    errors and just returns None on failure, but an unexpected error
+    surfacing here anyway (a future change, a weird edge case) must
+    still not take the base "Good day" greeting down with it."""
+    try:
+        greeting = f"Good day, {spoken_name()}. All systems fully operational."
+
+        try:
+            line = weather_summary_line()
+        except Exception as e:
+            log(f"Startup weather lookup failed: {e}")
+            line = None
+
+        if line:
+            greeting += f" Outside, {line}."
+        speak(greeting)
+    except Exception as e:
+        log(f"Startup greeting failed: {e}")
+
+
 def announce_code_changes_if_any():
     try:
         changed = code_watch_v1.check_for_code_changes()
@@ -2946,6 +2969,55 @@ def max_rain_chance_for_day(day):
     return highest
 
 
+def fetch_weather_snapshot():
+    """Fetches and parses current conditions + today/tomorrow's forecast
+    from wttr.in -- shared by weather_fast (voice command) and the
+    startup greeting, so there's exactly one place that knows how to
+    talk to this API. wttr.in geolocates by requesting IP server-side
+    (WEATHER_URL has no city in it on purpose), so this already follows
+    Jarvis wherever he's actually running -- no separate location lookup
+    needed, and nothing about the location gets logged (stream privacy).
+    Returns None on any failure -- callers decide how to handle that."""
+    try:
+        response = requests.get(
+            WEATHER_URL,
+            headers={"User-Agent": "Jarvis Local Assistant", "Accept": "application/json"},
+            timeout=WEATHER_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        current = data.get("current_condition", [{}])[0]
+        days = data.get("weather", [])
+
+        return {
+            "temp_c": current.get("temp_C", "?"),
+            "feels_c": current.get("FeelsLikeC", "?"),
+            "desc": get_weather_description(current),
+            "humidity": current.get("humidity", "?"),
+            "wind_kmph": current.get("windspeedKmph", "?"),
+            "today": days[0] if len(days) > 0 else {},
+            "tomorrow": days[1] if len(days) > 1 else {},
+        }
+    except Exception as e:
+        log(f"Weather fetch failed: {e}")
+        return None
+
+
+def weather_summary_line():
+    """Short spoken-friendly current-conditions sentence, no name/sign-
+    off -- meant to be dropped into a larger sentence (the startup
+    greeting) rather than stand alone the way weather_fast's replies
+    do. Returns None if the fetch failed."""
+    snap = fetch_weather_snapshot()
+    if not snap:
+        return None
+    return (
+        f"it's currently {snap['temp_c']} degrees Celsius and {snap['desc']}, "
+        f"feeling like {snap['feels_c']}"
+    )
+
+
 def weather_fast(command):
     c = normalize_transcript(command)
 
@@ -2959,26 +3031,18 @@ def weather_fast(command):
 
     log("Weather checked. Location hidden for stream privacy.")
 
+    snap = fetch_weather_snapshot()
+    if not snap:
+        return {"mode": "chat", "reply": f"I couldn't get the weather right now, {spoken_name()}.", "steps": []}
+
     try:
-        response = requests.get(
-            WEATHER_URL,
-            headers={"User-Agent": "Jarvis Local Assistant", "Accept": "application/json"},
-            timeout=WEATHER_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        current = data.get("current_condition", [{}])[0]
-        days = data.get("weather", [])
-
-        temp_c = current.get("temp_C", "?")
-        feels_c = current.get("FeelsLikeC", "?")
-        desc = get_weather_description(current)
-        humidity = current.get("humidity", "?")
-        wind_kmph = current.get("windspeedKmph", "?")
-
-        today = days[0] if len(days) > 0 else {}
-        tomorrow = days[1] if len(days) > 1 else {}
+        temp_c = snap["temp_c"]
+        feels_c = snap["feels_c"]
+        desc = snap["desc"]
+        humidity = snap["humidity"]
+        wind_kmph = snap["wind_kmph"]
+        today = snap["today"]
+        tomorrow = snap["tomorrow"]
 
         if "tomorrow" in c:
             if not tomorrow:
@@ -3569,6 +3633,7 @@ class JarvisApp:
         self.start_live_view()
         self.start_listening()
 
+        threading.Thread(target=startup_greeting, daemon=True).start()
         threading.Thread(target=prewarm_voice, daemon=True).start()
         threading.Thread(target=code_watch_loop, daemon=True).start()
         threading.Thread(target=preload_whisper, daemon=True).start()
