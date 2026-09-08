@@ -188,10 +188,29 @@ def _reply(text):
 
 def is_update_request(command):
     c = _norm(command)
-    return c in {
+
+    exact_phrases = {
         "check for updates", "check for an update", "jarvis check for updates",
         "any updates", "do you have any updates",
     }
+    if c in exact_phrases:
+        return True
+
+    # Narrow exact matching alone missed every natural way to actually
+    # ask for a self-update ("update yourself", "pull the latest from
+    # github") -- those fell through to the general conversational brain
+    # instead, which has no idea this deterministic, tested mechanism
+    # exists and can only guess/improvise an answer (confirmed the hard
+    # way: a real report of Jarvis claiming he "doesn't have open file
+    # access" to update himself -- not an error this module produces,
+    # so that request never reached it at all).
+    substring_phrases = [
+        "update yourself", "update jarvis", "self update", "self-update",
+        "pull the update", "pull the latest update", "pull the latest changes",
+        "update from github", "update your code", "update your own code",
+        "can you update", "update now",
+    ]
+    return any(phrase in c for phrase in substring_phrases)
 
 
 def _is_confirmation(command):
