@@ -35,6 +35,7 @@ import pygame
 import pyautogui
 import requests
 import jarvis_interrupt_v1 as interrupt_v1
+import jarvis_code_watch_v1 as code_watch_v1
 
 try:
     import mss
@@ -1948,6 +1949,16 @@ def speak(text):
         speak_queue.put(text)
 
 
+def announce_code_changes_if_any():
+    try:
+        changed = code_watch_v1.check_for_code_changes()
+        text = code_watch_v1.announcement_text(changed, spoken_name())
+        if text:
+            speak(text)
+    except Exception as e:
+        log(f"Code-change announcement failed: {e}")
+
+
 def prewarm_voice():
     preload_voice()
 
@@ -3532,6 +3543,7 @@ class JarvisApp:
         self.start_listening()
 
         threading.Thread(target=prewarm_voice, daemon=True).start()
+        threading.Thread(target=announce_code_changes_if_any, daemon=True).start()
         threading.Thread(target=preload_whisper, daemon=True).start()
         threading.Thread(target=prewarm_ollama, daemon=True).start()
         threading.Thread(target=prewarm_vision, daemon=True).start()
