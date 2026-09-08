@@ -208,6 +208,35 @@ if ($pyVerLine -notmatch "Python 3\.12") {
 # --- venv ---
 $venvPath = Join-Path $root "venv"
 $venvPython = Join-Path $venvPath "Scripts\python.exe"
+
+# A venv from an earlier, failed run of THIS SAME script (built before
+# the Python 3.12 detection above worked correctly) can already exist
+# on disk, pinned to whatever wrong Python version was found back then
+# (3.13+). "already exists, skip creation" used to trust that blindly --
+# so even after fixing detection above, re-running the installer kept
+# installing packages into the same stale, wrong-version venv and
+# hitting the identical kokoro failure forever, no matter how good the
+# detection got. Comparing the existing venv's actual Python version
+# against what was just detected, and rebuilding if they don't match,
+# is the only way a re-run can actually self-heal.
+$needsRebuild = $false
+if (Test-Path $venvPython) {
+    try {
+        $existingVer = & $venvPython --version
+        if ($LASTEXITCODE -ne 0 -or "$existingVer" -notmatch "Python 3\.12") {
+            Say "Existing virtual environment is on $existingVer, not 3.12 -- rebuilding it." "Yellow"
+            $needsRebuild = $true
+        }
+    } catch {
+        Say "Existing virtual environment's Python couldn't be checked -- rebuilding it." "Yellow"
+        $needsRebuild = $true
+    }
+}
+
+if ($needsRebuild) {
+    Remove-Item -Recurse -Force $venvPath -ErrorAction SilentlyContinue
+}
+
 if (-not (Test-Path $venvPython)) {
     Say "Creating virtual environment..."
     Invoke-Py -m venv $venvPath
@@ -215,7 +244,7 @@ if (-not (Test-Path $venvPython)) {
         Fail "Virtual environment creation failed -- $venvPython was never created. Check the output above for the real error."
     }
 } else {
-    Say "Virtual environment already exists, skipping creation."
+    Say "Virtual environment already exists and is on the right Python version, skipping creation."
 }
 
 $pip = Join-Path $venvPath "Scripts\pip.exe"
