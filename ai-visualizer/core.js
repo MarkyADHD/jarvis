@@ -71,6 +71,30 @@ const AV = (() => {
     _sndOn: true, _mic: false, _readyCbs: [], _ready: false,
   };
 
+  // Every face binds its own keyboard shortcuts (Space = cinematic
+  // flythrough, C, F, ...) straight onto window/document, with no idea
+  // the chat bar or settings panel inputs might exist and have focus.
+  // That ate every space bar keystroke typed into the chat box, since
+  // Space bubbles from the input up to those face-level listeners which
+  // preventDefault() it unconditionally.
+  //
+  // IMPORTANT: this must be a BUBBLE-phase listener, not capture-phase.
+  // A capture-phase stopPropagation() on document fires before the
+  // event ever reaches the input at all -- which was a real bug this
+  // exact fix introduced the first time around: it silently broke the
+  // chat bar's own Enter-to-send handler along with fixing Space, since
+  // neither the input's listeners nor anything else downstream ever
+  // got the event. Bubble phase (the default -- no third `true` arg)
+  // lets the input's own handlers run first during the target phase,
+  // then stops the event right there before it climbs any further up
+  // toward window's face-shortcut listener.
+  document.addEventListener("keydown", (e) => {
+    const t = e.target;
+    if (t && t.matches && t.matches("input, textarea")) {
+      e.stopPropagation();
+    }
+  });
+
   function dotted(name) {
     const up = String(name).toUpperCase();
     if (/^[A-Z0-9]{2,10}$/.test(up)) return up.split("").join(".") + ".";

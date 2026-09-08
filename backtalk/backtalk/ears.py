@@ -337,7 +337,7 @@ def transcribe(pcm: np.ndarray) -> str:
                                       verbose=None)["text"].strip()
     else:
         segments, _ = model.transcribe(audio, temperature=0.0, language=lang)
-        text = "".join(s.text for s in segments).strip()
+        text = " ".join(s.text.strip() for s in segments).strip()
     return _NONSPEECH.sub("", text).strip()
 
 
