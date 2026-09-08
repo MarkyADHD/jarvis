@@ -350,6 +350,25 @@ def known_app_launch(app_name):
             if path.exists():
                 return start_process_silent([str(path), "--processStart", "Discord.exe"])
 
+    # Browsers installed without admin rights (Firefox's default install
+    # mode since ~2021, and an option for Chrome) land per-user under
+    # LOCALAPPDATA rather than Program Files -- the generic search below
+    # only ever checked Program Files, so a per-user Firefox/Chrome
+    # install was invisible to it even though the app name was already
+    # in the `known` table below, same as Steam. That produced exactly
+    # this: "open Steam" works (Program Files install), "open Firefox"
+    # doesn't (per-user install), even though both apps were "taught"
+    # identically -- the gap was in where it looked, not what it knew.
+    per_user_candidates = {
+        "firefox": [local / "Mozilla Firefox" / "firefox.exe"],
+        "chrome": [local / "Google" / "Chrome" / "Application" / "chrome.exe"],
+        "google chrome": [local / "Google" / "Chrome" / "Application" / "chrome.exe"],
+    }
+    for name in names:
+        for path in per_user_candidates.get(name, []):
+            if path.exists():
+                return start_process_silent([str(path)])
+
     known = {
         "notepad": [["notepad.exe"]],
         "calculator": [["calc.exe"]],
