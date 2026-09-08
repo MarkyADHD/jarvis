@@ -380,6 +380,43 @@ if ($espeakFound) {
 
 Say ""
 Say "===================================================="
+Say "  Tailscale -- optional, for talking to Jarvis remotely"
+Say "===================================================="
+Say ""
+
+# Purely optional (unlike eSpeak NG above) -- Jarvis's remote-chat
+# server already runs fine without it, just LAN-only. Tailscale is what
+# makes "http://<tailscale-ip>:8792" reachable from your phone anywhere,
+# not just at home. Best-effort and silent about failure on purpose:
+# nothing else in Jarvis depends on this succeeding.
+$tailscaleExe = @(
+    "C:\Program Files\Tailscale\tailscale.exe",
+    "C:\Program Files (x86)\Tailscale\tailscale.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($tailscaleExe) {
+    Say "Found: $tailscaleExe"
+} else {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Say "Tailscale not found -- installing via winget..."
+        winget install --id tailscale.tailscale -e --accept-source-agreements --accept-package-agreements --silent
+        $tailscaleExe = @(
+            "C:\Program Files\Tailscale\tailscale.exe",
+            "C:\Program Files (x86)\Tailscale\tailscale.exe"
+        ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+    if ($tailscaleExe) {
+        Say "Installed: $tailscaleExe"
+        Say "One-time step whenever you want remote access: open a terminal and run 'tailscale up' -- it opens a browser to sign in. Then ask Jarvis 'what's my remote address' for the URL to use from your phone." "White"
+    } else {
+        Write-Host "Tailscale could not be installed automatically -- skipping, this is optional." -ForegroundColor Yellow
+        Write-Host "Install it yourself later if you want remote access: https://tailscale.com/download (or 'winget install tailscale.tailscale')" -ForegroundColor Yellow
+    }
+}
+
+Say ""
+Say "===================================================="
 Say "  Claude Code -- Jarvis's brain"
 Say "===================================================="
 Say ""
