@@ -10,6 +10,24 @@
 #>
 
 $ErrorActionPreference = "Stop"
+
+# Self-elevate if not already running as admin. The installer itself
+# runs elevated (creating C:\AI-Agent under an admin-owned ACL), but
+# this script can be launched two different ways afterward: the
+# installer's own "run now" prompt (already elevated, inherits it) or
+# the "Finish Setup" Start Menu shortcut launched later on its own
+# (NOT elevated by default). That second path could fail to write into
+# the venv or install packages with no visible error beyond a vague
+# permissions failure -- which is exactly what produced a venv that
+# looked like it worked but was actually missing packages, including
+# `requests`, one of the most basic ones. Self-elevating here removes
+# the ambiguity regardless of which way this got launched.
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`""
+    exit
+}
+
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 function Say($text, $color = "Cyan") { Write-Host $text -ForegroundColor $color }
