@@ -130,6 +130,13 @@ const AV = (() => {
 
     const style = document.createElement("style");
     style.textContent = `
+      /* Every face hides the OS cursor for a cinematic look, which made
+         real interactive UI (this bar, the settings gear/panel) hard to
+         navigate to since you couldn't see the mouse getting there.
+         !important beats each face's own cursor:none regardless of rule
+         order or specificity -- restoring it here, once, covers all four
+         faces instead of patching each one's own stylesheet. */
+      html, body { cursor: default !important; }
       #jarvisChatBar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
         z-index:100;width:min(46vw,560px);display:flex;gap:8px;
         pointer-events:auto;opacity:.55;transition:opacity .25s}
@@ -259,6 +266,36 @@ const AV = (() => {
         padding:4px 0;font-size:11px}
       #jarvisSettings .device span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #jarvisSettings .device button{padding:3px 7px;font-size:10px}
+
+      #jarvisTwitchBtn{position:fixed;top:16px;right:56px;z-index:110;width:30px;height:30px;
+        border-radius:50%;border:1px solid rgba(145,70,255,.4);background:rgba(10,14,18,.55);
+        color:#9146FF;font-size:15px;line-height:28px;text-align:center;cursor:pointer;
+        pointer-events:auto;opacity:.5;transition:opacity .2s;user-select:none}
+      #jarvisTwitchBtn:hover{opacity:1}
+      #jarvisTwitchBtn.open{opacity:1;background:rgba(145,70,255,.18)}
+      #jarvisTwitchPanel{position:fixed;top:54px;right:56px;z-index:109;width:300px;
+        pointer-events:auto;background:rgba(8,12,16,.92);border:1px solid rgba(145,70,255,.35);
+        border-radius:10px;padding:16px;backdrop-filter:blur(8px);
+        font:12px "SF Mono",Menlo,Consolas,monospace;color:#c8d6d8;
+        opacity:0;transform:translateY(-8px);transition:opacity .18s,transform .18s;
+        visibility:hidden}
+      #jarvisTwitchPanel.open{opacity:1;transform:translateY(0);visibility:visible}
+      #jarvisTwitchPanel h4{margin:0 0 8px;font-size:11px;letter-spacing:.14em;color:#9146FF;
+        text-transform:uppercase;border-bottom:1px solid rgba(145,70,255,.25);padding-bottom:6px}
+      #jarvisTwitchPanel .row{display:flex;gap:6px;margin-top:6px}
+      #jarvisTwitchPanel input{flex:1;min-width:0;background:rgba(255,255,255,.04);
+        border:1px solid rgba(145,70,255,.3);border-radius:6px;color:#e8f0f2;
+        font:11px "SF Mono",Menlo,Consolas,monospace;padding:6px 8px;outline:none;cursor:text}
+      #jarvisTwitchPanel input:focus{border-color:rgba(145,70,255,.7)}
+      #jarvisTwitchPanel button{background:rgba(145,70,255,.16);border:1px solid rgba(145,70,255,.45);
+        color:#c9a8ff;border-radius:6px;padding:6px 10px;font:11px "SF Mono",Menlo,Consolas,monospace;
+        cursor:pointer;white-space:nowrap}
+      #jarvisTwitchPanel button:hover{background:rgba(145,70,255,.28)}
+      #jarvisTwitchPanel button:disabled{opacity:.4;cursor:default}
+      #jarvisTwitchPanel .hint{color:#5a6a72;font-size:10px;line-height:1.5;margin-top:6px}
+      #jarvisTwitchPanel .status{font-size:10px;color:#5a6a72;margin-top:4px}
+      #jarvisTwitchPanel .status.ok{color:#c9a8ff}
+      #jarvisTwitchPanel .status.err{color:#ff8080}
     `;
     document.head.appendChild(style);
 
@@ -331,6 +368,139 @@ const AV = (() => {
       el.textContent = text;
       el.className = "status" + (kind ? " " + kind : "");
     }
+
+    /* ------------------------------ Twitch panel ------------------------------ */
+    // A separate button/panel from the gear settings on purpose -- this
+    // is meant to feel like its own "streamer centre", not one more
+    // section buried in general settings. Same token-gated local
+    // server underneath (jarvis_twitch_v1.py), same DPAPI secret
+    // storage as everything else in the settings panel.
+    const twitchBtn = document.createElement("div");
+    twitchBtn.id = "jarvisTwitchBtn";
+    twitchBtn.innerHTML = "&#128250;"; // TV-ish glyph; swapped for a real Twitch mark below if the font has one
+    twitchBtn.title = "Twitch";
+    document.body.appendChild(twitchBtn);
+
+    const twitchPanel = document.createElement("div");
+    twitchPanel.id = "jarvisTwitchPanel";
+    twitchPanel.innerHTML = `
+      <h4>Twitch</h4>
+      <div id="twitchStatus" class="status">checking...</div>
+      <div id="twitchConnectForm">
+        <div class="row">
+          <input id="twitchClientId" type="password" placeholder="Client ID">
+        </div>
+        <div class="row">
+          <input id="twitchClientSecret" type="password" placeholder="Client Secret">
+        </div>
+        <div class="row">
+          <button id="twitchConnect" style="flex:1">Save &amp; Connect</button>
+        </div>
+        <div class="hint">One-time setup: register a free app at
+          <b>dev.twitch.tv/console/apps</b> with the OAuth Redirect URL
+          set to exactly <b>http://localhost:8792/twitch/callback</b>,
+          then paste its Client ID and Secret above.</div>
+      </div>
+      <div id="twitchConnectedPanel" style="display:none">
+        <div class="row">
+          <input id="twitchTitle" placeholder="Stream title">
+        </div>
+        <div class="row">
+          <input id="twitchCategory" placeholder="Category (optional)">
+        </div>
+        <div class="row">
+          <button id="twitchUpdate" style="flex:1">Update</button>
+        </div>
+        <div class="row">
+          <button id="twitchDashboard" style="flex:1">Twitch Dashboard</button>
+        </div>
+        <button id="twitchDisconnect" style="width:100%;margin-top:6px">Disconnect</button>
+      </div>
+    `;
+    document.body.appendChild(twitchPanel);
+
+    let twitchOpen = false;
+    let twitchLogin = "";
+    function setTwitchOpen(v) {
+      twitchOpen = v;
+      twitchBtn.classList.toggle("open", twitchOpen);
+      twitchPanel.classList.toggle("open", twitchOpen);
+      if (twitchOpen) refreshTwitch();
+    }
+    twitchBtn.addEventListener("click", () => setTwitchOpen(!twitchOpen));
+
+    async function refreshTwitch() {
+      const statusEl = twitchPanel.querySelector("#twitchStatus");
+      const form = twitchPanel.querySelector("#twitchConnectForm");
+      const connected = twitchPanel.querySelector("#twitchConnectedPanel");
+      try {
+        const r = await fetch(api("/settings/twitch/status"), authed({ method: "GET" }));
+        const data = await r.json();
+        if (data.connected) {
+          twitchLogin = data.login || "";
+          form.style.display = "none";
+          connected.style.display = "block";
+          setStatus(statusEl, data.error ? data.error : `✓ connected as ${data.login}`, data.error ? "err" : "ok");
+          if (!data.error) {
+            twitchPanel.querySelector("#twitchTitle").value = data.title || "";
+            twitchPanel.querySelector("#twitchCategory").value = data.game_name || "";
+          }
+        } else {
+          form.style.display = "block";
+          connected.style.display = "none";
+          setStatus(statusEl, "not connected", "");
+        }
+      } catch (e) {
+        setStatus(statusEl, "server unreachable", "err");
+      }
+    }
+
+    twitchPanel.querySelector("#twitchConnect").addEventListener("click", async () => {
+      const clientId = twitchPanel.querySelector("#twitchClientId").value.trim();
+      const clientSecret = twitchPanel.querySelector("#twitchClientSecret").value.trim();
+      const statusEl = twitchPanel.querySelector("#twitchStatus");
+      if (!clientId || !clientSecret) { setStatus(statusEl, "enter both fields", "err"); return; }
+      setStatus(statusEl, "saving...");
+      try {
+        const r = await fetch(api("/settings/twitch/credentials"), authed({
+          method: "POST", body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+        }));
+        const data = await r.json();
+        if (!data.ok) { setStatus(statusEl, data.error || "save failed", "err"); return; }
+        const ur = await fetch(api("/settings/twitch/authorize_url"), authed({ method: "POST", body: "{}" }));
+        const udata = await ur.json();
+        if (!udata.ok) { setStatus(statusEl, udata.error || "couldn't build authorize link", "err"); return; }
+        window.open(udata.url, "_blank");
+        setStatus(statusEl, "approve in the new tab, then come back here", "ok");
+      } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+    });
+
+    twitchPanel.querySelector("#twitchUpdate").addEventListener("click", async () => {
+      const title = twitchPanel.querySelector("#twitchTitle").value.trim();
+      const category = twitchPanel.querySelector("#twitchCategory").value.trim();
+      const statusEl = twitchPanel.querySelector("#twitchStatus");
+      setStatus(statusEl, "updating...");
+      try {
+        const r = await fetch(api("/settings/twitch/update"), authed({
+          method: "POST", body: JSON.stringify({ title, category }),
+        }));
+        const data = await r.json();
+        setStatus(statusEl, data.ok ? "✓ updated" : (data.error || "update failed"), data.ok ? "ok" : "err");
+      } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+    });
+
+    twitchPanel.querySelector("#twitchDashboard").addEventListener("click", () => {
+      window.open(twitchLogin ? `https://dashboard.twitch.tv/u/${twitchLogin}` : "https://dashboard.twitch.tv", "_blank");
+    });
+
+    twitchPanel.querySelector("#twitchDisconnect").addEventListener("click", async () => {
+      const statusEl = twitchPanel.querySelector("#twitchStatus");
+      setStatus(statusEl, "disconnecting...");
+      try {
+        await fetch(api("/settings/twitch/disconnect"), authed({ method: "POST", body: "{}" }));
+        refreshTwitch();
+      } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+    });
 
     function renderNanoleafList(devices, def) {
       const list = panel.querySelector("#nanoleafList");

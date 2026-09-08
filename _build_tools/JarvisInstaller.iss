@@ -18,7 +18,7 @@
 
 #define AppName "JARVIS"
 #define AppPublisher "MarkyADHD"
-#define AppVersion "1.8"
+#define AppVersion "1.9"
 #define ExportDir "C:\JarvisExport"
 #define ArtDir "installer_art"
 
@@ -72,12 +72,14 @@ Name: "{commondesktop}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Para
 Name: "{commonstartup}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"; Comment: "Start Jarvis with Windows"
 
 [Run]
-; These three run in this exact order when checked, each waiting for
-; the previous one to finish (none are flagged `nowait` except the
-; final launch) -- so "Launch JARVIS now" landing after "Finish setup"
-; is not incidental: Jarvis has no venv to run in until that's done.
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_environment.ps1"""; Description: "Finish setup now (Python environment + Claude Code install and login -- takes a few minutes, and will ask you to sign in with your own Claude account)"; Flags: postinstall shellexec skipifsilent
-Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; Description: "Launch JARVIS now"; Flags: postinstall skipifsilent nowait runasoriginaluser
+; Deliberately ONE checkbox, not two. An earlier version had a separate
+; independent "Launch JARVIS now" entry after this one -- which broke
+; for a real user who unchecked "Finish setup" but left "Launch" checked,
+; producing "Unable to execute pythonw.exe: the system cannot find the
+; file specified" (no venv exists yet at that point). setup_environment.ps1
+; now launches Jarvis itself at the very end, where the venv's existence
+; is guaranteed rather than assumed from checkbox state.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_environment.ps1"""; Description: "Finish setup now (Python environment + Claude Code install and login -- takes a few minutes, and will ask you to sign in with your own Claude account -- launches JARVIS automatically when done)"; Flags: postinstall shellexec skipifsilent
 Filename: "{app}\FRIEND_SETUP.md"; Description: "Open the setup guide"; Flags: postinstall shellexec skipifsilent unchecked
 
 [UninstallDelete]

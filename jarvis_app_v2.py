@@ -40,6 +40,7 @@ import jarvis_keylight_v1 as keylight_v1
 import jarvis_nanoleaf_v1 as nanoleaf_v1
 import jarvis_hue_v1 as hue_v1
 import jarvis_update_check_v1 as update_check_v1
+import jarvis_twitch_v1 as twitch_v1
 import jarvis_room_lights_v1 as room_lights_v1
 import jarvis_shutdown_systems_v1 as shutdown_systems_v1
 import jarvis_interrupt_v1 as interrupt_v1
@@ -481,6 +482,10 @@ def quick_handle_command_v2(command):
     update_result = update_check_v1.update_command_fast(c, name, app)
     if update_result:
         return finish_plan_v3(update_result, c, name, "update_check")
+
+    twitch_result = twitch_v1.twitch_command_fast(c, name, app)
+    if twitch_result:
+        return finish_plan_v3(twitch_result, c, name, "twitch")
 
     # Core/system commands stay deterministic and fast.
     maintainer_result = maintainer_v1.maintainer_command_fast(c, name, app)

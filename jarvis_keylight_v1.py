@@ -511,7 +511,7 @@ def is_keylight_request(command):
 
 
 def _extract_percent(c):
-    m = re.search(r"\b(\d{1,3})\s*(?:%|percent)\b", c)
+    m = re.search(r"\b(\d{1,3})\s*(?:%|percent\b)", c)
     if not m:
         return None
 

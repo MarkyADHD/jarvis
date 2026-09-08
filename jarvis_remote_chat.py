@@ -46,6 +46,7 @@ from backtalk import mouth as backtalk_mouth
 import jarvis_settings_v1 as settings
 import jarvis_keylight_v1 as keylight
 import jarvis_hue_v1 as hue
+import jarvis_twitch_v1 as twitch
 
 
 def process_message(text: str) -> str:
@@ -212,6 +213,61 @@ def settings_hue_connect(host: str) -> dict:
 def settings_hue_disconnect() -> dict:
     ok, error = hue.disconnect_bridge()
     return {"ok": ok, "error": error}
+
+
+def settings_twitch_status() -> dict:
+    if not twitch.is_connected():
+        return {"connected": False}
+    try:
+        info = twitch.get_channel_info()
+        return {"connected": True, **info}
+    except Exception as e:
+        return {"connected": True, "error": str(e)}
+
+
+def settings_twitch_save_credentials(client_id: str, client_secret: str) -> dict:
+    try:
+        twitch.save_credentials(client_id, client_secret)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def settings_twitch_authorize_url() -> dict:
+    try:
+        return {"ok": True, "url": twitch.authorize_url()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def settings_twitch_update(title: str, category: str) -> dict:
+    try:
+        twitch.update_channel(title=title or None, category=category or None)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def settings_twitch_disconnect() -> dict:
+    twitch.disconnect()
+    return {"ok": True}
+
+
+TWITCH_CALLBACK_PAGE_OK = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Twitch connected</title>
+<style>body{{background:#0a0e14;color:#e8f4ff;font-family:sans-serif;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
+div{{text-align:center}}</style></head>
+<body><div><h2>&#9989; Connected as {login}</h2>
+<p>You can close this tab and go back to the HUD.</p></div></body></html>"""
+
+TWITCH_CALLBACK_PAGE_ERR = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Twitch connection failed</title>
+<style>body{{background:#0a0e14;color:#ff8080;font-family:sans-serif;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
+div{{text-align:center;max-width:480px}}</style></head>
+<body><div><h2>Connection failed</h2><p>{error}</p>
+<p>Close this tab and try again from the HUD.</p></div></body></html>"""
 
 
 PAGE = """<!doctype html>
@@ -488,6 +544,42 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(settings_status())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/twitch/status":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_twitch_status())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/twitch/callback":
+            # Twitch redirects the USER'S OWN BROWSER here after they
+            # approve the app -- not an API caller with our token, so
+            # this can't be behind _authorized(). Safe regardless: the
+            # `code` itself is Twitch's one-time secret, and this only
+            # ever does anything with a code that was actually issued
+            # for the credentials already saved locally.
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            code = (qs.get("code") or [""])[0]
+            error = (qs.get("error_description") or qs.get("error") or [""])[0]
+            if error:
+                body = TWITCH_CALLBACK_PAGE_ERR.format(error=error).encode("utf-8")
+            elif not code:
+                body = TWITCH_CALLBACK_PAGE_ERR.format(error="No authorization code received.").encode("utf-8")
+            else:
+                try:
+                    login = twitch.exchange_code(code)
+                    body = TWITCH_CALLBACK_PAGE_OK.format(login=login).encode("utf-8")
+                except Exception as e:
+                    body = TWITCH_CALLBACK_PAGE_ERR.format(error=str(e)).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -502,6 +594,12 @@ class Handler(BaseHTTPRequestHandler):
         "/settings/hue/discover": lambda d: settings_hue_discover(),
         "/settings/hue/connect": lambda d: settings_hue_connect(str(d.get("host", "")).strip()),
         "/settings/hue/disconnect": lambda d: settings_hue_disconnect(),
+        "/settings/twitch/credentials": lambda d: settings_twitch_save_credentials(
+            str(d.get("client_id", "")).strip(), str(d.get("client_secret", "")).strip()),
+        "/settings/twitch/authorize_url": lambda d: settings_twitch_authorize_url(),
+        "/settings/twitch/update": lambda d: settings_twitch_update(
+            str(d.get("title", "")).strip(), str(d.get("category", "")).strip()),
+        "/settings/twitch/disconnect": lambda d: settings_twitch_disconnect(),
     }
 
     def do_POST(self):

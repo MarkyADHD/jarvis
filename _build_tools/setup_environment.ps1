@@ -265,9 +265,36 @@ Say "===================================================="
 Say "  All done -- everything Jarvis needs is installed."
 Say "===================================================="
 Say ""
-Say "Launch Jarvis:" "White"
-Say "   $venvPath\Scripts\pythonw.exe `"$root\jarvis_app_v2.py`"" "Gray"
-Say "   (or just use the JARVIS shortcut on your Desktop / Start Menu)" "Gray"
+
+# Launch Jarvis for real, here, rather than as a separate installer
+# checkbox someone could tick independently of "Finish setup" -- that
+# earlier design let a real user uncheck Finish Setup but leave Launch
+# checked, producing "Unable to execute pythonw.exe: the system cannot
+# find the file specified" since the venv didn't exist yet. This point
+# in the script is the one place the venv's existence is guaranteed,
+# not assumed.
+#
+# This whole script is running elevated (self-elevated at the top), but
+# Jarvis itself should NOT run as admin -- launching it directly here
+# would inherit that. The standard de-elevation trick: hand a shortcut
+# to explorer.exe, which always runs at the logged-in user's own normal
+# integrity level regardless of what elevated process asked it to.
+Say "Launching Jarvis now..." "Green"
+try {
+    $tempLnk = Join-Path $env:TEMP "LaunchJarvis.lnk"
+    $wsh = New-Object -ComObject WScript.Shell
+    $sc = $wsh.CreateShortcut($tempLnk)
+    $sc.TargetPath = $venvPython.Replace("python.exe", "pythonw.exe")
+    $sc.Arguments = """$root\jarvis_app_v2.py"""
+    $sc.WorkingDirectory = $root
+    $sc.Save()
+    Start-Process "explorer.exe" -ArgumentList "`"$tempLnk`""
+} catch {
+    Write-Host "Couldn't auto-launch Jarvis -- start him from the Desktop/Start Menu shortcut instead." -ForegroundColor Yellow
+}
+
+Say ""
+Say "(or just use the JARVIS shortcut on your Desktop / Start Menu next time)" "Gray"
 Say ""
 Say "Add your own API keys / smart devices: click the gear icon in the" "White"
 Say "face HUD once Jarvis is running, or just tell him directly, e.g." "White"
