@@ -115,3 +115,25 @@ def announcement_text(changed_files, spoken_name="Sir"):
         return f"Code changes detected across {count} files, {spoken_name} -- {names}. Updated systems are now live."
 
     return f"Code changes detected across {count} files, {spoken_name}. Updated systems are now live."
+
+
+def runtime_announcement_text(changed_files, spoken_name="Sir"):
+    """Wording for a change detected WHILE Jarvis is already running --
+    deliberately different from announcement_text() above. Python
+    doesn't hot-reload an already-imported module, so a file edited
+    mid-session has NOT actually taken effect yet, unlike the startup
+    case where the new code just finished loading. Saying "now live"
+    here would be false; this needs a real restart first."""
+    count = len(changed_files)
+
+    if count == 0:
+        return None
+
+    if count == 1:
+        return f"Code change detected, {spoken_name}. {changed_files[0]} was just edited -- restart me to load it."
+
+    if count <= 3:
+        names = ", ".join(changed_files)
+        return f"Code changes detected, {spoken_name} -- {names}. Restart me to load them."
+
+    return f"Code changes detected across {count} files, {spoken_name}. Restart me to load them."
