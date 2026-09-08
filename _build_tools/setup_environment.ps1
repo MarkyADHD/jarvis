@@ -277,7 +277,12 @@ $pip = Join-Path $venvPath "Scripts\pip.exe"
 $reqFile = Join-Path $root "requirements.txt"
 
 if (Test-Path $reqFile) {
-    Say "Installing Python packages (this can take several minutes)..."
+    Say "Installing Python packages -- this downloads and builds ~200 packages" "Yellow"
+    Say "including PyTorch and other large AI/ML libraries. It can genuinely" "Yellow"
+    Say "take 10-20+ minutes depending on your internet speed and CPU, and" "Yellow"
+    Say "long stretches with NO new text printed are normal, not a freeze --" "Yellow"
+    Say "please don't close this window even if it looks stuck." "Yellow"
+    Say ""
     & $pip install -r $reqFile
     if ($LASTEXITCODE -ne 0) {
         Fail "pip install failed (exit code $LASTEXITCODE) -- see the pip output above for the real reason. Common causes: no internet connection, or a firewall/antivirus blocking pip. Fix that, then run this script again."

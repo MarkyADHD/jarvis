@@ -6,6 +6,8 @@ from pathlib import Path
 
 
 BRAIN_ROOT = Path("E:/JarvisMemory")
+if not BRAIN_ROOT.exists():
+    BRAIN_ROOT = Path("C:/AI-Agent/JarvisMemory")
 PROFILE_FILE = BRAIN_ROOT / "jarvis_profile.json"
 CONTEXT_FILE = BRAIN_ROOT / "jarvis_context.json"
 
