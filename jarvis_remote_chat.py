@@ -21,6 +21,8 @@ import json
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,6 +32,7 @@ import numpy as np
 sys.path.insert(0, r"C:\AI-Agent")
 
 PORT = 8792
+VISUALIZER_PORT = 8790
 TOKEN_FILE = Path(r"C:\AI-Agent\.remote_chat_token")
 if not TOKEN_FILE.exists():
     # First run on a machine that's never had this file (a fresh
@@ -525,9 +528,45 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _proxy_to_visualizer(self):
+        """Forwards this GET request to the ai-visualizer HUD server on
+        VISUALIZER_PORT (127.0.0.1 only -- it's never reachable directly
+        from Tailscale/LAN itself) and relays its response back
+        verbatim. This server (8792) is the one with a proven-working
+        Tailscale HTTPS mapping, mic access included -- making it the
+        single front door for both the chat API AND the HUD avoids
+        relying on `tailscale serve`'s path-based routing, which
+        testing showed to be unreliable in the installed CLI version
+        (silently 404s a deeper path depending on registration order,
+        confirmed the hard way against this exact machine's setup)."""
+        url = f"http://127.0.0.1:{VISUALIZER_PORT}{self.path}"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                body = resp.read()
+                self.send_response(resp.status)
+                self.send_header("Content-Type", resp.headers.get("Content-Type", "application/octet-stream"))
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        except urllib.error.HTTPError as e:
+            body = e.read() if hasattr(e, "read") else b""
+            self.send_response(e.code)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+        except Exception:
+            self.send_response(502)
+            self.end_headers()
+
     def do_GET(self):
         path = self.path.split("?")[0]
         if path == "/":
+            self._proxy_to_visualizer()
+        elif path == "/chat":
+            # The original plain text-only chat page -- kept reachable
+            # here as a lightweight fallback now that "/" serves the
+            # real HUD instead.
             body = PAGE.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -581,8 +620,11 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         else:
-            self.send_response(404)
-            self.end_headers()
+            # Anything not one of this server's own known routes above
+            # is HUD content -- /state (polled ~8x/sec), /config, and
+            # every static asset (core.js, face folders, etc.) that
+            # ai-visualizer's own server serves.
+            self._proxy_to_visualizer()
 
     _SETTINGS_ROUTES = {
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),
