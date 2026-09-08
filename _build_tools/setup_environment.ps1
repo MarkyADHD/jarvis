@@ -114,6 +114,31 @@ function Get-RealPythonCmd {
             if ($LASTEXITCODE -eq 0 -and "$v" -match "Python 3\.12") { return @("py", "-3.12") }
         } catch { }
     }
+
+    # `py -3.12` depends on Python having registered itself with the py
+    # launcher's own version registry (PEP 514) -- a real install proved
+    # this doesn't reliably happen for a SILENT winget install the way
+    # it does for an interactive one from python.org. That left a 3.12
+    # actually sitting on disk, installed successfully moments earlier
+    # by this very script, completely invisible to `py -3.12` -- so the
+    # script fell through to whatever unversioned "python" was on PATH
+    # (3.13), and hit the exact kokoro Python-version conflict this
+    # whole detection scheme exists to avoid. Checking the well-known
+    # install locations directly sidesteps launcher registration
+    # entirely for exactly this case.
+    $directPaths = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"),
+        "C:\Program Files\Python312\python.exe",
+        "C:\Program Files (x86)\Python312\python.exe"
+    )
+    foreach ($path in $directPaths) {
+        if (-not (Test-Path $path)) { continue }
+        try {
+            $v = & $path --version
+            if ($LASTEXITCODE -eq 0 -and "$v" -match "Python 3\.12") { return @($path) }
+        } catch { }
+    }
+
     foreach ($candidate in @("py", "python")) {
         $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
         if (-not $cmd) { continue }
