@@ -296,26 +296,29 @@ def ask_sync(prompt: str, timeout: float = 150.0) -> Dict[str, Any]:
     except Exception:
         signals = None
 
-    with _BRAIN_LOCK:
-        try:
-            result = _run_coro(_ask_stream_collect(prompt), timeout=timeout)
-        except Exception as e:
-            if signals is not None:
-                try:
-                    signals.set_state("idle")
-                except Exception:
-                    pass
-            return {"ok": False, "error": str(e), "result": ""}
+    try:
+        with _BRAIN_LOCK:
+            try:
+                result = _run_coro(_ask_stream_collect(prompt), timeout=timeout)
+            except Exception as e:
+                return {"ok": False, "error": str(e), "result": ""}
 
-    if not result:
+        if not result:
+            return {"ok": False, "error": "empty reply", "result": ""}
+
+        return {"ok": True, "error": "", "result": result}
+    finally:
+        # Whatever happens next (a fallback chain throwing before speak()
+        # is ever reached, a caller bug, anything) must not leave the face
+        # wedged on "thinking" forever -- see reset_face_state()'s docstring
+        # for the confirmed report this class of bug produces. speak(),
+        # if it runs, immediately overwrites this with "speaking" anyway,
+        # so resetting here on the success path costs nothing.
         if signals is not None:
             try:
                 signals.set_state("idle")
             except Exception:
                 pass
-        return {"ok": False, "error": "empty reply", "result": ""}
-
-    return {"ok": True, "error": "", "result": result}
 
 
 def _get_mouth():

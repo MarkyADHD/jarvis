@@ -26,25 +26,36 @@ can use another path, but then expect to hunt down and fix hardcoded
 ## 1. Prerequisites
 
 - **Python 3.12** (from python.org — check "Add to PATH" during install)
-- **Node.js** (needed for Claude Code)
-- **Claude Code**: `npm install -g @anthropic-ai/claude-code`, then run
-  `claude login` and sign in with **your own** Claude/Anthropic account.
-  This is the important part — Jarvis's brain runs on your login, kept
-  entirely separate from whoever gave you this copy.
+  — this one you need to install yourself first, nothing can do it for
+  you automatically
 - **Microsoft Edge** (used for the visual HUD window — usually already
   on Windows)
 - **[Tailscale](https://tailscale.com/download)** — only if you want to
   talk to Jarvis from your phone when away from this PC. Skip if you
   only want him running locally.
 
-## 2. Set up the main Jarvis environment
+Node.js and Claude Code do NOT need installing by hand — step 2 below
+handles both, including prompting you to sign in with your own Claude
+account.
 
-Open PowerShell in this folder and run:
+## 2. Run "Finish Setup"
 
-```powershell
-python -m venv venv
-.\venv\Scripts\pip install -r requirements.txt
-```
+Use the **"Finish Setup (run this first)"** shortcut from the Start
+Menu → JARVIS folder (or run `setup_environment.ps1` in this folder
+directly). It handles, in order:
+
+- Creating the Python virtual environment and installing packages
+- Installing Node.js via winget if it's missing
+- Installing Claude Code (`npm install -g @anthropic-ai/claude-code`)
+  if it's missing
+- Running `claude login` for you, if you're not already signed in on
+  this machine — **sign in with your own Claude/Anthropic account
+  here**, not whoever gave you this copy's. That's the whole point:
+  Jarvis's brain runs on YOUR login, and it's kept entirely separate.
+
+If any of that fails partway (no internet, Node install blocked by a
+work/school PC policy, etc.), it tells you exactly what to run by hand
+to pick up where it left off.
 
 ## 3. Set up the voice pipeline (backtalk)
 

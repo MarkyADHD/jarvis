@@ -71,7 +71,7 @@ Name: "{group}\Uninstall JARVIS"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_environment.ps1"""; Description: "Finish setup now (creates the Python environment -- takes a few minutes)"; Flags: postinstall shellexec skipifsilent
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_environment.ps1"""; Description: "Finish setup now (Python environment + Claude Code install and login -- takes a few minutes, and will ask you to sign in with your own Claude account)"; Flags: postinstall shellexec skipifsilent
 Filename: "{app}\FRIEND_SETUP.md"; Description: "Open the setup guide"; Flags: postinstall shellexec skipifsilent unchecked
 
 [UninstallDelete]

@@ -48,6 +48,7 @@ New-Item -ItemType Directory -Path $Destination | Out-Null
 Write-Host "Copying $Source -> $Destination (this takes a few minutes)..." -ForegroundColor Cyan
 
 $excludeDirs = @(
+    ".git",
     "venv", "backtalk\.venv", "backtalk\logs",
     "__pycache__", "build", "dist",
     "JarvisMemory", "voice_cache", "temp_screenshots",
@@ -68,7 +69,12 @@ $excludeFiles = @(
     "*.log",
     "jarvis_live_debug.log",
     "*_error.txt",
-    "*startup_error*"
+    "*startup_error*",
+    "*.bak_*",
+    "piper_windows_amd64.zip",
+    "vosk-model-*.zip",
+    "_hud_*.png",
+    "JarvisSetup.exe"
 )
 
 robocopy $Source $Destination /E /XD $excludeDirs /XF $excludeFiles /NFL /NDL /NJH /NP | Out-Null
