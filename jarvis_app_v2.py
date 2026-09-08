@@ -1844,12 +1844,6 @@ def install_v2(headless=False):
     behind it, forever."""
     refresh_spoken_name()
 
-    # Follow-up conversation window after the wake word: how long Jarvis
-    # keeps listening for a follow-up without needing "Jarvis" said again
-    # before it drops back to wake-word-only. Was 60s; shortened per the
-    # user's request.
-    app.CONVERSATION_TIMEOUT_SECONDS = 10
-
     try:
         maintainer_v1.install_error_hooks()
     except Exception:
