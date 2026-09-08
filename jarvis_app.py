@@ -466,6 +466,8 @@ def is_weather_or_location_request(text):
         "weather", "temperature", "forecast", "rain", "raining",
         "umbrella", "coat", "hoodie", "how cold", "how hot",
         "location", "where am i", "where i am",
+        "local news", "news near me", "news around here",
+        "news where i am", "what's happening near me", "whats happening near me",
     ]
     return any(trigger in lowered for trigger in triggers)
 
@@ -1505,6 +1507,71 @@ def make_direct_web_reply(query, web_data):
         "reply": "I found this online: " + "; ".join(useful[:3]) + f" {spoken_name()}.",
         "steps": [],
     }
+
+
+def local_news_fast(command):
+    """Handles 'local news' style requests by silently resolving the
+    IP-geolocated area (same wttr.in lookup weather uses) and folding it
+    into the search query, so results are actually local instead of
+    generic. The area itself is never logged or spoken on its own --
+    only used to build the query -- keeping the stream-privacy rule that
+    already applies to weather."""
+    c = normalize_transcript(command)
+
+    local_news_triggers = [
+        "local news", "news near me", "news around here",
+        "news where i am", "what's happening near me", "whats happening near me",
+    ]
+
+    if not any(trigger in c for trigger in local_news_triggers):
+        return None
+
+    if not WEB_AVAILABLE:
+        return {
+            "mode": "chat",
+            "reply": f"Internet mode is not loaded correctly, {spoken_name()}. The jarvis_web.py file is missing or broken.",
+            "steps": []
+        }
+
+    area = fetch_ip_area()
+    if not area:
+        return {
+            "mode": "chat",
+            "reply": f"I couldn't resolve your area for local news right now, {spoken_name()}. Tell me your city and I'll pull it directly.",
+            "steps": []
+        }
+
+    query = f"local news {area}"
+    log("Local news checked. Location hidden for stream privacy.")
+
+    try:
+        web_data = web_research(query, max_results=WEB_MAX_RESULTS)
+        web_context = format_web_context(web_data)
+
+        result_count = len((web_data or {}).get("results", []) or [])
+        page_count = len((web_data or {}).get("pages", []) or [])
+        log(f"Local news results found: {result_count}; pages read: {page_count}")
+
+        if not web_context:
+            return {
+                "mode": "chat",
+                "reply": f"I searched for local news but couldn't find anything reliable right now, {spoken_name()}.",
+                "steps": []
+            }
+
+        direct_reply = make_direct_web_reply(query, web_data)
+        if direct_reply and result_count > 0:
+            return direct_reply
+
+        return answer_with_web_context(c, web_context)
+
+    except Exception as e:
+        log(f"Local news fetch failed: {e}")
+        return {
+            "mode": "chat",
+            "reply": f"I couldn't get local news right now, {spoken_name()}.",
+            "steps": []
+        }
 
 
 def web_fast(command):
@@ -3004,6 +3071,32 @@ def fetch_weather_snapshot():
         return None
 
 
+def fetch_ip_area():
+    """Best-effort IP-geolocated city/region, reusing the same wttr.in
+    call weather already makes (WEATHER_URL has no city in it, so this
+    is IP geolocation server-side). Only ever used to build a search
+    query for things like local news -- never logged and never spoken
+    back on its own, keeping the same stream-privacy rule as weather.
+    Returns None on any failure."""
+    try:
+        response = requests.get(
+            WEATHER_URL,
+            headers={"User-Agent": "Jarvis Local Assistant", "Accept": "application/json"},
+            timeout=WEATHER_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        nearest = data.get("nearest_area", [{}])[0]
+        city = nearest.get("areaName", [{}])[0].get("value", "")
+        region = nearest.get("region", [{}])[0].get("value", "")
+        area = ", ".join(part for part in [city, region] if part)
+        return area or None
+    except Exception as e:
+        log(f"IP area lookup failed: {e}")
+        return None
+
+
 def weather_summary_line():
     """Short spoken-friendly current-conditions sentence, no name/sign-
     off -- meant to be dropped into a larger sentence (the startup
@@ -3400,6 +3493,10 @@ def quick_handle_command(command):
     weather_result = weather_fast(c)
     if weather_result:
         return weather_result
+
+    local_news_result = local_news_fast(c)
+    if local_news_result:
+        return local_news_result
 
     web_result = web_fast(c)
     if web_result:
