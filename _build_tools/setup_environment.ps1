@@ -279,13 +279,48 @@ $reqFile = Join-Path $root "requirements.txt"
 if (Test-Path $reqFile) {
     Say "Installing Python packages -- this downloads and builds ~200 packages" "Yellow"
     Say "including PyTorch and other large AI/ML libraries. It can genuinely" "Yellow"
-    Say "take 10-20+ minutes depending on your internet speed and CPU, and" "Yellow"
-    Say "long stretches with NO new text printed are normal, not a freeze --" "Yellow"
-    Say "please don't close this window even if it looks stuck." "Yellow"
+    Say "take 10-20+ minutes depending on your internet speed and CPU." "Yellow"
     Say ""
-    & $pip install -r $reqFile
-    if ($LASTEXITCODE -ne 0) {
-        Fail "pip install failed (exit code $LASTEXITCODE) -- see the pip output above for the real reason. Common causes: no internet connection, or a firewall/antivirus blocking pip. Fix that, then run this script again."
+
+    # pip streams live output fine during the download/collect phase, but
+    # goes almost completely silent for MINUTES during the final
+    # "Installing collected packages" unpack phase -- torch alone is a
+    # 124 MB wheel to extract. A real user reported exactly this: no new
+    # text for several minutes reads as a frozen window, and someone
+    # without dev background has no reason to trust otherwise, so they
+    # close it before it ever finishes.
+    #
+    # No output redirection at all -- UseShellExecute=$false with
+    # RedirectStandard*=$false (the default) makes the child process
+    # inherit this console's real output handle directly, so pip's own
+    # text still streams to the screen completely normally and in real
+    # time, exactly like `& $pip ...` does, with NO buffering/deadlock
+    # risk (that risk only exists when actually redirecting stdout/
+    # stderr, which needs the parent to actively pump the pipe or it can
+    # fill up and stall the child -- deliberately avoided here). This
+    # gets us one extra thing over plain `&`: a process handle to poll
+    # from this same script while pip runs, so a heartbeat line can be
+    # printed on top, independent of whatever pip itself is doing.
+    #
+    # Deliberately NOT using the Start-Process cmdlet with -PassThru for
+    # this -- tested directly and confirmed its returned object's
+    # ExitCode comes back $null even after WaitForExit(), which would
+    # have made `$pipProc.ExitCode -ne 0` ALWAYS true ($null -ne 0 is
+    # true in PowerShell) and reported every successful install as a
+    # failure. Going straight to System.Diagnostics.Process, confirmed
+    # working the same way, reads ExitCode correctly.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $pip
+    $psi.Arguments = "install -r `"$reqFile`""
+    $psi.UseShellExecute = $false
+    $pipProc = [System.Diagnostics.Process]::Start($psi)
+    $pipStart = Get-Date
+    while (-not $pipProc.WaitForExit(20000)) {
+        $elapsedMin = [Math]::Round(((Get-Date) - $pipStart).TotalMinutes, 1)
+        Write-Host "   ...still working ($elapsedMin min elapsed) -- long quiet stretches here are normal, not a freeze. Please keep this window open." -ForegroundColor DarkGray
+    }
+    if ($pipProc.ExitCode -ne 0) {
+        Fail "pip install failed (exit code $($pipProc.ExitCode)) -- see the pip output above for the real reason. Common causes: no internet connection, or a firewall/antivirus blocking pip. Fix that, then run this script again."
     }
     # pip can exit 0 while still not actually having installed everything
     # in rare partial-failure cases -- a real import check is the only way
