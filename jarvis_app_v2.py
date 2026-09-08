@@ -682,6 +682,10 @@ def quick_handle_command_v2(command):
     if app_result and family != "question":
         return finish_plan_v3(app_result, c, name, "desktop")
 
+    close_app_result = desktop.close_app_plan(c, name)
+    if close_app_result and family != "question":
+        return finish_plan_v3(close_app_result, c, name, "desktop")
+
     # Current/fresh facts are researched BEFORE legacy quick answers. This is
     # what makes release dates, prices, versions, schedules and current roles
     # behave like a modern assistant rather than stale local model knowledge.

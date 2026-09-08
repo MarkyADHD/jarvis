@@ -36,6 +36,7 @@ import pyautogui
 import requests
 import jarvis_interrupt_v1 as interrupt_v1
 import jarvis_code_watch_v1 as code_watch_v1
+import jarvis_network_health_v1 as network_health_v1
 
 try:
     import mss
@@ -229,7 +230,13 @@ AUDIO_SAMPLE_RATE = 16000
 AUDIO_BLOCK_SIZE = 1600
 CALIBRATION_SECONDS = 1.0
 MIN_SPEECH_SECONDS = 0.35
-SILENCE_AFTER_SPEECH_SECONDS = 0.4
+# 0.4s was cutting people off mid-sentence -- a normal thinking/breathing
+# pause between phrases is longer than that, so a couple of words then a
+# beat of silence was enough to get treated as a complete, finished
+# utterance and sent off for a reply before the rest of the sentence was
+# even said. 1.1s gives room for a natural pause without making Jarvis
+# feel sluggish to respond once someone's actually finished talking.
+SILENCE_AFTER_SPEECH_SECONDS = 1.1
 MAX_UTTERANCE_SECONDS = 14
 PRE_ROLL_CHUNKS = 4
 MIN_VOICE_THRESHOLD = 350
@@ -3733,6 +3740,11 @@ class JarvisApp:
         threading.Thread(target=startup_greeting, daemon=True).start()
         threading.Thread(target=prewarm_voice, daemon=True).start()
         threading.Thread(target=code_watch_loop, daemon=True).start()
+        threading.Thread(
+            target=network_health_v1.background_check_loop,
+            args=(sys.modules[__name__], spoken_name),
+            daemon=True,
+        ).start()
         threading.Thread(target=preload_whisper, daemon=True).start()
         threading.Thread(target=prewarm_ollama, daemon=True).start()
         threading.Thread(target=prewarm_vision, daemon=True).start()

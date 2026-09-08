@@ -6,6 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import psutil
+
 
 WAKE_WORDS = {
     "jarvis", "jervis", "javis", "javas", "jarvus", "travis", "charvis", "service"
@@ -37,6 +39,78 @@ OPEN_WORDS = [
     "show me",
     "pull up",
 ]
+
+CLOSE_WORDS = [
+    "close",
+    "quit",
+    "exit",
+    "kill",
+    "shut down",
+    "shutdown",
+    "end",
+]
+
+# Shared between known_app_launch (finding the exe to start) and
+# close_app (finding the process to end) -- was a local dict inside
+# known_app_launch only, which meant a "close app" feature would have
+# had to duplicate or drift from this same name-to-exe knowledge. One
+# table, used both directions.
+KNOWN_APP_EXES = {
+    "notepad": [["notepad.exe"]],
+    "calculator": [["calc.exe"]],
+    "calc": [["calc.exe"]],
+    "paint": [["mspaint.exe"]],
+    "cmd": [["cmd.exe"]],
+    "command prompt": [["cmd.exe"]],
+    "powershell": [["powershell.exe"]],
+    "chrome": [["chrome.exe"]],
+    "google chrome": [["chrome.exe"]],
+    "edge": [["msedge.exe"]],
+    "microsoft edge": [["msedge.exe"]],
+    "firefox": [["firefox.exe"]],
+    "spotify": [["spotify.exe"]],
+    "steam": [["steam.exe"]],
+    "vscode": [["code.exe"]],
+    "vs code": [["code.exe"]],
+    "visual studio code": [["code.exe"]],
+    "obs": [["obs64.exe"], ["obs.exe"]],
+    "obs studio": [["obs64.exe"], ["obs.exe"]],
+    "blender": [["blender.exe"]],
+}
+
+# Natural, polite phrasing ("can you open steam", "could you please
+# close spotify") was silently failing to match OPEN_WORDS/CLOSE_WORDS
+# at all, since parse_open_app/parse_close_app required the command to
+# START with one of those verbs exactly -- any leading filler made the
+# match fail entirely and fall through to a much less reliable fallback
+# (a vision-based autopilot that can claim "done" without having
+# actually done anything). Confirmed as the likely cause of "sometimes
+# works, sometimes doesn't" -- it tracked phrasing, not chance.
+LEADING_FILLER_PATTERNS = [
+    r"^hey[, ]+",
+    r"^can you[, ]+",
+    r"^could you[, ]+",
+    r"^would you[, ]+",
+    r"^will you[, ]+",
+    r"^do you mind[, ]+",
+    r"^please[, ]+",
+    r"^i want you to[, ]+",
+    r"^i need you to[, ]+",
+    r"^go ahead and[, ]+",
+    r"^just[, ]+",
+]
+
+
+def strip_leading_filler(text):
+    changed = True
+    while changed:
+        changed = False
+        for pattern in LEADING_FILLER_PATTERNS:
+            new_text = re.sub(pattern, "", text)
+            if new_text != text:
+                text = new_text
+                changed = True
+    return text.strip()
 
 APP_ALIASES = {
     "x": ["x", "twitter"],
@@ -103,6 +177,7 @@ def is_stop_command(command):
 
 def parse_open_app(command):
     c = strip_wake_word(command)
+    c = strip_leading_filler(c)
 
     for word in OPEN_WORDS:
         if c == word:
@@ -369,32 +444,9 @@ def known_app_launch(app_name):
             if path.exists():
                 return start_process_silent([str(path)])
 
-    known = {
-        "notepad": [["notepad.exe"]],
-        "calculator": [["calc.exe"]],
-        "calc": [["calc.exe"]],
-        "paint": [["mspaint.exe"]],
-        "cmd": [["cmd.exe"]],
-        "command prompt": [["cmd.exe"]],
-        "powershell": [["powershell.exe"]],
-        "chrome": [["chrome.exe"]],
-        "google chrome": [["chrome.exe"]],
-        "edge": [["msedge.exe"]],
-        "microsoft edge": [["msedge.exe"]],
-        "firefox": [["firefox.exe"]],
-        "spotify": [["spotify.exe"]],
-        "steam": [["steam.exe"]],
-        "vscode": [["code.exe"]],
-        "vs code": [["code.exe"]],
-        "visual studio code": [["code.exe"]],
-        "obs": [["obs64.exe"], ["obs.exe"]],
-        "obs studio": [["obs64.exe"], ["obs.exe"]],
-        "blender": [["blender.exe"]],
-    }
-
     for name in names:
-        if name in known:
-            for command in known[name]:
+        if name in KNOWN_APP_EXES:
+            for command in KNOWN_APP_EXES[name]:
                 exe = command[0]
                 if shutil.which(exe):
                     return start_process_silent(command)
@@ -597,6 +649,84 @@ def open_app_plan(command, spoken_name="Sir"):
         return None
 
     result = open_or_focus_app(app_name)
+    message = result.get("message", "")
+
+    return {
+        "mode": "action",
+        "reply": f"{message} {spoken_name}.",
+        "steps": []
+    }
+
+
+def parse_close_app(command):
+    c = strip_wake_word(command)
+    c = strip_leading_filler(c)
+
+    for word in CLOSE_WORDS:
+        if c == word:
+            return None
+
+        if c.startswith(word + " "):
+            app_name = c[len(word):].strip()
+            app_name = cleanup_app_name(app_name)
+            return app_name or None
+
+    return None
+
+
+def close_app(app_name):
+    """Ends every running process matching app_name's known exe name(s)
+    (falling back to a literal '<app_name>.exe' guess if it isn't in
+    KNOWN_APP_EXES), verified via psutil rather than firing a taskkill
+    and assuming it worked -- the actual count of processes found and
+    terminated is what the reply is based on, not an assumption."""
+    names = alias_names(app_name)
+
+    exe_targets = set()
+    for name in names:
+        if name in KNOWN_APP_EXES:
+            for command in KNOWN_APP_EXES[name]:
+                exe_targets.add(command[0].lower())
+
+    if not exe_targets:
+        # Not in the known table -- a plain "<name>.exe" guess covers a
+        # lot of real cases (discord.exe, notepad.exe-style simple
+        # apps) without needing every app pre-registered.
+        base = names[0].replace(" ", "")
+        if base:
+            exe_targets.add(f"{base}.exe")
+
+    matched = []
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            proc_name = (proc.info.get("name") or "").lower()
+            if proc_name in exe_targets:
+                proc.terminate()
+                matched.append(proc)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    if not matched:
+        return {"ok": False, "message": f"I couldn't find {app_name} running."}
+
+    _, alive = psutil.wait_procs(matched, timeout=3)
+    if alive:
+        for proc in alive:
+            try:
+                proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+    return {"ok": True, "message": f"Closed {app_name}."}
+
+
+def close_app_plan(command, spoken_name="Sir"):
+    app_name = parse_close_app(command)
+
+    if not app_name:
+        return None
+
+    result = close_app(app_name)
     message = result.get("message", "")
 
     return {
