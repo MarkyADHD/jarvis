@@ -27,11 +27,39 @@ $ErrorActionPreference = "Stop"
 # the ambiguity regardless of which way this got launched.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`""
+    # A real user hit this window flashing open and closing instantly
+    # with zero explanation. Root cause: Start-Process -Verb RunAs
+    # THROWS if the UAC prompt is declined or can't be shown (not a
+    # graceful failure) -- with $ErrorActionPreference=Stop and no
+    # -NoExit, an uncaught exception here just kills the window before
+    # anything gets a chance to print or pause. This is exactly why
+    # nothing after this point in the whole script can be trusted to
+    # run without its own safety net either -- see the try/finally
+    # wrapping everything below.
+    try {
+        Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`"" -ErrorAction Stop
+    } catch {
+        Write-Host ""
+        Write-Host "====================================================" -ForegroundColor Red
+        Write-Host "  Administrator approval is required to continue." -ForegroundColor Red
+        Write-Host "====================================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "The Windows permission prompt was declined, or couldn't be shown." -ForegroundColor Yellow
+        Write-Host "Run this again and click 'Yes' when Windows asks for permission." -ForegroundColor Yellow
+        Write-Host ""
+        Read-Host "Press Enter to close"
+    }
     exit
 }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Everything else in this script runs inside one big try/finally so that
+# ANY unexpected error -- not just the ones this script explicitly
+# checks for with Fail() -- prints something and pauses instead of the
+# window just vanishing, which is what actually happened to a real user
+# and gave them zero information to act on.
+try {
 
 function Say($text, $color = "Cyan") { Write-Host $text -ForegroundColor $color }
 
@@ -303,3 +331,22 @@ Say ""
 Say "Full details are in FRIEND_SETUP.md in this same folder." "Cyan"
 Say ""
 Read-Host "Press Enter to close"
+
+} catch {
+    # Catches anything NOT already handled by this script's own Fail()
+    # calls (those already print their own message and exit cleanly,
+    # which does not trigger this catch) -- this is the safety net for
+    # a genuinely unexpected error anywhere in the script, so the window
+    # always shows something and waits instead of silently vanishing.
+    Write-Host ""
+    Write-Host "====================================================" -ForegroundColor Red
+    Write-Host "  Something went wrong that this script didn't expect:" -ForegroundColor Red
+    Write-Host "====================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Full details, for reporting this:" -ForegroundColor Gray
+    Write-Host ($_ | Out-String) -ForegroundColor Gray
+    Write-Host ""
+    Read-Host "Press Enter to close"
+}
