@@ -94,16 +94,33 @@ function Get-RealPythonCmd {
     # silently never got installed). `py -3.12` asks the launcher for
     # that exact version if it's present, sidestepping the issue
     # instead of gambling on whatever "python"/"py" defaults to.
+    # Redirecting a native command's stderr AT ALL -- 2>&1, or even
+    # 2>$null -- combined with $ErrorActionPreference = "Stop" further
+    # up this script, throws a terminating NativeCommandError in
+    # PowerShell 5.1 the moment that command writes anything to stderr.
+    # Confirmed the hard way (a real user's window died here) and then
+    # confirmed again deliberately: `py -3.99 --version 2>$null` still
+    # throws "No suitable Python runtime found" even though the error
+    # text is being discarded, not merged -- it's the redirect itself
+    # that triggers it, not what's done with the output. Verified the
+    # actual fix too: no redirect at all, and the same failing command
+    # just returns an empty result with no exception, which is exactly
+    # the routine "not found" outcome this function needs to detect,
+    # not treat as fatal.
     $cmd = Get-Command py -ErrorAction SilentlyContinue
     if ($cmd) {
-        $v = (& py -3.12 --version) 2>&1 | Out-String
-        if ($v -match "Python 3\.12") { return @("py", "-3.12") }
+        try {
+            $v = & py -3.12 --version
+            if ($LASTEXITCODE -eq 0 -and "$v" -match "Python 3\.12") { return @("py", "-3.12") }
+        } catch { }
     }
     foreach ($candidate in @("py", "python")) {
         $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
         if (-not $cmd) { continue }
-        $v = (& $candidate --version) 2>&1 | Out-String
-        if ($v -match "Python 3\.") { return @($candidate) }
+        try {
+            $v = & $candidate --version
+            if ($LASTEXITCODE -eq 0 -and "$v" -match "Python 3\.") { return @($candidate) }
+        } catch { }
     }
     return $null
 }
@@ -152,7 +169,11 @@ function Invoke-Py {
     $pyExtra = @(if ($pyCmdParts.Count -gt 1) { $pyCmdParts[1..($pyCmdParts.Count - 1)] } else { @() })
     & $pyCmdParts[0] @pyExtra @args
 }
-$pyVerLine = (Invoke-Py --version) 2>&1 | Out-String
+try {
+    $pyVerLine = (Invoke-Py --version) | Out-String
+} catch {
+    $pyVerLine = ""
+}
 Say "Found: $($pyVerLine.Trim())"
 if ($pyVerLine -notmatch "Python 3\.12") {
     Write-Host "Warning: this is not Python 3.12, which is what requirements.txt was tested against." -ForegroundColor Yellow
@@ -184,8 +205,17 @@ if (Test-Path $reqFile) {
     # pip can exit 0 while still not actually having installed everything
     # in rare partial-failure cases -- a real import check is the only way
     # to be sure the environment actually works, not just that pip ran.
-    & $venvPython -c "import requests" 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    # No stderr redirect here on purpose -- see the note above
+    # Get-RealPythonCmd about why that throws instead of just failing.
+    # This exact line would otherwise crash the moment `import requests`
+    # legitimately fails, which is precisely the case it exists to catch.
+    try {
+        & $venvPython -c "import requests"
+        $importOk = ($LASTEXITCODE -eq 0)
+    } catch {
+        $importOk = $false
+    }
+    if (-not $importOk) {
         Fail "Packages were installed but a basic import check (requests) still failed. Try running manually to see the real error:`n  $pip install -r `"$reqFile`""
     }
     Say "Package install verified."
