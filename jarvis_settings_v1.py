@@ -189,6 +189,54 @@ def _unprotect(value):
         return ""
 
 
+def encrypt_blob(text, description="Jarvis Data"):
+    """General-purpose DPAPI encryption for whole files (jarvis_memory_v2's
+    profile/long-memory/recent-context files), not just single secret
+    strings -- same CryptProtectData mechanism as _protect() above, kept
+    as one shared implementation rather than a second copy. Tied to this
+    Windows user account: protects the files if the drive is stolen,
+    cloned, or read on another machine without this login. Does NOT
+    protect against live malware already running as this same Windows
+    user -- that's a fundamentally different threat DPAPI was never
+    designed to stop (confirmed and explained to the user before this
+    was built, not glossed over). Falls back to returning the plaintext
+    unchanged if DPAPI isn't available, rather than losing data."""
+    text = str(text or "")
+    if not text or not DPAPI_AVAILABLE:
+        return text
+
+    try:
+        encrypted = win32crypt.CryptProtectData(
+            text.encode("utf-8"), description, None, None, None, 0,
+        )
+        return "dpapi:" + base64.b64encode(encrypted).decode("ascii")
+    except Exception:
+        return text
+
+
+def decrypt_blob(value):
+    """Returns the decrypted text, the value unchanged if it was never
+    encrypted (plaintext -- covers every existing user's files before
+    this shipped: read once as plaintext, the next save encrypts it,
+    transparent in-place migration with no separate migration step), or
+    None if it WAS encrypted but couldn't be decrypted (wrong machine,
+    corrupted, DPAPI unavailable) -- callers should treat None as
+    "unreadable", not silently swallow it as empty content."""
+    value = str(value or "")
+    if not value.startswith("dpapi:"):
+        return value
+
+    if not DPAPI_AVAILABLE:
+        return None
+
+    try:
+        raw = base64.b64decode(value[6:].encode("ascii"))
+        _, decrypted = win32crypt.CryptUnprotectData(raw, None, None, None, 0)
+        return decrypted.decode("utf-8")
+    except Exception:
+        return None
+
+
 def load_secrets():
     raw = _read_json(SECRETS_PATH, {})
     if not isinstance(raw, dict):

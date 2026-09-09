@@ -6,6 +6,8 @@ import requests
 from datetime import datetime
 from pathlib import Path
 
+import jarvis_settings_v1 as _settings_v1
+
 
 def choose_memory_root():
     preferred = Path("E:/JarvisMemory")
@@ -254,17 +256,32 @@ def clean_noisy_command(command):
 
 
 def read_json(path, default):
+    """Encrypted at rest via DPAPI (jarvis_settings_v1.decrypt_blob) --
+    protects this file if the drive is stolen/cloned/read on another
+    machine, tied to this Windows account. Transparently reads an
+    existing PLAINTEXT file unchanged too (decrypt_blob returns
+    non-"dpapi:" content as-is) -- an existing user's file gets
+    encrypted automatically the next time it's saved, no separate
+    migration step needed."""
     try:
         if not path.exists():
             return default
-        return json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8")
+        text = _settings_v1.decrypt_blob(raw)
+        if text is None:
+            # Was encrypted but couldn't be decrypted (wrong machine,
+            # corrupted) -- fail safe to the caller's default rather
+            # than crash or silently treat unreadable data as empty.
+            return default
+        return json.loads(text)
     except Exception:
         return default
 
 
 def write_json(path, data):
     MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    text = json.dumps(data, indent=2, ensure_ascii=False)
+    path.write_text(_settings_v1.encrypt_blob(text, "Jarvis Memory"), encoding="utf-8")
 
 
 def load_profile():
@@ -364,25 +381,33 @@ def add_known_fact(fact):
 
 
 def load_long_memories():
+    """Same DPAPI-at-rest protection as read_json() above, applied to the
+    whole jsonl file as one blob (write_long_memories already rewrites
+    the entire file every call, never appends, so this doesn't change
+    that behavior). Reads an existing plaintext file unchanged too --
+    transparent migration on the next write, no separate step."""
     MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
 
     if not LONG_MEMORY_FILE.exists():
         return []
 
+    raw = LONG_MEMORY_FILE.read_text(encoding="utf-8", errors="replace")
+    text = _settings_v1.decrypt_blob(raw)
+    if text is None:
+        return []
+
     items = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
 
-    with open(LONG_MEMORY_FILE, "r", encoding="utf-8", errors="replace") as file:
-        for line in file:
-            line = line.strip()
-            if not line:
-                continue
-
-            try:
-                item = json.loads(line)
-                if isinstance(item, dict):
-                    items.append(item)
-            except Exception:
-                continue
+        try:
+            item = json.loads(line)
+            if isinstance(item, dict):
+                items.append(item)
+        except Exception:
+            continue
 
     return items
 
@@ -390,9 +415,8 @@ def load_long_memories():
 def write_long_memories(items):
     MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
 
-    with open(LONG_MEMORY_FILE, "w", encoding="utf-8") as file:
-        for item in items:
-            file.write(json.dumps(item, ensure_ascii=False) + "\n")
+    text = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in items)
+    LONG_MEMORY_FILE.write_text(_settings_v1.encrypt_blob(text, "Jarvis Memory"), encoding="utf-8")
 
 
 def remember_memory(kind, text, tags=None, importance=3, source="user"):

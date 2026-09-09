@@ -1,4 +1,11 @@
-
+"""One-off historical cleanup script, not imported anywhere in the live
+app (confirmed via repo-wide grep). NOTE: memory files are now encrypted
+at rest via DPAPI (jarvis_memory_v2.read_json/write_json) -- this script
+still reads/writes them as raw plaintext JSON directly, so running it
+against an already-encrypted file will fail to parse rather than
+silently corrupt anything (json.loads on ciphertext just raises). If
+this is ever needed again, route it through jarvis_memory_v2's own
+read_json/write_json instead of opening these files directly."""
 import json
 import re
 from pathlib import Path
