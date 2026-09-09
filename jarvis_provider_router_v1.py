@@ -259,7 +259,37 @@ def list_effort_levels(provider_id):
 
 
 def find_cli(name):
-    return shutil.which(name) if name else None
+    """Not just shutil.which() -- confirmed as a real reported bug:
+    "switched to codex, it said not installed, it installed it, still
+    says not installed." Root cause: shutil.which() only sees directories
+    already in THIS process's PATH environment variable, snapshotted when
+    Jarvis itself started. A freshly-run `npm install -g` places the new
+    .cmd shim in %APPDATA%\\npm -- if that directory wasn't already on
+    Jarvis's PATH at process start (a real possibility the very first
+    time any of these get installed, especially right after Node.js
+    itself was just set up in a different process), shutil.which() keeps
+    returning None forever, even though the file is sitting right there
+    on disk, until Jarvis is restarted. jarvis_claude_code_v1's own
+    Claude lookup already works around exactly this with a hardcoded
+    %APPDATA%\\npm fallback that checks the file directly instead of
+    trusting PATH -- this mirrors that same proven pattern for every
+    other npm-installed provider CLI instead of leaving them exposed to
+    the same gap Claude was already patched against."""
+    if not name:
+        return None
+
+    found = shutil.which(name)
+    if found:
+        return found
+
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        npm_dir = Path(appdata) / "npm"
+        for candidate in (npm_dir / f"{name}.cmd", npm_dir / f"{name}.exe", npm_dir / name):
+            if candidate.exists():
+                return str(candidate)
+
+    return None
 
 
 def _ollama_list_models():
