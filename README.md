@@ -91,21 +91,21 @@ canned replies.
 ### Design your thumbnails — JarvisThumbnails
 - Say "make me a thumbnail for my GTA stream" and he'll actually generate
   one — real image generation, not a template filler
-- Drop your favorite creators' thumbnails (Vanoss, SMii7Y, whoever) into
-  `Jarvis Thumbnails\Style References` and he'll match that visual
-  style automatically — bold outlined text, exaggerated expressions,
-  high-contrast pop backgrounds — instead of guessing at a generic look.
-  He's explicitly told to copy the STYLE only, never the actual people/
-  characters/mascots in those images — those belong to other creators
-- Drop your own face, character renders, or logos into
-  `Jarvis Thumbnails\My Assets` and those are what actually get
-  featured as the subject of the thumbnail
-- Say "edit this thumbnail to say COMEBACK KING" to change text/colors/
-  elements on the last one he made, instead of starting over
-- Runs on a free Google Gemini API key (separate from your Claude
-  subscription, no credit card needed) — Claude itself is text-only and
-  can't generate images at any tier, so this is the one feature in
-  Jarvis that leans on a second AI provider
+- Genuinely free, no API key, no account, no card — runs on Pollinations.ai's
+  free image endpoint. Claude itself is text-only and can't generate
+  images at any tier, so this is the one feature in Jarvis that leans on
+  a second image source, and this one needs zero setup
+- Having anything saved in `Jarvis Thumbnails\Style References` nudges
+  the look toward bold outlined text, exaggerated expressions, and
+  high-contrast pop backgrounds instead of a generic composition — he's
+  explicitly told to never depict the actual people/characters/mascots
+  from other creators' content, style influence only
+- Having anything in `Jarvis Thumbnails\My Assets` tells him to feature
+  your own streaming character/persona as the subject
+- Say "edit this thumbnail to say COMEBACK KING" to generate a revised
+  version with that change folded in — this regenerates a fresh image
+  from an updated description rather than truly editing the same pixels,
+  since the free backend doesn't support image-in/image-out
 - Saved to `Jarvis Thumbnails` on your desktop, folder opens
   automatically the moment it's ready
 

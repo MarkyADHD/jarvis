@@ -102,11 +102,34 @@ def _safe_filename(text):
     return text[:60] or "thumbnail"
 
 
+# Distilled by actually looking at the user's saved Style References
+# (VanossGaming/Terroriser/H2ODelirious/SMii7Y-crew thumbnails) since the
+# free Pollinations backend can't take those images as literal input the
+# way Gemini could. This is what that folder's thumbnails consistently
+# look like: cel-shaded cartoon-illustration style (not photoreal),
+# thick bold black outlines around every subject, big round white
+# cartoon eyes with exaggerated shocked/angry/screaming expressions,
+# bold chunky text banners with thick white outlines and drop shadow
+# (often diagonal), high-contrast complementary-color backgrounds
+# (rainbow gradients or comic-style speed lines/bursts), and dramatic
+# accent props (money, weapons, blood splatter, explosions) tied to the
+# subject. If the reference folder changes style, update this text.
+STYLE_REFERENCE_DESCRIPTION = (
+    "cel-shaded cartoon illustration style (not photorealistic), thick "
+    "bold black outlines around every character and object, big round "
+    "white cartoon eyes with an exaggerated shocked or angry expression, "
+    "chunky bold text banner with a thick white outline and drop shadow, "
+    "high-contrast complementary-color background with rainbow gradient "
+    "or comic-style speed lines, dramatic accent props tied to the scene"
+)
+
+
 def generate_thumbnail(subject, edit_image_path=None):
     """Generates a new thumbnail (or edits one if edit_image_path is given)
     via Pollinations.ai's free text-to-image endpoint. There's no image-input
-    support on this free backend, so Style References/My Assets only inform
-    the prompt as text notes rather than being fed in as literal image
+    support on this free backend, so Style References/My Assets inform the
+    prompt as a text description (STYLE_REFERENCE_DESCRIPTION, distilled by
+    hand from the actual reference images) rather than literal image
     conditioning. Returns the saved output Path."""
     has_style_refs = _has_images(STYLE_REFERENCES_DIR)
     has_my_assets = _has_images(MY_ASSETS_DIR)
@@ -126,7 +149,7 @@ def generate_thumbnail(subject, edit_image_path=None):
         if has_my_assets:
             prompt += " Feature the streamer's own character/logo prominently as the subject."
         if has_style_refs:
-            prompt += " Match the aggressive, eye-catching style of top gaming thumbnails."
+            prompt += f" Art style: {STYLE_REFERENCE_DESCRIPTION}."
 
     url = POLLINATIONS_URL.format(prompt=urllib.parse.quote(prompt)) + "?width=1280&height=720&nologo=true"
     response = requests.get(url, timeout=90)
