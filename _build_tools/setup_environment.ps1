@@ -456,6 +456,36 @@ if ($ollamaExe) {
 
 Say ""
 Say "===================================================="
+Say "  FFmpeg -- audio/video for the mobile voice page and clipping"
+Say "===================================================="
+Say ""
+
+# Optional, same reasoning as Tailscale/Ollama above. Confirmed this was
+# NEVER installed by this script -- it only worked on the dev machine
+# because ffmpeg happened to already be there from something unrelated.
+# Without it: the mobile HUD's voice page can't decode a phone's
+# recording, and JarvisClipper (VOD highlight clipping) can't read or
+# cut any video at all.
+$ffmpegExe = Get-Command ffmpeg -ErrorAction SilentlyContinue
+if ($ffmpegExe) {
+    Say "Found: $($ffmpegExe.Source)"
+} else {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Say "FFmpeg not found -- installing via winget..."
+        winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements --silent
+        $ffmpegExe = Get-Command ffmpeg -ErrorAction SilentlyContinue
+    }
+    if ($ffmpegExe) {
+        Say "Installed: $($ffmpegExe.Source)"
+    } else {
+        Write-Host "FFmpeg could not be installed automatically -- skipping, this is optional." -ForegroundColor Yellow
+        Write-Host "The mobile voice page and JarvisClipper need it -- install yourself later: https://www.gyan.dev/ffmpeg/builds/ (or 'winget install Gyan.FFmpeg'), then open a NEW terminal so PATH updates." -ForegroundColor Yellow
+    }
+}
+
+Say ""
+Say "===================================================="
 Say "  Claude Code -- Jarvis's brain"
 Say "===================================================="
 Say ""
