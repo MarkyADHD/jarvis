@@ -2,7 +2,8 @@
 
 **A personal AI assistant that can work on himself.**
 
-Created by **MarkyADHD**.
+Created by **MarkyADHD**. Tested by **TreeLoc**, right alongside him
+building this.
 
 ---
 
@@ -14,10 +15,12 @@ most assistants — he can actually open his own source code and change
 it when you ask him to. Fix a bug, add a feature, tune his
 personality: just tell him, the same way you'd ask a developer.
 
-He runs on your own [Claude](https://claude.com) account (via Claude
-Code), so the "brain" behind him is the real thing — genuine reasoning
-and real tool access, not a scripted chatbot with a fixed set of
-canned replies.
+His "brain" is genuine reasoning and real tool access, not a scripted
+chatbot with a fixed set of canned replies — and you get to pick what
+powers it: your own [Claude](https://claude.com) account, Gemini,
+Codex, and others, or a completely free local AI that needs no account
+at all. See [Run on a different brain](#run-on-a-different-brain)
+below.
 
 ## What can he actually do?
 
@@ -290,6 +293,17 @@ occasionally" project.
 
 Either way, your own memory, API keys, and settings live outside the
 tracked files and are never touched by an update.
+
+Jarvis moves fast — check the **[Releases page](../../releases)** for
+the full changelog of what's changed recently, version by version.
+
+## Credits & Support
+
+Created by **MarkyADHD**. Tested by **TreeLoc**, right alongside him —
+a huge amount of what works today only works because of that.
+
+Need help, found a bug, or just want to hang out with other people
+running Jarvis? **[discord.gg/marky](https://discord.gg/marky)**
 
 ## License
 
