@@ -189,8 +189,12 @@ def settings_ai_switch(provider_id: str, confirm_install: bool) -> dict:
         return {"ok": False, "error": "unknown provider"}
 
     ready, reason = provider_router.is_ready(provider_id)
+    # Real reported bug: checking `not ready` alone treated a missing
+    # API key the same as a missing CLI, offering to "install" something
+    # already genuinely installed. cli_missing() asks the actual question.
+    cli_missing = provider_router.cli_missing(provider_id)
 
-    if not ready and meta.get("install_cmd") and not confirm_install:
+    if cli_missing and meta.get("install_cmd") and not confirm_install:
         return {
             "ok": False,
             "needs_install": True,
@@ -198,7 +202,7 @@ def settings_ai_switch(provider_id: str, confirm_install: bool) -> dict:
             "label": meta["label"],
         }
 
-    if not ready and meta.get("install_cmd") and confirm_install:
+    if cli_missing and meta.get("install_cmd") and confirm_install:
         ok, error = provider_router.install_provider(provider_id)
         if not ok:
             return {"ok": False, "error": f"Install failed: {error}"}

@@ -435,6 +435,33 @@ def is_ready(provider_id):
     return True, ""
 
 
+def cli_missing(provider_id):
+    """Genuinely real bug, confirmed live: every caller offering "install
+    this?" was checking `not is_ready(provider_id)` -- but is_ready()
+    returns False for TWO completely different reasons (CLI not found,
+    OR CLI found fine but the API key isn't set yet), and every caller
+    treated both the same way, offering to install a CLI that was
+    already sitting right there on disk just because the key was
+    missing. A user with Codex genuinely installed, just missing an
+    OpenAI key, got told "isn't installed yet, install it now?" instead
+    of the actually-correct "needs an API key" -- installing again would
+    have done nothing, the real fix was always the key. This is the
+    one specific question every install-prompt call site should
+    actually be asking instead of reusing is_ready() for it."""
+    meta = PROVIDERS.get(provider_id)
+    if not meta:
+        return False
+
+    if provider_id == "claude":
+        return claude_v1.find_cli() is None
+    if provider_id == "ollama":
+        return False  # nothing to "install" here in the CLI sense
+    if not meta.get("cli_name"):
+        return False
+
+    return find_cli(meta["cli_name"]) is None
+
+
 def install_provider(provider_id, progress_cb=None):
     meta = PROVIDERS.get(provider_id)
     if not meta or not meta.get("install_cmd"):
@@ -776,7 +803,7 @@ def _run_switch_job(app_module, spoken_name, provider_id):
     meta = PROVIDERS[provider_id]
     ready, reason = is_ready(provider_id)
 
-    if not ready and meta.get("install_cmd"):
+    if not ready and cli_missing(provider_id) and meta.get("install_cmd"):
         def note(msg):
             try:
                 app_module.log(f"Brain switch: {msg}")

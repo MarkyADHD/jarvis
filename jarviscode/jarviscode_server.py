@@ -349,7 +349,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({
                     "ready": ready,
                     "reason": reason,
-                    "needs_install": (not ready) and bool(meta.get("install_cmd")),
+                    # Real reported bug: this used to fire whenever ready
+                    # was False for ANY reason, including a missing API
+                    # key on an already-installed CLI -- telling a user
+                    # with Codex genuinely installed that it "isn't
+                    # installed yet." router.cli_missing() checks the one
+                    # thing that actually matters here.
+                    "needs_install": router.cli_missing(provider_id) and bool(meta.get("install_cmd")),
                     "install_summary": " ".join(meta["install_cmd"]) if meta.get("install_cmd") else "",
                 })
                 return
@@ -437,7 +443,16 @@ class Handler(BaseHTTPRequestHandler):
                 confirm_install = bool(body.get("confirm_install"))
                 ready, reason = router.is_ready(provider_id)
 
-                if not ready and meta.get("install_cmd") and not confirm_install:
+                # Real reported bug: used to check `not ready` alone --
+                # true for a missing API key just as much as a missing
+                # CLI, so a genuinely-installed Codex with no key yet
+                # got offered "install it?" instead of the real fix
+                # ("add your key"). cli_missing() asks the one question
+                # that actually matters for whether installing would
+                # help at all.
+                cli_missing = router.cli_missing(provider_id)
+
+                if cli_missing and meta.get("install_cmd") and not confirm_install:
                     # Ask before installing anything, per explicit
                     # instruction -- the frontend shows a confirm dialog
                     # and re-sends this same request with confirm_install
@@ -450,7 +465,7 @@ class Handler(BaseHTTPRequestHandler):
                     })
                     return
 
-                if not ready and meta.get("install_cmd") and confirm_install:
+                if cli_missing and meta.get("install_cmd") and confirm_install:
                     ok, error = router.install_provider(provider_id)
                     if not ok:
                         self._send_json({"ok": False, "error": f"Install failed: {error}"})
