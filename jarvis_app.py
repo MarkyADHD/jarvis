@@ -2750,7 +2750,7 @@ def scale_action_to_real_screen(action, frame):
 
 def vision_prompt():
     return f"""
-You are Jarvis, a private screen-vision assistant.
+You are JarvisVision, Jarvis's private screen-vision assistant.
 
 You are looking at a screenshot from the user's own computer.
 
@@ -2829,12 +2829,12 @@ def screen_vision_fast(command):
     if vision_lock.locked():
         return {
             "mode": "chat",
-            "reply": f"I am already looking at the screen, {spoken_name()}.",
+            "reply": f"JarvisVision is already looking at the screen, {spoken_name()}.",
             "steps": []
         }
 
     question = clean_vision_question(command)
-    log("Screen vision requested. Live frame contents hidden for stream privacy.")
+    log("JarvisVision requested. Live frame contents hidden for stream privacy.")
 
     try:
         with vision_lock:
@@ -2847,10 +2847,14 @@ def screen_vision_fast(command):
         return {"mode": "chat", "reply": answer, "steps": []}
 
     except Exception as e:
-        log(f"Screen vision failed: {e}")
+        log(f"JarvisVision failed: {e}")
         return {
             "mode": "chat",
-            "reply": f"I couldn't analyse the screen right now, {spoken_name()}.",
+            "reply": (
+                f"JarvisVision couldn't analyse the screen right now, {spoken_name()}. "
+                f"If this keeps happening, Ollama and the qwen2.5vl:7b model may not be "
+                f"installed -- setup_environment.ps1 installs both automatically."
+            ),
             "steps": []
         }
 

@@ -417,6 +417,45 @@ if ($tailscaleExe) {
 
 Say ""
 Say "===================================================="
+Say "  JarvisVision -- optional, lets Jarvis see your screen"
+Say "===================================================="
+Say ""
+
+# Optional, same reasoning as Tailscale above -- Jarvis's Claude-backed
+# conversation works fine without this. But without Ollama and its
+# vision model installed, "what's on my screen" / JarvisVision silently
+# failed on every install except the dev machine (which already had
+# both by hand) -- confirmed nothing in this script ever installed
+# either one. qwen2.5vl:7b is a real download (a few GB); best-effort
+# and non-fatal on purpose, same as Tailscale.
+$ollamaExe = Get-Command ollama -ErrorAction SilentlyContinue
+if ($ollamaExe) {
+    Say "Found: $($ollamaExe.Source)"
+} else {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Say "Ollama not found -- installing via winget..."
+        winget install --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements --silent
+        $ollamaExe = Get-Command ollama -ErrorAction SilentlyContinue
+    }
+}
+
+if ($ollamaExe) {
+    Say "Pulling the JarvisVision model (qwen2.5vl:7b) -- this is a real download, please be patient..."
+    try {
+        & $ollamaExe.Source pull qwen2.5vl:7b
+        Say "JarvisVision is ready. Ask Jarvis things like 'what's on my screen' any time."
+    } catch {
+        Write-Host "Could not pull the JarvisVision model automatically -- skipping, this is optional." -ForegroundColor Yellow
+        Write-Host "Install it yourself later by running 'ollama pull qwen2.5vl:7b'." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "Ollama could not be installed automatically -- skipping, this is optional." -ForegroundColor Yellow
+    Write-Host "JarvisVision ('what's on my screen') needs it -- install yourself later: https://ollama.com/download (or 'winget install Ollama.Ollama'), then run 'ollama pull qwen2.5vl:7b'." -ForegroundColor Yellow
+}
+
+Say ""
+Say "===================================================="
 Say "  Claude Code -- Jarvis's brain"
 Say "===================================================="
 Say ""
