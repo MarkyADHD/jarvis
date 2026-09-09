@@ -258,16 +258,17 @@ WAKE_WORD_ALIASES = [
 
 CONVERSATION_TIMEOUT_SECONDS = 15
 
-WHISPER_MODEL_NAME = "large-v3"
-WHISPER_DEVICE = "auto"
-WHISPER_COMPUTE_TYPE = "float16"
-# Used only if WHISPER_DEVICE turns out not to actually work on this
-# machine (see load_whisper_once()'s own probe/fallback) -- a model
-# sized for GPU run on CPU instead would be painfully slow, so the
-# fallback needs something CPU-appropriate, not just a different device
-# under the same big model.
-WHISPER_CPU_FALLBACK_MODEL_NAME = "base.en"
-WHISPER_CPU_FALLBACK_COMPUTE_TYPE = "int8"
+def _whisper_model_name():
+    """The real model name in use -- sourced live from backtalk's own
+    config rather than a separate constant here, since load_whisper_once()
+    now shares backtalk.ears's loaded model instead of building its own.
+    A local constant would risk going stale the moment someone changes
+    backtalk.json without knowing this file quotes it too."""
+    try:
+        from backtalk.config import CFG
+        return str(CFG.get("stt_model", "unknown"))
+    except Exception:
+        return "unknown"
 
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_BLOCK_SIZE = 1600
@@ -2180,20 +2181,17 @@ def prewarm_voice():
 # WHISPER
 # =========================
 
-def _whisper_probe(model):
-    """Force a real inference, not just construction -- WhisperModel
-    CONSTRUCTS fine against a GPU it cannot actually use (the CUDA
-    runtime, and specifically cuBLAS, isn't touched until the first real
-    transcribe call). Without proving that here, "auto" would silently
-    "succeed" at load time and only reveal a broken GPU path the first
-    time the user actually spoke. Mirrors backtalk.ears's own _probe()."""
-    segments, _ = model.transcribe(
-        np.zeros(AUDIO_SAMPLE_RATE // 10, dtype=np.float32), language="en",
-    )
-    list(segments)
-
-
 def load_whisper_once():
+    """Shares backtalk.ears's own loaded model instead of constructing a
+    second, separate WhisperModel -- confirmed live that this and
+    backtalk's push-to-talk path were each loading their OWN large-v3
+    instance (~3GB VRAM apiece, ~6GB total for two copies of the exact
+    same weights), a genuine waste that only got worse once both were
+    upgraded from small.en/base.en to large-v3 for better accent
+    accuracy. ears.warm() already has its own GPU probe + CPU-sized
+    fallback (added for the same accent fix) -- reusing it here means
+    that logic exists in exactly one place, not two copies that could
+    drift out of sync."""
     global WHISPER_MODEL
 
     if WHISPER_MODEL is not None:
@@ -2202,43 +2200,12 @@ def load_whisper_once():
     if not WHISPER_AVAILABLE:
         raise RuntimeError("faster-whisper is not installed.")
 
-    try:
-        from backtalk.ears import _add_nvidia_dll_dirs
-        _add_nvidia_dll_dirs()
-    except Exception:
-        pass
-
-    log(f"Loading local Whisper model: {WHISPER_MODEL_NAME}")
+    log(f"Loading local Whisper model: {_whisper_model_name()}")
     log("First launch may take longer while the model downloads.")
 
-    model = WhisperModel(
-        WHISPER_MODEL_NAME,
-        device=WHISPER_DEVICE,
-        compute_type=WHISPER_COMPUTE_TYPE,
-    )
+    from backtalk import ears as _ears
+    WHISPER_MODEL = _ears.warm()
 
-    try:
-        _whisper_probe(model)
-    except Exception as e:
-        if WHISPER_DEVICE == "cpu":
-            raise
-        log(f"Whisper device {WHISPER_DEVICE!r} does not work on this "
-            f"machine ({type(e).__name__}: {e}).")
-        if WHISPER_MODEL_NAME != WHISPER_CPU_FALLBACK_MODEL_NAME:
-            log(f"{WHISPER_MODEL_NAME!r} is sized for GPU -- falling back to "
-                f"{WHISPER_CPU_FALLBACK_MODEL_NAME!r} on the CPU instead of "
-                f"running the big model at CPU speed.")
-            model = WhisperModel(
-                WHISPER_CPU_FALLBACK_MODEL_NAME,
-                device="cpu",
-                compute_type=WHISPER_CPU_FALLBACK_COMPUTE_TYPE,
-            )
-        else:
-            log("Falling back to the CPU.")
-            model = WhisperModel(WHISPER_MODEL_NAME, device="cpu", compute_type=WHISPER_COMPUTE_TYPE)
-        _whisper_probe(model)
-
-    WHISPER_MODEL = model
     WHISPER_READY.set()
     log("Local Whisper speech recognition loaded and ready.")
     return WHISPER_MODEL
@@ -3989,7 +3956,7 @@ class JarvisApp:
             "Random app action guard: enabled by design",
             "Interrupt mode: enabled",
             f"Conversation timeout: {CONVERSATION_TIMEOUT_SECONDS} seconds",
-            f"Speech recognition: faster-whisper {WHISPER_MODEL_NAME}",
+            f"Speech recognition: faster-whisper {_whisper_model_name()}",
             f"Whisper available: {WHISPER_AVAILABLE}",
             f"Sounddevice available: {SOUNDDEVICE_AVAILABLE}",
             f"Vision model: {VISION_MODEL}",
