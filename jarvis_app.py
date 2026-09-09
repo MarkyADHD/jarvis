@@ -2058,7 +2058,12 @@ def speak(text):
         speak_queue.put(text)
 
 
-LIVE_CODE_WATCH_INTERVAL_SECONDS = 5
+# Was 5s -- scanning ~200 files' mtime/size that often, continuously,
+# for the entire life of the process is more overhead than the feature
+# actually needs (a spoken "code changed" notice landing 15s later
+# instead of 5s later is not user-facing-critical). 20s cuts that
+# background disk/CPU cost roughly 4x for the same practical result.
+LIVE_CODE_WATCH_INTERVAL_SECONDS = 20
 
 
 def startup_greeting():
