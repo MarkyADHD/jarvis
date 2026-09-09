@@ -258,34 +258,133 @@ def list_effort_levels(provider_id):
     return list(EFFORT_LEVELS) if provider_id == "claude" else []
 
 
+_PATH_REFRESHED = False
+
+
+def _refresh_path_from_registry():
+    """Reported as a real, still-live bug even after the first fix: "I
+    have Codex installed, Jarvis still says I don't." The first fix only
+    covered ONE specific gap (a fresh npm install landing in a hardcoded
+    %APPDATA%\\npm that wasn't on Jarvis's PATH yet) -- not the general
+    problem, which is that Jarvis is a long-running process whose PATH
+    was snapshotted once at startup and never updated again, no matter
+    what gets installed afterward, by npm or anything else, to any
+    directory. The actual, general fix: read PATH fresh from the
+    registry (both Machine and User scope -- exactly what
+    setup_environment.ps1 already does after an install, and what a
+    brand new terminal window gets automatically that this long-running
+    process never does on its own) and prepend it to this process's own
+    PATH. Runs once per process (cheap, but pointless to repeat on every
+    single lookup) -- call reset via the module-level flag if a caller
+    ever needs to force a second refresh."""
+    global _PATH_REFRESHED
+    if _PATH_REFRESHED:
+        return
+    _PATH_REFRESHED = True
+
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as k:
+            machine_path, _ = winreg.QueryValueEx(k, "Path")
+    except Exception:
+        machine_path = ""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            user_path, _ = winreg.QueryValueEx(k, "Path")
+    except Exception:
+        user_path = ""
+
+    fresh = ";".join(p for p in (machine_path, user_path) if p)
+    if not fresh:
+        return
+
+    current = os.environ.get("PATH", "")
+    # Prepend rather than replace -- never lose anything already working
+    # (the venv's own Scripts dir in particular), just add what a fresh
+    # process would see that this one doesn't yet.
+    os.environ["PATH"] = fresh + (";" + current if current else "")
+
+
+def _where(name):
+    """Shells out to Windows' own `where`, which resolves PATH AND the
+    "App Paths" registry key (HKLM/HKCU ...\\CurrentVersion\\App Paths) --
+    a second, completely separate mechanism some installers register
+    through instead of ever touching PATH at all, which shutil.which()
+    never checks under any circumstances. This is what actually closes
+    the gap for an installer neither of the other two strategies here
+    were ever going to catch."""
+    try:
+        proc = subprocess.run(
+            ["where", name], capture_output=True, text=True, timeout=5,
+            shell=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if proc.returncode != 0:
+            return None
+        first_line = proc.stdout.strip().splitlines()[0].strip() if proc.stdout.strip() else ""
+        return first_line if first_line and Path(first_line).exists() else None
+    except Exception:
+        return None
+
+
+def _npm_global_dirs():
+    """The hardcoded %APPDATA%\\npm guess only holds for npm's own
+    default prefix -- wrong for a custom prefix (.npmrc), nvm-managed
+    Node installs, or a per-project/company override, all real setups
+    that would make the earlier hardcoded-only fallback still fail
+    exactly like the reported bug. Asking npm itself where its global
+    packages actually live is the only way to get this right in
+    general, so it's attempted first; the historical default is kept
+    as a last-resort guess if npm can't be asked directly (e.g. npm
+    itself isn't resolvable yet either)."""
+    dirs = []
+    npm_path = shutil.which("npm") or _where("npm")
+    if npm_path:
+        try:
+            proc = subprocess.run(
+                [npm_path, "root", "-g"], capture_output=True, text=True, timeout=8,
+                shell=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            root = proc.stdout.strip()
+            if proc.returncode == 0 and root:
+                # `npm root -g` returns .../node_modules -- the actual
+                # bin shims (the .cmd files) live one level up, in the
+                # prefix dir itself, not inside node_modules.
+                dirs.append(str(Path(root).parent))
+        except Exception:
+            pass
+
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        dirs.append(str(Path(appdata) / "npm"))
+
+    return dirs
+
+
 def find_cli(name):
-    """Not just shutil.which() -- confirmed as a real reported bug:
-    "switched to codex, it said not installed, it installed it, still
-    says not installed." Root cause: shutil.which() only sees directories
-    already in THIS process's PATH environment variable, snapshotted when
-    Jarvis itself started. A freshly-run `npm install -g` places the new
-    .cmd shim in %APPDATA%\\npm -- if that directory wasn't already on
-    Jarvis's PATH at process start (a real possibility the very first
-    time any of these get installed, especially right after Node.js
-    itself was just set up in a different process), shutil.which() keeps
-    returning None forever, even though the file is sitting right there
-    on disk, until Jarvis is restarted. jarvis_claude_code_v1's own
-    Claude lookup already works around exactly this with a hardcoded
-    %APPDATA%\\npm fallback that checks the file directly instead of
-    trusting PATH -- this mirrors that same proven pattern for every
-    other npm-installed provider CLI instead of leaving them exposed to
-    the same gap Claude was already patched against."""
+    """Layered, in order of cost: shutil.which() against a freshly
+    registry-refreshed PATH (fixes the general staleness problem, not
+    just one specific directory) -> Windows' own `where` (catches
+    App-Paths-registered installs PATH-based lookups can never see at
+    all) -> npm's actual configured global directory, asked live rather
+    than guessed (catches a custom npm prefix/nvm setup) -> the old
+    hardcoded %APPDATA%\\npm guess, kept only as the final fallback."""
     if not name:
         return None
+
+    _refresh_path_from_registry()
 
     found = shutil.which(name)
     if found:
         return found
 
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        npm_dir = Path(appdata) / "npm"
-        for candidate in (npm_dir / f"{name}.cmd", npm_dir / f"{name}.exe", npm_dir / name):
+    found = _where(name)
+    if found:
+        return found
+
+    for npm_dir in _npm_global_dirs():
+        base = Path(npm_dir)
+        for candidate in (base / f"{name}.cmd", base / f"{name}.exe", base / name):
             if candidate.exists():
                 return str(candidate)
 
