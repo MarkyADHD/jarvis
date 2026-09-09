@@ -74,9 +74,22 @@ _single_instance_socket = None
 BAR_WIDTH = 240
 BAR_HEIGHT = 54
 TASKBAR_MARGIN = 8
-POLL_MS = 80
+POLL_MS = 33  # ~30fps -- was 80 (12.5fps), confirmed the real cause of
+              # visible choppiness was delete-all-and-recreate every
+              # single frame (see _draw's old body), not just this rate,
+              # but a real visualizer wants closer to 30fps than 12.5 too
 HIDE_AFTER_IDLE_SECONDS = 15.0
 WAVEFORM_STALE_SECONDS = 0.35  # older than this = nobody is feeding it now
+
+HALF_N = 11  # mirrored bars per side
+BAR_SMOOTHING = 0.45  # 0..1, higher = snappier/less smoothed. The
+                      # underlying waveform data only refreshes ~15x/sec
+                      # (backtalk's own throttle) but this renders at
+                      # ~30fps -- without easing toward the latest sample
+                      # each frame instead of jumping straight to it, the
+                      # extra frames just repeat the same stale values and
+                      # buy nothing. This is the same attack/release
+                      # smoothing any real audio visualizer does.
 
 FADE_STEP_MS = 20
 FADE_STEP = 0.15  # alpha change per fade tick -- ~7 ticks (~140ms) to fully fade
@@ -193,6 +206,15 @@ class MiniBar:
         self._fade_target = 0.0
         self._fade_done_cb = None
 
+        # Smoothed (eased) display values, carried between frames --
+        # the underlying waveform data only refreshes ~15x/sec but this
+        # renders at ~30fps; without easing toward each new sample
+        # instead of snapping to it, the extra frames were free but
+        # pointless. See BAR_SMOOTHING's own comment.
+        self._smoothed_levels = [0.0] * HALF_N
+        self._smoothed_radius = CORE_RADIUS_MIN
+
+        self._create_items()
         self._poll()
 
     def _position(self):
@@ -222,11 +244,17 @@ class MiniBar:
             styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_NOACTIVATE,
         )
 
-    def _draw_corner_brackets(self):
-        """Four HUD-style corner brackets (an L-shaped pair of short
-        lines per corner) framing the widget -- the classic sci-fi
-        targeting-reticle chrome, here just enough of it to read as a
-        HUD readout rather than a plain equaliser bar."""
+    def _create_items(self):
+        """Every canvas item this widget will ever show, created exactly
+        ONCE. The old version called canvas.delete("all") and recreated
+        all ~34 items from scratch on every single frame (12.5x/sec) --
+        confirmed as the real cause of the reported choppiness, not just
+        the frame rate: deleting and rebuilding Tk's whole display list
+        every tick is real, visible overhead, on top of forcing a full
+        redraw instead of the cheap partial-update Tk can otherwise do.
+        Frames now only ever call .coords()/.itemconfig() on these same
+        item ids -- no create/delete calls in the per-frame path at all.
+        """
         w, h, ins, arm = BAR_WIDTH, BAR_HEIGHT, CORNER_INSET, CORNER_LEN
         corners = (
             ((ins, ins), (1, 0), (0, 1)),                    # top-left
@@ -235,79 +263,105 @@ class MiniBar:
             ((w - ins, h - ins), (-1, 0), (0, -1)),           # bottom-right
         )
         for (cx, cy), (hx, hy), (vx, vy) in corners:
-            self.canvas.create_line(
-                cx, cy, cx + hx * arm, cy + hy * arm,
-                fill=FRAME_COLOR, width=2,
-            )
-            self.canvas.create_line(
-                cx, cy, cx + vx * arm, cy + vy * arm,
-                fill=FRAME_COLOR, width=2,
-            )
-
-    def _draw(self, samples, color, resting: bool):
-        self.canvas.delete("all")
-        self._draw_corner_brackets()
+            self.canvas.create_line(cx, cy, cx + hx * arm, cy + hy * arm, fill=FRAME_COLOR, width=2)
+            self.canvas.create_line(cx, cy, cx + vx * arm, cy + vy * arm, fill=FRAME_COLOR, width=2)
 
         mid_y = BAR_HEIGHT / 2
         core_x = BAR_WIDTH / 2
-        core_gap = 20  # dead zone either side of the core the bars don't enter
+        self._core_gap = 20  # dead zone either side of the core the bars don't enter
 
-        # Thin baseline scanline across the full width, broken only where
-        # the core sits -- the "reactive readout" and the arc-reactor
-        # core both sit ON this line rather than floating independently.
-        self.canvas.create_line(6, mid_y, core_x - core_gap, mid_y, fill=FRAME_COLOR)
-        self.canvas.create_line(core_x + core_gap, mid_y, BAR_WIDTH - 6, mid_y, fill=FRAME_COLOR)
+        # Static baseline -- geometry never changes, created once and
+        # never touched again (not even color, unlike the reactive items).
+        self.canvas.create_line(6, mid_y, core_x - self._core_gap, mid_y, fill=FRAME_COLOR)
+        self.canvas.create_line(core_x + self._core_gap, mid_y, BAR_WIDTH - 6, mid_y, fill=FRAME_COLOR)
 
-        half_n = 11
+        # Mirrored bars: HALF_N rectangles on each side, placeholder
+        # coords for now -- _draw() moves/recolors these every frame via
+        # their stored ids rather than recreating them.
+        self._bar_ids_left = [
+            self.canvas.create_rectangle(0, mid_y, 0, mid_y, fill=FRAME_COLOR, outline="")
+            for _ in range(HALF_N)
+        ]
+        self._bar_ids_right = [
+            self.canvas.create_rectangle(0, mid_y, 0, mid_y, fill=FRAME_COLOR, outline="")
+            for _ in range(HALF_N)
+        ]
+
+        self._halo_id = self.canvas.create_oval(0, 0, 0, 0, fill=FRAME_COLOR, outline="")
+        self._core_id = self.canvas.create_oval(0, 0, 0, 0, fill=FRAME_COLOR, outline="")
+
+    def _draw(self, samples, color, resting: bool):
+        mid_y = BAR_HEIGHT / 2
+        core_x = BAR_WIDTH / 2
+        core_gap = self._core_gap
+
         if samples:
-            step = max(1, len(samples) // half_n)
-            levels = [max(samples[i:i + step], default=0.0) for i in range(0, len(samples), step)][:half_n]
+            step = max(1, len(samples) // HALF_N)
+            levels = [max(samples[i:i + step], default=0.0) for i in range(0, len(samples), step)][:HALF_N]
         else:
-            levels = [0.0] * half_n
+            levels = [0.0] * HALF_N
+        levels += [0.0] * (HALF_N - len(levels))  # a short/partial sample set still fills every bar
 
         peak = max(levels) if levels and max(levels) > 0 else 1.0
         gap = 4
         bar_w = 5
         span = core_x - core_gap - 6
 
-        # Mirrored from the centre outward -- a HUD voice readout, not a
-        # left-to-right equaliser -- so the loudest bars always sit
-        # nearest the core and the whole thing stays visually symmetric.
-        for i, level in enumerate(levels):
-            norm = min(1.0, level / peak) if peak else 0.0
+        # Ease each bar toward its new target instead of snapping --
+        # this is what actually makes a ~15Hz data source look smooth at
+        # a ~30fps render rate, not the frame rate alone.
+        for i in range(HALF_N):
+            target = min(1.0, levels[i] / peak) if peak else 0.0
+            self._smoothed_levels[i] += (target - self._smoothed_levels[i]) * BAR_SMOOTHING
+
+        for i, norm in enumerate(self._smoothed_levels):
             bar_h = max(2, norm * (BAR_HEIGHT - 14))
             y0, y1 = mid_y - bar_h / 2, mid_y + bar_h / 2
             offset = core_gap + i * (bar_w + gap)
-            if offset + bar_w > core_gap + span:
-                break
             fill = color if norm > 0.1 else FRAME_COLOR
-            for cx in (core_x - offset - bar_w, core_x + offset):
-                self.canvas.create_rectangle(cx, y0, cx + bar_w, y1, fill=fill, outline="")
+            visible = offset + bar_w <= core_gap + span
+
+            left_id, right_id = self._bar_ids_left[i], self._bar_ids_right[i]
+            if visible:
+                left_x = core_x - offset - bar_w
+                right_x = core_x + offset
+                self.canvas.coords(left_id, left_x, y0, left_x + bar_w, y1)
+                self.canvas.coords(right_id, right_x, y0, right_x + bar_w, y1)
+                self.canvas.itemconfig(left_id, fill=fill, state="normal")
+                self.canvas.itemconfig(right_id, fill=fill, state="normal")
+            else:
+                self.canvas.itemconfig(left_id, state="hidden")
+                self.canvas.itemconfig(right_id, state="hidden")
 
         # Arc-reactor core: a dim halo behind a bright centre, size
         # driven by the loudest current sample when active, or a slow
         # breathing pulse while resting so the bar doesn't look dead
-        # between words.
+        # between words. Also eased, same reasoning as the bars.
         if resting:
             phase = (time.time() % CORE_PULSE_PERIOD_S) / CORE_PULSE_PERIOD_S
             pulse = (math.sin(phase * 2 * math.pi) + 1) / 2
-            radius = CORE_RADIUS_MIN + (CORE_RADIUS_MAX - CORE_RADIUS_MIN) * 0.35 * pulse
+            target_radius = CORE_RADIUS_MIN + (CORE_RADIUS_MAX - CORE_RADIUS_MIN) * 0.35 * pulse
             core_color = FRAME_COLOR
             halo_color = FRAME_COLOR
         else:
-            radius = CORE_RADIUS_MIN + (CORE_RADIUS_MAX - CORE_RADIUS_MIN) * _peak_norm(levels)
+            target_radius = CORE_RADIUS_MIN + (CORE_RADIUS_MAX - CORE_RADIUS_MIN) * _peak_norm(levels)
             core_color = color
             halo_color = _dim_hex(color, 0.35)
 
-        self.canvas.create_oval(
+        self._smoothed_radius += (target_radius - self._smoothed_radius) * BAR_SMOOTHING
+        radius = self._smoothed_radius
+
+        self.canvas.coords(
+            self._halo_id,
             core_x - radius * 1.8, mid_y - radius * 1.8,
             core_x + radius * 1.8, mid_y + radius * 1.8,
-            fill=halo_color, outline="",
         )
-        self.canvas.create_oval(
+        self.canvas.itemconfig(self._halo_id, fill=halo_color)
+        self.canvas.coords(
+            self._core_id,
             core_x - radius, mid_y - radius, core_x + radius, mid_y + radius,
-            fill=core_color, outline="",
         )
+        self.canvas.itemconfig(self._core_id, fill=core_color)
 
     def _show(self):
         if self.visible:
