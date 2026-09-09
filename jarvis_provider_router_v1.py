@@ -165,10 +165,26 @@ SPOKEN_ALIASES = {
     "ollama": "ollama",
     "local ai": "ollama",
     "free local ai": "ollama",
+    # Confirmed real reported bug: the user's own natural phrase was
+    # "local model" -- not in this list at all, so it silently matched
+    # nothing and the switch request fell through to being treated as
+    # a normal chat message instead. "the local model" reads as "does
+    # nothing" from the outside, identical in symptom to the earlier
+    # Codex detection bug even though the cause here is pure phrase
+    # coverage, not a code path issue.
+    "local model": "ollama",
+    "free local model": "ollama",
+    "local brain": "ollama",
+    "the local one": "ollama",
+    "offline model": "ollama",
+    "offline ai": "ollama",
     "gemini": "gemini",
     "qwen": "qwen",
     "qwen cloud": "qwen",
     "codex": "codex",
+    "chatgpt": "codex",
+    "open ai": "codex",
+    "openai": "codex",
     "kiro": "kiro",
     "minimax": "minimax",
     "opencode": "opencode",
@@ -608,11 +624,22 @@ def _run_generic_cli(cli_path, extra_args, prompt, system_prompt, timeout):
 
 
 def _run_gemini_like(provider_id, prompt, system_prompt, timeout):
+    """Live-tested for real against a real Gemini API key -- confirmed
+    this was the actual reported bug ("Gemini doesn't seem to work"),
+    never caught earlier because no real key existed on the dev machine
+    until now. Gemini CLI (and Qwen Code, the fork sharing this same
+    adapter) refuses to run headlessly in a directory it hasn't been
+    interactively trusted in -- error text confirmed live: "Gemini CLI
+    is not running in a trusted directory... use --skip-trust... for
+    headless and automated environments." Jarvis only ever runs these
+    headlessly, so every single call was failing on this before ever
+    reaching the model at all. --skip-trust is documented by Gemini's
+    own CLI specifically for this headless/automated case."""
     meta = PROVIDERS[provider_id]
     cli_path = find_cli(meta["cli_name"])
     if not cli_path:
         return {"ok": False, "error": f"{meta['label']} CLI not installed", "result": ""}
-    return _run_generic_cli(cli_path, ["--output-format", "json"], prompt, system_prompt, timeout)
+    return _run_generic_cli(cli_path, ["--output-format", "json", "--skip-trust"], prompt, system_prompt, timeout)
 
 
 def _run_codex(prompt, system_prompt, timeout):
