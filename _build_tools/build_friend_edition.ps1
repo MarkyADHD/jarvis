@@ -60,7 +60,14 @@ $excludeDirs = @(
     "SearchResponseHygieneV5", "ToolIntelligenceV1", "NEW JARVIS",
     ".maintenance_v2\installations",
     "ai-visualizer\.edge-app-profile",
-    "_build_tools"
+    "_build_tools",
+    # Jarvis now builds real deliverables (websites, scripts) directly
+    # when asked, straight into the project root by default -- those
+    # are the user's own generated content, not part of Jarvis itself,
+    # and must never end up bundled into the public friend-edition
+    # installer. Add any other project-output folder names here as
+    # they come up.
+    "website"
 ) | ForEach-Object { Join-Path $Source $_ }
 
 $excludeFiles = @(
