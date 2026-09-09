@@ -741,6 +741,12 @@ def parse_play_request(command):
         r"^(?:jarvis\s+)?play\s+(.+?)\s+(?:on|in)\s+spotify[.!?]*$",
         r"^(?:jarvis\s+)?play\s+the\s+song\s+(.+?)\s+by\s+(.+?)[.!?]*$",
         r"^(?:jarvis\s+)?play\s+the\s+song\s+(.+?)[.!?]*$",
+        # Bare "play <song> by <artist>" -- no "the song" prefix, no "on
+        # spotify" suffix. Confirmed missing live: this is the single
+        # most natural phrasing ("play <song> by bbno$") and previously
+        # matched NONE of the four patterns above, so it never reached
+        # this module's precise track search at all.
+        r"^(?:jarvis\s+)?play\s+(.+?)\s+by\s+(.+?)[.!?]*$",
     ]
 
     m = re.match(patterns[0], c, flags=re.IGNORECASE)
@@ -772,6 +778,16 @@ def parse_play_request(command):
     if m:
         title = m.group(1).strip(" \"'")
         return {"query": title, "title": title, "artist": ""}
+
+    m = re.match(patterns[4], c, flags=re.IGNORECASE)
+    if m:
+        title = m.group(1).strip(" \"'")
+        artist = m.group(2).strip(" \"'")
+        return {
+            "query": f'track:"{title}" artist:"{artist}"',
+            "title": title,
+            "artist": artist,
+        }
 
     return None
 

@@ -242,6 +242,15 @@ def intent_family(text: Any) -> str:
 
     if any(w in c for w in ("spotify", "play song", "play music", "playlist")):
         return "spotify"
+    # "play <song> by <artist>" is an unambiguous exact-track request --
+    # the single most natural way to ask for a specific song -- but
+    # without this it never contained any of the keywords above (no
+    # literal "spotify"/"playlist"/etc.), so it fell all the way through
+    # to general chat instead of ever reaching jarvis_spotify_v2's
+    # precise Spotify Web API track search. Confirmed live as the cause
+    # of "play <song> by bbno$ struggles to find the exact song."
+    if re.search(r"^play\s+.+\s+by\s+.+$", c):
+        return "spotify"
     if any(w in c for w in ("pause music", "resume music", "next song", "previous song", "volume")):
         return "media"
     if any(w in c for w in ("nanoleaf", "key light", "keylight", "room lights", "the lights", "govee")):
