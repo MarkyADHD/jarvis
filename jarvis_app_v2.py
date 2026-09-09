@@ -1460,12 +1460,38 @@ _CODING_TASK_PATTERNS = (
     "rewrite your", "refactor your",
 )
 
+# Same failure this whole block was built to fix, just for a project
+# Jarvis builds FOR the user instead of on himself: "make me a website"
+# or a later "update the website" is real multi-file coding work, but
+# without this it only ever got the generic 150s/medium-effort request
+# ask_ai_common_v2 gives ordinary chat -- confirmed as the reported cause
+# of "he just doesn't understand" when asked to update a website he'd
+# already built. A build/update request that ran long enough to actually
+# time out could also leave an orphaned request still running against
+# the one shared Claude session in the background (see the cancel() in
+# claude_brain_v2._run_coro), and the NEXT request -- e.g. that same
+# "now update it" -- landing on top of it while it's still replying reads
+# exactly like Claude "not understanding" a plain follow-up. Longer
+# timeout keeps that collision from happening in the first place.
+_PROJECT_BUILD_TARGETS = (
+    "website", "web page", "webpage", "web app", "landing page",
+    "app", "application", "program", "script", "game", "tool",
+)
+_PROJECT_BUILD_VERBS = (
+    "make", "build", "create", "update", "edit", "fix", "change",
+    "add to", "improve", "redesign", "rewrite", "modify", "code",
+)
+
 CODING_TASK_TIMEOUT_SECONDS = 600.0
 
 
 def _looks_like_coding_task(text):
     t = str(text or "").lower()
-    return any(phrase in t for phrase in _CODING_TASK_PATTERNS)
+    if any(phrase in t for phrase in _CODING_TASK_PATTERNS):
+        return True
+    if any(target in t for target in _PROJECT_BUILD_TARGETS):
+        return any(verb in t for verb in _PROJECT_BUILD_VERBS)
+    return False
 
 
 def ask_ai_common_v2(goal, original_func=None):

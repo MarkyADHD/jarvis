@@ -262,7 +262,22 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
 def _run_coro(coro, timeout: float):
     loop = _ensure_loop()
     future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=timeout)
+    try:
+        return future.result(timeout=timeout)
+    except TimeoutError:
+        # future.result() timing out only stops THIS thread from
+        # waiting -- the coroutine itself keeps running on the
+        # background event loop unless told to stop. Left alone, it
+        # goes on calling brain.ask_stream() against the one shared
+        # persistent Claude session, and if the NEXT request grabs
+        # _BRAIN_LOCK (released the instant this timeout fires) before
+        # that orphaned call finishes, both prompts are live on the
+        # same session at once -- which reads exactly like Claude
+        # "not understanding" a follow-up, because it's actually
+        # answering two overlapping requests at once. Cancelling here
+        # stops that orphaned call from ever reaching the session.
+        future.cancel()
+        raise
 
 
 DEFAULT_EFFORT = "medium"
