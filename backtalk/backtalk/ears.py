@@ -25,11 +25,13 @@ an utterance opens after ~120ms of sustained speech, closes after
 `silence_ms` of trailing quiet. A `gate` callable can suppress
 listening (so the open mic ignores the speakers unless barge-in is on).
 """
+import os
 import platform
 import re
 import sys
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
@@ -44,6 +46,12 @@ FRAME_MS = 30
 FRAME_LEN = RATE * FRAME_MS // 1000  # samples per frame
 OPEN_FRAMES = 4        # ~120ms speech to open an utterance
 MAX_UTTER_S = 30
+
+# Used only when a GPU-sized configured model (see warm()) can't actually
+# run on GPU and the automatic fallback needs something CPU-appropriate
+# instead -- not a general "small English" default otherwise.
+CPU_FALLBACK_MODEL = "small.en"
+CPU_FALLBACK_COMPUTE = "int8"
 
 _NONSPEECH = re.compile(r"[\[(][^\])]*[\])]")
 
@@ -271,6 +279,37 @@ def _probe(model):
     list(segments)
 
 
+def _add_nvidia_dll_dirs():
+    """faster-whisper's CUDA backend (CTranslate2) needs cuBLAS/cuDNN at
+    runtime, and on Windows those come from the nvidia-cublas-cu12/
+    nvidia-cudnn-cu12 pip packages -- but confirmed live on this machine
+    that CTranslate2's own internal DLL loading does NOT find them via
+    Python's newer os.add_dll_directory() (tried directly: ctypes could
+    load the DLL fine that way, CTranslate2 still couldn't). Only
+    prepending their folders to the classic PATH environment variable
+    actually worked. Without this, "auto"/"cuda" device selection was
+    silently failing the _probe() below on every single startup and
+    falling back to CPU, even with the right packages installed and a
+    perfectly good GPU sitting idle -- CPU-only English-tuned Whisper
+    at this size is measurably worse on non-American accents than the
+    same model gets right on GPU, where a bigger model becomes
+    affordable. Best-effort: never raises, a machine with no GPU or no
+    nvidia packages just skips this and behaves exactly as before."""
+    try:
+        import sysconfig
+        site_packages = Path(sysconfig.get_paths()["purelib"])
+        added = []
+        for pkg in ("cublas", "cudnn"):
+            bin_dir = site_packages / "nvidia" / pkg / "bin"
+            if bin_dir.exists():
+                os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+                added.append(pkg)
+        if added:
+            log(f"[ears] added NVIDIA DLL directories to PATH: {', '.join(added)}")
+    except Exception as e:
+        log(f"[ears] could not add NVIDIA DLL directories ({e}) -- GPU STT may fall back to CPU")
+
+
 def warm():
     """Load the STT model (first call downloads it to the HF cache).
     Called at startup while the greeting plays, so the first real
@@ -291,6 +330,7 @@ def warm():
                                        verbose=None)
                 _model, _backend = repo, "mlx"
             else:
+                _add_nvidia_dll_dirs()
                 from faster_whisper import WhisperModel
                 want = CFG["stt_device"]
                 log(f"[ears] loading {CFG['stt_model']} "
@@ -314,11 +354,25 @@ def warm():
                         raise
                     log(f"[ears] {want!r} does not work on this machine "
                         f"({type(e).__name__}: {e}).")
-                    log("[ears] falling back to the CPU. Set "
-                        "\"stt_device\": \"cpu\" in backtalk.json to skip "
-                        "this check in future.")
-                    _model = WhisperModel(CFG["stt_model"], device="cpu",
-                                          compute_type=CFG["stt_compute"])
+                    fallback_model, fallback_compute = CFG["stt_model"], CFG["stt_compute"]
+                    if CFG["stt_model"] != CPU_FALLBACK_MODEL:
+                        # A model sized for GPU (e.g. large-v3, chosen for
+                        # its much better accent/dialect accuracy) run on
+                        # CPU instead would be painfully slow -- tens of
+                        # seconds per utterance on a modest machine, not a
+                        # few hundred ms. Fall back to a model actually
+                        # sized for CPU rather than just swapping the
+                        # device under the same big model.
+                        fallback_model, fallback_compute = CPU_FALLBACK_MODEL, CPU_FALLBACK_COMPUTE
+                        log(f"[ears] {CFG['stt_model']!r} is sized for GPU -- "
+                            f"falling back to {fallback_model!r} on the CPU "
+                            f"instead of running the big model at CPU speed.")
+                    else:
+                        log("[ears] falling back to the CPU. Set "
+                            "\"stt_device\": \"cpu\" in backtalk.json to skip "
+                            "this check in future.")
+                    _model = WhisperModel(fallback_model, device="cpu",
+                                          compute_type=fallback_compute)
                     _probe(_model)
                 _backend = "faster-whisper"
             log(f"[ears] model ready ({_backend})")

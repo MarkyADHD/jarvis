@@ -258,9 +258,16 @@ WAKE_WORD_ALIASES = [
 
 CONVERSATION_TIMEOUT_SECONDS = 15
 
-WHISPER_MODEL_NAME = "base.en"
-WHISPER_DEVICE = "cpu"
-WHISPER_COMPUTE_TYPE = "int8"
+WHISPER_MODEL_NAME = "large-v3"
+WHISPER_DEVICE = "auto"
+WHISPER_COMPUTE_TYPE = "float16"
+# Used only if WHISPER_DEVICE turns out not to actually work on this
+# machine (see load_whisper_once()'s own probe/fallback) -- a model
+# sized for GPU run on CPU instead would be painfully slow, so the
+# fallback needs something CPU-appropriate, not just a different device
+# under the same big model.
+WHISPER_CPU_FALLBACK_MODEL_NAME = "base.en"
+WHISPER_CPU_FALLBACK_COMPUTE_TYPE = "int8"
 
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_BLOCK_SIZE = 1600
@@ -2173,6 +2180,19 @@ def prewarm_voice():
 # WHISPER
 # =========================
 
+def _whisper_probe(model):
+    """Force a real inference, not just construction -- WhisperModel
+    CONSTRUCTS fine against a GPU it cannot actually use (the CUDA
+    runtime, and specifically cuBLAS, isn't touched until the first real
+    transcribe call). Without proving that here, "auto" would silently
+    "succeed" at load time and only reveal a broken GPU path the first
+    time the user actually spoke. Mirrors backtalk.ears's own _probe()."""
+    segments, _ = model.transcribe(
+        np.zeros(AUDIO_SAMPLE_RATE // 10, dtype=np.float32), language="en",
+    )
+    list(segments)
+
+
 def load_whisper_once():
     global WHISPER_MODEL
 
@@ -2182,15 +2202,43 @@ def load_whisper_once():
     if not WHISPER_AVAILABLE:
         raise RuntimeError("faster-whisper is not installed.")
 
+    try:
+        from backtalk.ears import _add_nvidia_dll_dirs
+        _add_nvidia_dll_dirs()
+    except Exception:
+        pass
+
     log(f"Loading local Whisper model: {WHISPER_MODEL_NAME}")
     log("First launch may take longer while the model downloads.")
 
-    WHISPER_MODEL = WhisperModel(
+    model = WhisperModel(
         WHISPER_MODEL_NAME,
         device=WHISPER_DEVICE,
         compute_type=WHISPER_COMPUTE_TYPE,
     )
 
+    try:
+        _whisper_probe(model)
+    except Exception as e:
+        if WHISPER_DEVICE == "cpu":
+            raise
+        log(f"Whisper device {WHISPER_DEVICE!r} does not work on this "
+            f"machine ({type(e).__name__}: {e}).")
+        if WHISPER_MODEL_NAME != WHISPER_CPU_FALLBACK_MODEL_NAME:
+            log(f"{WHISPER_MODEL_NAME!r} is sized for GPU -- falling back to "
+                f"{WHISPER_CPU_FALLBACK_MODEL_NAME!r} on the CPU instead of "
+                f"running the big model at CPU speed.")
+            model = WhisperModel(
+                WHISPER_CPU_FALLBACK_MODEL_NAME,
+                device="cpu",
+                compute_type=WHISPER_CPU_FALLBACK_COMPUTE_TYPE,
+            )
+        else:
+            log("Falling back to the CPU.")
+            model = WhisperModel(WHISPER_MODEL_NAME, device="cpu", compute_type=WHISPER_COMPUTE_TYPE)
+        _whisper_probe(model)
+
+    WHISPER_MODEL = model
     WHISPER_READY.set()
     log("Local Whisper speech recognition loaded and ready.")
     return WHISPER_MODEL
