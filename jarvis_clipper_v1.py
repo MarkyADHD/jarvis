@@ -159,6 +159,38 @@ def list_recent_vods(limit=10):
     return list(r.json().get("data", []))
 
 
+# Jarvis's own upstream text normalisation (app_normalise, run before
+# any fast-path handler including this one ever sees the command)
+# strips punctuation -- confirmed live that "https://www.twitch.tv/
+# videos/2866848527" arrives here as "https www twitch tv videos
+# 2866848527", losing every "." and "/". Matches both the raw punctuated
+# URL (typed/pasted into the HUD's text chat, which may not go through
+# that normalisation) and the space-separated normalised form.
+VOD_URL_RE = re.compile(r"twitch[.\s]*tv[/\s]+videos[/\s]+(\d{6,})", re.IGNORECASE)
+
+
+def extract_vod_id(text):
+    m = VOD_URL_RE.search(str(text or ""))
+    return m.group(1) if m else None
+
+
+def get_vod_by_id(vod_id):
+    """Same shape as one entry from list_recent_vods() -- lets a request
+    naming a specific VOD (a pasted twitch.tv/videos/<id> URL) run
+    through exactly the same make_clips_from_vod() pipeline as "my last
+    stream" does, just against a chosen VOD instead of always the most
+    recent one. Works for ANY VOD on the connected account, not just
+    recent ones -- Get Videos takes an id directly."""
+    headers, _ = twitch._helix_headers()
+    r = requests.get(
+        f"{twitch.HELIX}/videos", headers=headers,
+        params={"id": vod_id}, timeout=10,
+    )
+    r.raise_for_status()
+    data = r.json().get("data", [])
+    return data[0] if data else None
+
+
 def resolve_stream_url(vod_url):
     """The VOD's real HLS playlist URL + duration, resolved once via
     yt-dlp. Everything after this talks to that URL directly through
@@ -598,7 +630,13 @@ AD_PHRASES_RE = re.compile(
 
 def is_clipper_request(command):
     c = str(command or "").strip().lower()
-    return any(phrase in c for phrase in TRIGGER_PHRASES)
+    if any(phrase in c for phrase in TRIGGER_PHRASES):
+        return True
+    # A pasted/spoken twitch.tv/videos/<id> URL is an unambiguous request
+    # on its own -- doesn't need one of the fixed trigger phrases too.
+    # Natural to just paste a link in the HUD's text chat and have that
+    # be the whole message.
+    return extract_vod_id(command) is not None
 
 
 def is_live_clip_request(command):
@@ -647,15 +685,24 @@ def _run_ad_job(app_module, spoken_name, length):
             pass
 
 
-def _run_job(app_module, spoken_name):
+def _run_job(app_module, spoken_name, command=""):
     global _JOB_RUNNING
     try:
-        vods = list_recent_vods(limit=1)
-        if not vods:
-            app_module.speak(f"I couldn't find any recent VODs on your Twitch channel, {spoken_name}.")
-            return
-
-        vod = vods[0]
+        vod_id = extract_vod_id(command)
+        if vod_id:
+            vod = get_vod_by_id(vod_id)
+            if not vod:
+                app_module.speak(
+                    f"I couldn't find a VOD at that link, {spoken_name} -- it may be "
+                    f"private, deleted, or not a VOD URL."
+                )
+                return
+        else:
+            vods = list_recent_vods(limit=1)
+            if not vods:
+                app_module.speak(f"I couldn't find any recent VODs on your Twitch channel, {spoken_name}.")
+                return
+            vod = vods[0]
 
         def progress(msg):
             try:
@@ -745,13 +792,14 @@ def clipper_command_fast(command, spoken_name="Sir", app_module=None):
         _JOB_RUNNING = True
 
     threading.Thread(
-        target=_run_job, args=(app_module, spoken_name), daemon=True,
+        target=_run_job, args=(app_module, spoken_name, command), daemon=True,
     ).start()
 
+    target_desc = "that VOD" if extract_vod_id(command) else "your last VOD"
     return {
         "mode": "chat",
         "reply": (
-            f"On it, {spoken_name} -- going through your last VOD for clips now. "
+            f"On it, {spoken_name} -- going through {target_desc} for clips now. "
             f"This can take a few minutes for a long stream, I'll let you know when it's done."
         ),
         "steps": [],
