@@ -138,6 +138,7 @@ def _run_git(root, args, timeout=15):
         proc = subprocess.run(
             ["git"] + args, cwd=str(root), capture_output=True, text=True,
             timeout=timeout, shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return proc.returncode, proc.stdout, proc.stderr
     except Exception as e:

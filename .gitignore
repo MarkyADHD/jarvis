@@ -47,6 +47,7 @@ dist/
 _build_tools/dist/
 _build_tools/installer_art/*_preview.png
 ai-visualizer/.edge-app-profile/
+jarviscode/.edge-app-profile/
 temp_screenshots/
 /JarvisSetup.exe
 

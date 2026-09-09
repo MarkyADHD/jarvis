@@ -81,6 +81,7 @@ def detect_hardware():
         proc = subprocess.run(
             ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
             capture_output=True, text=True, timeout=5, shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if proc.returncode == 0 and proc.stdout.strip():
             line = proc.stdout.strip().splitlines()[0]

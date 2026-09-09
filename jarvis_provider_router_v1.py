@@ -326,6 +326,7 @@ def install_provider(provider_id, progress_cb=None):
         try:
             proc = subprocess.run(
                 meta["install_cmd"], capture_output=True, text=True, timeout=300, shell=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except Exception as e:
             return False, f"Install failed: {e}"
@@ -413,6 +414,7 @@ def _run_generic_cli(cli_path, extra_args, prompt, system_prompt, timeout):
         proc = subprocess.run(
             [cli_path] + extra_args, input=stdin_text, text=True, encoding="utf-8",
             errors="replace", capture_output=True, timeout=timeout, shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timed out", "result": ""}
@@ -453,6 +455,7 @@ def _run_codex(prompt, system_prompt, timeout):
             proc = subprocess.run(
                 [cli_path, "exec", "--json", "-o", out_file], input=stdin_text, text=True,
                 encoding="utf-8", errors="replace", capture_output=True, timeout=timeout, shell=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except subprocess.TimeoutExpired:
             return {"ok": False, "error": "timed out", "result": ""}
@@ -496,6 +499,7 @@ def _run_opencode_like(prompt, system_prompt, timeout, model_flag=None):
         proc = subprocess.run(
             [cli_path] + args + [stdin_text], text=True, encoding="utf-8", errors="replace",
             capture_output=True, timeout=timeout, shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timed out", "result": ""}
@@ -658,6 +662,7 @@ def _run_qwen_local_download_job(app_module, spoken_name):
         app_module.log(f"Brain: pulling {OLLAMA_TEXT_MODEL} via Ollama...")
         proc = subprocess.run(
             [ollama_cli, "pull", OLLAMA_TEXT_MODEL], capture_output=True, text=True, timeout=3600, shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if proc.returncode != 0:
             app_module.speak(f"The Qwen download failed, {spoken_name}: {clean_stderr(proc.stderr)}")

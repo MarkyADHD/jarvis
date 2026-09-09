@@ -160,6 +160,7 @@ def cli_version() -> str:
             capture_output=True,
             timeout=20,
             shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
         text = clean(proc.stdout or proc.stderr)
@@ -362,6 +363,7 @@ def _run(
             capture_output=True,
             timeout=timeout,
             shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
     except subprocess.TimeoutExpired:
