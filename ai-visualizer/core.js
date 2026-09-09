@@ -365,6 +365,18 @@ const AV = (() => {
         <button id="keylightAuto" style="width:100%">Auto-Connect</button>
         <div id="keylightStatus" class="status"></div>
       </section>
+      <section>
+        <h4>Govee</h4>
+        <div id="goveeStatus" class="status">checking...</div>
+        <div class="row">
+          <input id="goveeInput" type="password" placeholder="Govee API Key">
+          <button id="goveeSave">Save</button>
+        </div>
+        <div class="hint">In the Govee Home app: profile icon (top
+          right) &gt; About Us &gt; Apply for API Key -- usually granted
+          instantly by email. Paste it above and Save. Controls every
+          Govee device on the account, no per-device pairing needed.</div>
+      </section>
     `;
     document.body.appendChild(panel);
 
@@ -562,6 +574,9 @@ const AV = (() => {
           data.hue_connected ? "✓ connected" : "not connected",
           data.hue_connected ? "ok" : "");
         panel.querySelector("#hueDisconnect").style.display = data.hue_connected ? "block" : "none";
+        setStatus(panel.querySelector("#goveeStatus"),
+          data.govee_configured ? "✓ configured" : "not configured",
+          data.govee_configured ? "ok" : "");
       } catch (e) {
         setStatus(panel.querySelector("#spotifyStatus"), "server unreachable", "err");
       }
@@ -596,6 +611,24 @@ const AV = (() => {
         const data = await r.json();
         if (data.ok) { input.value = ""; setStatus(statusEl, "✓ saved -- premium voice active", "ok"); }
         else setStatus(statusEl, data.error || "save failed", "err");
+      } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+    });
+
+    panel.querySelector("#goveeSave").addEventListener("click", async () => {
+      const input = panel.querySelector("#goveeInput");
+      const value = input.value.trim();
+      const statusEl = panel.querySelector("#goveeStatus");
+      if (!value) return;
+      setStatus(statusEl, "verifying with Govee...");
+      try {
+        const r = await fetch(api("/settings/govee"), authed({
+          method: "POST", body: JSON.stringify({ api_key: value }),
+        }));
+        const data = await r.json();
+        if (data.ok) {
+          input.value = "";
+          setStatus(statusEl, `✓ saved -- ${data.device_count} device(s) found`, "ok");
+        } else setStatus(statusEl, data.error || "save failed", "err");
       } catch (e) { setStatus(statusEl, "connection failed", "err"); }
     });
 

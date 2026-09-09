@@ -79,6 +79,10 @@ SECRET_SERVICES = {
         "env": "OPENAI_API_KEY",
         "label": "OpenAI API Key",
     },
+    "govee api key": {
+        "env": "GOVEE_API_KEY",
+        "label": "Govee API Key",
+    },
 }
 
 WAKE_ALIASES = (

@@ -49,6 +49,7 @@ from backtalk import mouth as backtalk_mouth
 import jarvis_settings_v1 as settings
 import jarvis_keylight_v1 as keylight
 import jarvis_hue_v1 as hue
+import jarvis_govee_v1 as govee
 import jarvis_twitch_v1 as twitch
 
 
@@ -145,9 +146,11 @@ def settings_status() -> dict:
     nanoleaf_registry = settings.load_nanoleaf_devices()
     keylight_cache = keylight.load_cache()
     elevenlabs_key = settings.load_secrets().get("ELEVENLABS_API_KEY", "")
+    govee_key = settings.load_secrets().get("GOVEE_API_KEY", "")
     return {
         "spotify_configured": bool(spotify and spotify["configured"]),
         "elevenlabs_configured": bool(elevenlabs_key),
+        "govee_configured": bool(govee_key),
         "nanoleaf_devices": [
             {"name": d.get("name", ""), "host": d.get("host", ""),
              "device_name": d.get("device_name", "")}
@@ -188,6 +191,36 @@ def settings_save_elevenlabs(api_key: str) -> dict:
         except Exception:
             pass
     return {"ok": ok, "error": error}
+
+
+def settings_save_govee(api_key: str) -> dict:
+    """Verifies the key before saving, unlike settings_save_elevenlabs --
+    a Govee key is a cloud credential (no local device it can silently
+    fail to reach later the way a wrong ElevenLabs key just falls back
+    to Kokoro); a bad key here would otherwise "save" successfully and
+    only fail the next time a light command actually ran. Same pattern
+    Nanoleaf pairing already uses (verify by actually contacting the
+    service before persisting)."""
+    api_key = str(api_key or "").strip()
+    if not api_key:
+        return {"ok": False, "error": "No API key entered."}
+
+    import os as _os
+    previous = _os.environ.get("GOVEE_API_KEY")
+    _os.environ["GOVEE_API_KEY"] = api_key
+    try:
+        devices = govee.list_devices()
+    except Exception as e:
+        if previous is not None:
+            _os.environ["GOVEE_API_KEY"] = previous
+        else:
+            _os.environ.pop("GOVEE_API_KEY", None)
+        return {"ok": False, "error": f"Govee rejected that key: {e}"}
+
+    ok, error = settings.save_secret("GOVEE_API_KEY", api_key)
+    if not ok:
+        return {"ok": False, "error": error}
+    return {"ok": True, "device_count": len(devices)}
 
 
 def settings_nanoleaf_pair(host: str) -> dict:
@@ -851,6 +884,7 @@ class Handler(BaseHTTPRequestHandler):
     _SETTINGS_ROUTES = {
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),
         "/settings/elevenlabs": lambda d: settings_save_elevenlabs(str(d.get("api_key", "")).strip()),
+        "/settings/govee": lambda d: settings_save_govee(str(d.get("api_key", "")).strip()),
         "/settings/nanoleaf/pair": lambda d: settings_nanoleaf_pair(str(d.get("host", "")).strip()),
         "/settings/nanoleaf/connect": lambda d: settings_nanoleaf_connect(
             str(d.get("name", "")).strip(), str(d.get("host", "")).strip(), str(d.get("token", "")).strip()),

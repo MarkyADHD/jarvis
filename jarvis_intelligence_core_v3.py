@@ -244,7 +244,7 @@ def intent_family(text: Any) -> str:
         return "spotify"
     if any(w in c for w in ("pause music", "resume music", "next song", "previous song", "volume")):
         return "media"
-    if any(w in c for w in ("nanoleaf", "key light", "keylight", "room lights", "the lights")):
+    if any(w in c for w in ("nanoleaf", "key light", "keylight", "room lights", "the lights", "govee")):
         return "lights"
     if any(w in c for w in ("attached", "attachment", "this image", "this photo", "this file")):
         return "attachment"

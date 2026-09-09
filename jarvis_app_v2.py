@@ -39,6 +39,7 @@ import jarvis_spotify_v2 as spotify_v2
 import jarvis_keylight_v1 as keylight_v1
 import jarvis_nanoleaf_v1 as nanoleaf_v1
 import jarvis_hue_v1 as hue_v1
+import jarvis_govee_v1 as govee_v1
 import jarvis_update_check_v1 as update_check_v1
 import jarvis_twitch_v1 as twitch_v1
 import jarvis_discord_v1 as discord_v1
@@ -433,7 +434,7 @@ def _tool_registry_v1(name):
         "link": lambda command: link_v1.link_command_fast(command, name, app, search_module=search_v4),
         "spotify": lambda command: spotify_v2.spotify_command_fast(command, name, app),
         "media": lambda command: media_v1.media_command_fast(command, name, app),
-        "lights": lambda command: (room_lights_v1.room_lights_command_fast(command, name, app) or nanoleaf_v1.nanoleaf_command_fast(command, name, app) or keylight_v1.keylight_command_fast(command, name, app) or hue_v1.hue_command_fast(command, name, app)),
+        "lights": lambda command: (room_lights_v1.room_lights_command_fast(command, name, app) or nanoleaf_v1.nanoleaf_command_fast(command, name, app) or keylight_v1.keylight_command_fast(command, name, app) or hue_v1.hue_command_fast(command, name, app) or govee_v1.govee_command_fast(command, name, app)),
         "pc": lambda command: (goal_v32.goal_command_fast(command, name, app) or pc_control_v3.operator_command_fast(command, name, app) or operator_v2.operator_command_fast(command, name, app) or operator_v1.operator_command_fast(command, name, app)),
         "attachment": lambda command: attachments_v1.attachment_command_fast(command, name, app),
         "memory": lambda command: memory.memory_command_fast(command, name),
@@ -633,6 +634,10 @@ def quick_handle_command_v2(command):
         hue_result = hue_v1.hue_command_fast(c, name, app)
         if hue_result:
             return finish_plan_v3(hue_result, c, name, "hue")
+
+        govee_result = govee_v1.govee_command_fast(c, name, app)
+        if govee_result:
+            return finish_plan_v3(govee_result, c, name, "govee")
 
     if family == "spotify":
         spotify_result = spotify_v2.spotify_command_fast(c, name, app)

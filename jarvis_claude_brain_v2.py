@@ -504,11 +504,21 @@ def prewarm_ptt_async():
     press, same reasoning as prewarm_voice_async above -- a cold model
     load on the first real press would otherwise hold the mic hand-off
     open for several extra seconds for no reason.
+
+    Also starts ears' persistent PTT mic pump (warm_ptt_stream()) here --
+    without it, every single press opened a brand new PortAudio stream
+    from scratch, and that open latency (commonly 50-300ms) landed AFTER
+    the press already fired, clipping the start of short commands. That
+    was the real cause of "push-to-talk garbles the command without a
+    lead-in word" -- nothing about the word itself, just a throwaway
+    sound absorbing the clipped window. The pump plus its pre-roll
+    buffer fixes it directly instead of needing a sacrificial word.
     """
     def _run():
         try:
             from backtalk import ears
             ears.warm()
+            ears.warm_ptt_stream()
         except Exception:
             pass
 
