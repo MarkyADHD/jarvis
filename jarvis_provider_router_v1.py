@@ -353,9 +353,28 @@ def install_provider(provider_id, progress_cb=None):
             return True, ""
 
         note(f"Installing {meta['label']}'s CLI ({' '.join(meta['install_cmd'])})...")
+
+        # Confirmed live as the actual reported bug ("not actually
+        # running the commands to download them"): on Windows, npm is
+        # itself a .cmd batch file (npm.cmd), and subprocess.run(["npm",
+        # ...], shell=False) raises FileNotFoundError -- CreateProcess
+        # does not do the PATHEXT resolution a real shell would, so the
+        # bare command name was never found at all. This was silently
+        # caught by the except-Exception below and returned as an
+        # unhelpful "Install failed: [WinError 2]..." -- meaning every
+        # install_cmd starting with "npm" (every provider here except
+        # Claude/Kiro) never actually ran, ever. Resolving the first
+        # argument through shutil.which() first (same fix already
+        # applied to find_cli() for the same root cause) gives
+        # subprocess.run() the real, extension-qualified path.
+        cmd = list(meta["install_cmd"])
+        resolved = shutil.which(cmd[0])
+        if resolved:
+            cmd[0] = resolved
+
         try:
             proc = subprocess.run(
-                meta["install_cmd"], capture_output=True, text=True, timeout=300, shell=False,
+                cmd, capture_output=True, text=True, timeout=300, shell=False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except Exception as e:
