@@ -178,6 +178,15 @@ canned replies.
   they are no matter which brain is active, since none of them are
   actually implemented as AI tool calls in the first place
 
+### Get you a ride
+- "Get me an Uber to the airport" opens a real Uber ride request with
+  your destination already filled in and pickup set to your current
+  location — you still tap the final Request button and pay in the
+  real Uber app yourself. Uber's actual booking API isn't open to
+  individual developers (confirmed, not assumed), and even if it were,
+  Jarvis won't spend your money without you confirming it in the
+  moment — this is that boundary by design, not a workaround
+
 ### Keep himself current
 - Ask him to update and he pulls the latest code straight from this
   GitHub repo and restarts himself — no re-running the installer, no

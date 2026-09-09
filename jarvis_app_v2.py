@@ -44,6 +44,7 @@ import jarvis_update_check_v1 as update_check_v1
 import jarvis_twitch_v1 as twitch_v1
 import jarvis_clipper_v1 as clipper_v1
 import jarvis_thumbnail_v1 as thumbnail_v1
+import jarvis_uber_v1 as uber_v1
 import jarvis_provider_router_v1 as provider_router
 import jarvis_onboarding_v1 as onboarding_v1
 import jarvis_discord_v1 as discord_v1
@@ -502,6 +503,10 @@ def quick_handle_command_v2(command):
     thumbnail_result = thumbnail_v1.thumbnail_command_fast(c, name, app)
     if thumbnail_result:
         return finish_plan_v3(thumbnail_result, c, name, "thumbnail")
+
+    uber_result = uber_v1.uber_command_fast(c, name, app)
+    if uber_result:
+        return finish_plan_v3(uber_result, c, name, "uber")
 
     if c in {"open jarviscode", "open jarvis code", "launch jarviscode", "launch jarvis code", "start jarviscode", "start jarvis code"}:
         try:
