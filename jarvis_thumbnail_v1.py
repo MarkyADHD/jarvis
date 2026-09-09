@@ -2,27 +2,27 @@
 Jarvis Thumbnail V1
 ====================
 
-Generates and edits YouTube/Twitch thumbnails using Google's Gemini
-image-generation model (nano-banana, model id "gemini-2.5-flash-image").
+Generates and edits YouTube/Twitch thumbnails. Primary backend is
+Pollinations.ai's free image API -- no API key, no billing, no card,
+period. This replaced an earlier Gemini ("nano-banana") backend after
+Google's free tier turned out to hand out zero actual request quota for
+image models without a billing account attached (confirmed live: a
+freshly created API key came back "RESOURCE_EXHAUSTED ... limit: 0" on
+the very first call). The user's own Gemini/Google One subscription does
+not help here either -- that's a separate consumer billing system from
+the developer API/Cloud project a key is issued under, so it doesn't
+carry over any quota.
 
-WHY GEMINI, NOT CLAUDE: Claude is a text-only model -- there is no image
-output path in it at any tier, this isn't a training gap that can be
-closed. Actual image generation needs a different model family entirely.
-Gemini was picked over OpenAI/Stability because its free tier does real
-image generation under a daily quota with no credit card required, which
-was the user's explicit requirement (confirmed live in conversation).
+WHY NOT CLAUDE: Claude is a text-only model -- there is no image output
+path in it at any tier, this isn't a training gap that can be closed.
 
-WHY NOT "TRAIN" ON REFERENCE THUMBNAILS: nobody fine-tunes an image model
-off a folder of screenshots for a job like this. What actually works, and
-what this module does, is pass a handful of the user's saved reference
-thumbnails (drop files from VanosGaming, Sm1thy, etc. into
-STYLE_REFERENCES_DIR) straight into the same request as image inputs
-alongside the text prompt -- Gemini looks at them and matches the style
-(bold outlined text, exaggerated expressions, high-contrast pop
-backgrounds) for the new thumbnail rather than inventing its own look.
-Same mechanism doubles as thumbnail EDITING: pass an existing thumbnail
-as the image input with an instruction ("swap the text to say X",
-"make the background more blue") instead of a text-only prompt.
+TRADEOFF vs the old Gemini path: Pollinations' free endpoint is a plain
+text-to-image call, so it can't take the user's saved style-reference or
+"My Assets" images as literal inputs the way Gemini could. Those folders
+and the style/asset notes below are kept as TEXT guidance baked into the
+prompt instead (bold outlined text, exaggerated expressions, high-contrast
+colors) -- real image-conditioned style transfer would need a paid/keyed
+backend again.
 
 Examples:
     Jarvis make me a thumbnail for my GTA stream
@@ -31,11 +31,13 @@ Examples:
     Jarvis edit this thumbnail to say COMEBACK KING
 """
 import io
-import os
 import re
 import threading
 import time
+import urllib.parse
 from pathlib import Path
+
+import requests
 
 THUMBNAILS_ROOT = Path.home() / "Desktop" / "Jarvis Thumbnails"
 STYLE_REFERENCES_DIR = THUMBNAILS_ROOT / "Style References"
@@ -49,10 +51,10 @@ MY_ASSETS_DIR = THUMBNAILS_ROOT / "My Assets"
 
 # gemini-2.5-flash-image ("nano banana") is Gemini's current image
 # generation/editing model, reachable on the free API tier under a daily
-# quota -- confirmed against Google's own model listing, not guessed.
-MODEL_NAME = "gemini-2.5-flash-image"
+# Pollinations.ai free image endpoint -- no key, no billing, no account.
+POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
 
-MAX_STYLE_REFERENCES = 4  # keep the request small/fast; more doesn't help style transfer
+MAX_STYLE_REFERENCES = 4  # kept only to cap how many refs we glance at for a text note
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 TRIGGER_PHRASES = (
@@ -69,16 +71,6 @@ TRIGGER_PHRASES = (
 
 _JOB_LOCK = threading.Lock()
 _JOB_RUNNING = False
-
-
-def _client():
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError(
-            "no Gemini API key is configured -- say \"change my gemini api key\" first"
-        )
-    from google import genai
-    return genai.Client(api_key=api_key)
 
 
 def is_thumbnail_request(command):
@@ -98,32 +90,10 @@ def _extract_subject(command):
     return c
 
 
-def _load_images_from(directory, limit):
+def _has_images(directory):
     if not directory.exists():
-        return []
-
-    files = sorted(
-        (f for f in directory.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
-    )
-
-    from PIL import Image
-    images = []
-    for f in files[:limit]:
-        try:
-            images.append(Image.open(f).convert("RGB"))
-        except Exception:
-            continue
-    return images
-
-
-def _load_style_references(limit=MAX_STYLE_REFERENCES):
-    return _load_images_from(STYLE_REFERENCES_DIR, limit)
-
-
-def _load_my_assets(limit=MAX_STYLE_REFERENCES):
-    return _load_images_from(MY_ASSETS_DIR, limit)
+        return False
+    return any(f.suffix.lower() in IMAGE_EXTENSIONS for f in directory.iterdir())
 
 
 def _safe_filename(text):
@@ -133,93 +103,39 @@ def _safe_filename(text):
 
 
 def generate_thumbnail(subject, edit_image_path=None):
-    """Generates a new thumbnail (or edits one if edit_image_path is given).
-    Style References images teach LOOK ONLY (composition/text treatment/
-    color/energy) -- the prompt explicitly forbids reproducing the actual
-    people/characters/mascots shown in them, since those belong to other
-    creators. My Assets images (the user's own face/character/logo) are
-    what actually gets featured as the subject, when present. Returns the
-    saved output Path."""
-    from google.genai import types
-
-    client = _client()
-    style_refs = _load_style_references()
-    my_assets = _load_my_assets()
-
-    contents = []
-    if style_refs:
-        contents.extend(style_refs)
-    if my_assets:
-        contents.extend(my_assets)
-
-    style_note = ""
-    if style_refs:
-        style_note = (
-            " Match the VISUAL STYLE of the reference images provided -- "
-            "bold outlined text, exaggerated expressive faces, high-contrast "
-            "pop background, vivid saturated colors, energetic composition. "
-            "Do NOT reproduce, copy, or reference the specific people, "
-            "characters, mascots, logos, or watermarks shown in those "
-            "reference images -- they belong to other creators. They are a "
-            "style guide only, never subject matter."
-        )
-
-    asset_note = ""
-    if my_assets:
-        asset_note = (
-            " Feature the character/person/logo shown in the other "
-            "provided image(s) (the user's own assets) as the actual "
-            "subject of the thumbnail."
-        )
+    """Generates a new thumbnail (or edits one if edit_image_path is given)
+    via Pollinations.ai's free text-to-image endpoint. There's no image-input
+    support on this free backend, so Style References/My Assets only inform
+    the prompt as text notes rather than being fed in as literal image
+    conditioning. Returns the saved output Path."""
+    has_style_refs = _has_images(STYLE_REFERENCES_DIR)
+    has_my_assets = _has_images(MY_ASSETS_DIR)
 
     if edit_image_path:
-        from PIL import Image
-        contents.append(Image.open(edit_image_path).convert("RGB"))
-        instruction = (
-            f"Edit this thumbnail image as follows: {subject}. "
-            f"Keep it looking like a punchy, high-CTR YouTube/Twitch gaming "
-            f"thumbnail -- bold readable text with a thick outline, high "
-            f"contrast, vivid colors."
+        prompt = (
+            f"A punchy, high-CTR YouTube/Twitch gaming thumbnail, edited so that: "
+            f"{subject}. Bold readable text with a thick outline, high contrast, "
+            f"vivid colors, exaggerated expressive faces."
         )
     else:
-        instruction = (
-            f"Create a brand new YouTube/Twitch gaming thumbnail about: "
-            f"{subject or 'the stream'}."
-            f"{style_note}"
-            f"{asset_note}"
+        prompt = (
+            f"A YouTube/Twitch gaming thumbnail about: {subject or 'the stream'}. "
+            f"Bold outlined text, exaggerated expressive faces, high-contrast "
+            f"vivid pop-art colors, energetic composition, clean layout."
         )
-        if not style_refs and not my_assets:
-            instruction += (
-                " Bold text with a thick outline, exaggerated expressive "
-                "faces if a person is shown, high-contrast vivid colors, "
-                "clean composition."
-            )
+        if has_my_assets:
+            prompt += " Feature the streamer's own character/logo prominently as the subject."
+        if has_style_refs:
+            prompt += " Match the aggressive, eye-catching style of top gaming thumbnails."
 
-    contents.append(instruction)
-
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=contents,
-    )
-
-    image_bytes = None
-    for candidate in getattr(response, "candidates", None) or []:
-        parts = getattr(candidate.content, "parts", None) or []
-        for part in parts:
-            inline = getattr(part, "inline_data", None)
-            if inline and getattr(inline, "data", None):
-                image_bytes = inline.data
-                break
-        if image_bytes:
-            break
-
-    if not image_bytes:
-        raise RuntimeError("Gemini didn't return an image -- it may have refused the prompt")
+    url = POLLINATIONS_URL.format(prompt=urllib.parse.quote(prompt)) + "?width=1280&height=720&nologo=true"
+    response = requests.get(url, timeout=90)
+    response.raise_for_status()
 
     from PIL import Image
     THUMBNAILS_ROOT.mkdir(parents=True, exist_ok=True)
     out_path = THUMBNAILS_ROOT / f"{_safe_filename(subject)}_{int(time.time())}.png"
-    Image.open(io.BytesIO(image_bytes)).save(out_path)
+    Image.open(io.BytesIO(response.content)).convert("RGB").save(out_path)
     return out_path
 
 
@@ -263,17 +179,6 @@ def thumbnail_command_fast(command, spoken_name="Sir", app_module=None):
 
     if not is_thumbnail_request(command):
         return None
-
-    if not os.environ.get("GEMINI_API_KEY", "").strip():
-        return {
-            "mode": "chat",
-            "reply": (
-                f"I don't have a Gemini API key set up yet, {spoken_name}. "
-                f"Grab a free one from Google AI Studio, then say "
-                f"\"change my gemini api key\" and I'll take it from there."
-            ),
-            "steps": [],
-        }
 
     with _JOB_LOCK:
         if _JOB_RUNNING:
