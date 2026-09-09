@@ -102,7 +102,11 @@ if not MEMORY_ROOT.exists():
 
 CLIPS_ROOT = Path.home() / "Desktop" / "Jarvis Clips"
 
-DEFAULT_MAX_CLIPS = 5
+# Raised from an original 5 (users hit this ceiling constantly on longer
+# VODs) to a real ceiling of 25 -- Claude's judgment pass in
+# judge_candidates still decides how many of those are actually good, so
+# this is a cap, not a target: a quiet VOD can still come back with 3.
+DEFAULT_MAX_CLIPS = 25
 DEFAULT_CLIP_SECONDS = 30
 DEFAULT_LEAD_IN_SECONDS = 8  # clip starts this long before the detected spike
 
@@ -121,13 +125,17 @@ MIN_GAP_BETWEEN_CLIPS_SECONDS = 90  # don't cut two clips from the same moment
 # candidates than the final clip count so Claude's judgment pass (see
 # judge_candidates below) has real options to choose between rather than
 # rubber-stamping whatever loudness already capped at the final number.
-CANDIDATE_POOL_SIZE = 15
+# Must stay comfortably above DEFAULT_MAX_CLIPS or a 25-clip request could
+# never be satisfied even on a VOD packed with genuine highlights.
+CANDIDATE_POOL_SIZE = 60
 
 # Almost always intro/stinger/hype-music territory on a stream, not
 # actual content -- confirmed live as the cause of the stream intro
 # getting clipped. Ruled out before any judgment call, not left to
-# Claude to catch every time.
-INTRO_SKIP_SECONDS = 100
+# Claude to catch every time. Raised from 100s to a full 10 minutes per
+# the user's own call -- most stream openers (waiting-for-raid screens,
+# "just getting set up" chat, intro loops) run well past 100s.
+INTRO_SKIP_SECONDS = 600
 
 # How much audio around each candidate spike gets transcribed for
 # Claude's judgment call -- wide enough to capture a whole reaction/joke,
@@ -455,7 +463,9 @@ _JUDGE_SYSTEM_PROMPT = """You are curating short highlight clips from a livestre
 
 You will be given a numbered list of candidate moments, each with a timestamp and a transcript of roughly 30 seconds of speech around that moment. These candidates were already pre-filtered by audio loudness, so some are genuinely exciting moments and others are just loud stream noise (ad breaks, dead air, someone bumping their mic, mundane chatter that happened to be loud).
 
-Judge each candidate on whether it would actually make a good standalone social media clip: a joke landing, a big reaction, a surprising or quotable moment, genuine excitement. Reject anything that reads as mundane, incoherent, an ad/sponsor read, or has no real content (e.g. an empty or nonsense transcript).
+Judge each candidate on whether it would actually make a good standalone social media clip: something FUNNY, EPIC, impressive, a big reaction, a surprising or quotable moment, genuine excitement -- the kind of moment someone would actually stop scrolling for. Reject anything that reads as mundane, incoherent, an ad/sponsor read, filler chat, or has no real content (e.g. an empty or nonsense transcript).
+
+Be a real curator, not a quota-filler: you may be shown up to 60 candidates and asked for as many as 25 keepers, but only mark "keep": true for moments that are genuinely good. A quiet or low-energy VOD might only have 3 real highlights in it -- approving mediocre moments just to reach a higher number is the wrong call every time. Quality over quantity.
 
 Respond with ONLY a JSON array, one object per candidate, in the same order given:
 [{"index": 0, "keep": true, "reason": "one short phrase why"}, ...]
