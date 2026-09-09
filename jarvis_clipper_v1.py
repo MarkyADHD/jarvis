@@ -42,12 +42,26 @@ downloading the full VOD in high quality. Only the analysis pass reads
 the whole VOD once (audio only, ~30x realtime).
 
 Uses jarvis_twitch_v1's existing OAuth connection (_helix_headers()) --
-no separate Twitch login needed.
+no separate Twitch login needed. Two live features on top of the VOD
+scanner above, both against Twitch's own real APIs, both needing
+clips:edit / channel:edit:commercial scopes that were added after the
+original connection existed (see has_required_scopes()):
+
+- "clip that" -- triggers Twitch's own native clip creation against
+  whatever's live right now (the same thing the clip button or a chat
+  !clip command does), then downloads the finished clip locally once
+  Twitch is done processing it.
+- "run ads" -- starts a real Twitch ad break (default 30s) on the live
+  stream via the Start Commercial endpoint. Only works while live, and
+  only for Partner/Affiliate channels -- both Twitch's own requirements.
 
 Examples:
     Jarvis find clips from my last stream
     Jarvis make clips from my last vod
     Jarvis clip my last stream
+    Jarvis clip that
+    Jarvis run ads
+    Jarvis run a 60 second ad
 """
 import json
 import re
@@ -158,6 +172,131 @@ def resolve_stream_url(vod_url):
         info = ydl.extract_info(vod_url, download=False)
 
     return info["url"], int(info.get("duration") or 0)
+
+
+# -------------------------------------------------------------------------
+# "Clip that" -- live clipping, and the ad-break command
+# -------------------------------------------------------------------------
+
+CLIP_READY_POLL_SECONDS = 3.0
+CLIP_READY_TIMEOUT_SECONDS = 30.0
+
+
+def has_required_scopes():
+    """clips:edit and channel:edit:commercial were both added after the
+    original Twitch connection existed on this and other machines --
+    Twitch has no way to add a scope to an already-issued token, so a
+    connection made before this shipped is simply missing them. Checked
+    before either live feature runs so the failure is a clear "reconnect
+    Twitch" message instead of a confusing raw 401 from Twitch itself."""
+    scopes = set(twitch.token_scopes())
+    return {"clips:edit", "channel:edit:commercial"}.issubset(scopes)
+
+
+def create_live_clip():
+    """Triggers Twitch's own native clip creation (the same thing the
+    clip button or a chat !clip command does) against whatever's live
+    RIGHT NOW, then downloads the finished clip locally once Twitch is
+    done processing it. Clip creation only works while actually
+    streaming -- Twitch clips a live broadcast, not a VOD already ended.
+
+    Returns (clip_path, clip_url). Raises RuntimeError with a clear
+    message on any failure (not live, scope missing, Twitch never
+    finished processing in time, etc)."""
+    if not has_required_scopes():
+        raise RuntimeError(
+            "Twitch needs to be reconnected -- clip creation needs a permission "
+            "this connection doesn't have yet. Reconnect it from the settings panel."
+        )
+
+    headers, broadcaster_id = twitch._helix_headers()
+
+    r = requests.post(
+        f"{twitch.HELIX}/clips", headers=headers,
+        params={"broadcaster_id": broadcaster_id}, timeout=10,
+    )
+    if r.status_code == 404:
+        raise RuntimeError("You need to be live on Twitch for me to clip anything.")
+    r.raise_for_status()
+    data = r.json().get("data", [])
+    if not data:
+        raise RuntimeError("Twitch didn't return a clip.")
+
+    clip_id = data[0]["id"]
+    clip_url = f"https://clips.twitch.tv/{clip_id}"
+
+    # "Creating a clip is an asynchronous operation" (Twitch's own docs)
+    # -- poll Get Clips until it has a thumbnail, Twitch's own signal
+    # that processing actually finished, rather than guessing a fixed
+    # delay and racing a download against a clip that isn't ready.
+    deadline = time.time() + CLIP_READY_TIMEOUT_SECONDS
+    ready = False
+    while time.time() < deadline:
+        time.sleep(CLIP_READY_POLL_SECONDS)
+        check = requests.get(
+            f"{twitch.HELIX}/clips", headers=headers,
+            params={"id": clip_id}, timeout=10,
+        )
+        if check.status_code == 200:
+            items = check.json().get("data", [])
+            if items and items[0].get("thumbnail_url"):
+                ready = True
+                break
+
+    if not ready:
+        # Not a failure -- the clip exists on Twitch either way, just
+        # slower to process than expected. Hand back the URL so it's
+        # still usable even without a local download.
+        raise RuntimeError(
+            f"The clip is still processing on Twitch's side -- it'll be ready "
+            f"shortly at {clip_url}, just took longer than usual to download."
+        )
+
+    created = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    output_dir = CLIPS_ROOT / "Live Clips"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    clip_path = output_dir / f"clip_{created}.mp4"
+
+    if yt_dlp is None:
+        raise RuntimeError(f"Clip created at {clip_url}, but yt-dlp isn't installed to download it locally.")
+
+    opts = {"quiet": True, "no_warnings": True, "format": "best", "outtmpl": str(clip_path)}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.download([clip_url])
+
+    return clip_path, clip_url
+
+
+def start_commercial(length=30):
+    """Runs a real Twitch ad break on the live stream. Only works while
+    live, and only for Partner/Affiliate channels -- both requirements
+    are Twitch's own, not something this can work around. `length` must
+    be one of Twitch's accepted durations; anything else gets rounded
+    to the nearest one."""
+    if not has_required_scopes():
+        raise RuntimeError(
+            "Twitch needs to be reconnected -- running ads needs a permission "
+            "this connection doesn't have yet. Reconnect it from the settings panel."
+        )
+
+    valid_lengths = (30, 60, 90, 120, 150, 180)
+    length = min(valid_lengths, key=lambda v: abs(v - int(length)))
+
+    headers, broadcaster_id = twitch._helix_headers()
+    r = requests.post(
+        f"{twitch.HELIX}/channels/commercial", headers=headers,
+        json={"broadcaster_id": broadcaster_id, "length": length}, timeout=10,
+    )
+
+    if r.status_code == 400:
+        raise RuntimeError("Twitch refused that -- you need to be live, and only the broadcaster (not a mod) can start ads.")
+    r.raise_for_status()
+
+    data = r.json().get("data", [])
+    if not data:
+        raise RuntimeError("Twitch didn't confirm the ad started.")
+
+    return data[0]
 
 
 # -------------------------------------------------------------------------
@@ -446,10 +585,64 @@ TRIGGER_PHRASES = (
     "find me some clips", "make me some clips",
 )
 
+LIVE_CLIP_PHRASES = ("clip that", "clip this", "clip it")
+
+AD_PHRASES_RE = re.compile(
+    r"\brun\s+(?:a\s+|an\s+)?(?:(\d+)\s*(?:second|sec)s?\s+)?ads?\b|"
+    r"\bstart\s+(?:a\s+|an\s+)?(?:(\d+)\s*(?:second|sec)s?\s+)?(?:ad|commercial)\b|"
+    r"\brun\s+(?:a\s+|an\s+)?commercial\b"
+)
+
 
 def is_clipper_request(command):
     c = str(command or "").strip().lower()
     return any(phrase in c for phrase in TRIGGER_PHRASES)
+
+
+def is_live_clip_request(command):
+    c = str(command or "").strip().lower()
+    return any(phrase in c for phrase in LIVE_CLIP_PHRASES)
+
+
+def is_ad_request(command):
+    c = str(command or "").strip().lower()
+    return bool(AD_PHRASES_RE.search(c))
+
+
+def _requested_ad_length(command):
+    m = AD_PHRASES_RE.search(str(command or "").strip().lower())
+    if not m:
+        return 30
+    for group in m.groups():
+        if group:
+            return int(group)
+    return 30
+
+
+def _run_live_clip_job(app_module, spoken_name):
+    try:
+        clip_path, clip_url = create_live_clip()
+        app_module.speak(f"Clipped that, {spoken_name}.")
+        try:
+            app_module.log(f"Clipper: live clip saved to {clip_path} ({clip_url})")
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            app_module.speak(f"I couldn't clip that, {spoken_name}: {e}")
+        except Exception:
+            pass
+
+
+def _run_ad_job(app_module, spoken_name, length):
+    try:
+        result = start_commercial(length=length)
+        app_module.speak(f"Running a {result.get('length', length)} second ad, {spoken_name}.")
+    except Exception as e:
+        try:
+            app_module.speak(f"I couldn't start the ad, {spoken_name}: {e}")
+        except Exception:
+            pass
 
 
 def _run_job(app_module, spoken_name):
@@ -497,6 +690,31 @@ def _run_job(app_module, spoken_name):
 
 def clipper_command_fast(command, spoken_name="Sir", app_module=None):
     global _JOB_RUNNING
+
+    if is_live_clip_request(command):
+        if not twitch.is_connected():
+            return {
+                "mode": "chat",
+                "reply": f"Twitch isn't connected yet, {spoken_name}. Connect it from the settings panel first.",
+                "steps": [],
+            }
+        threading.Thread(
+            target=_run_live_clip_job, args=(app_module, spoken_name), daemon=True,
+        ).start()
+        return {"mode": "chat", "reply": f"Clipping that now, {spoken_name}.", "steps": []}
+
+    if is_ad_request(command):
+        if not twitch.is_connected():
+            return {
+                "mode": "chat",
+                "reply": f"Twitch isn't connected yet, {spoken_name}. Connect it from the settings panel first.",
+                "steps": [],
+            }
+        length = _requested_ad_length(command)
+        threading.Thread(
+            target=_run_ad_job, args=(app_module, spoken_name, length), daemon=True,
+        ).start()
+        return {"mode": "chat", "reply": f"Starting a {length} second ad, {spoken_name}.", "steps": []}
 
     if not is_clipper_request(command):
         return None

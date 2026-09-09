@@ -39,7 +39,13 @@ REDIRECT_URI = "http://localhost:8792/twitch/callback"
 AUTHORIZE_URL = "https://id.twitch.tv/oauth2/authorize"
 TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 HELIX = "https://api.twitch.tv/helix"
-SCOPES = "channel:manage:broadcast user:read:email"
+# clips:edit -- JarvisClipper's live "clip that" (create_clip below).
+# channel:edit:commercial -- JarvisClipper's "run ads" (start_commercial
+# below). Both added after the original connection; anyone who connected
+# Twitch before these existed has a token missing these scopes and needs
+# to reconnect once (Twitch has no way to add a scope to an existing
+# token -- a fresh authorize is the only way, same as any OAuth app).
+SCOPES = "channel:manage:broadcast channel:edit:commercial clips:edit user:read:email"
 
 MEMORY_ROOT = Path("E:/JarvisMemory")
 if not MEMORY_ROOT.exists():
@@ -102,7 +108,17 @@ def load_config():
         "login": str(raw.get("login", "") or ""),
         "broadcaster_id": str(raw.get("broadcaster_id", "") or ""),
         "expires_at": float(raw.get("expires_at", 0) or 0),
+        "scope": raw.get("scope", []) or [],
     }
+
+
+def token_scopes():
+    """The scopes Twitch actually granted this token, straight from its
+    own token response -- not just what this file currently asks for in
+    SCOPES. A connection made before clips:edit/channel:edit:commercial
+    existed genuinely doesn't have them; this is how that gets detected
+    instead of guessed."""
+    return list(load_config()["scope"])
 
 
 def save_credentials(client_id, client_secret):
@@ -116,11 +132,13 @@ def save_credentials(client_id, client_secret):
     _save_raw(raw)
 
 
-def _save_tokens(access_token, refresh_token, expires_in):
+def _save_tokens(access_token, refresh_token, expires_in, scope=None):
     raw = _load_raw()
     raw["access_token_protected"] = _protect(access_token)
     raw["refresh_token_protected"] = _protect(refresh_token)
     raw["expires_at"] = time.time() + int(expires_in or 0) - 60  # refresh a minute early
+    if scope is not None:
+        raw["scope"] = list(scope)
     _save_raw(raw)
 
 
@@ -168,7 +186,7 @@ def exchange_code(code):
     }, timeout=10)
     r.raise_for_status()
     data = r.json()
-    _save_tokens(data["access_token"], data["refresh_token"], data.get("expires_in", 0))
+    _save_tokens(data["access_token"], data["refresh_token"], data.get("expires_in", 0), data.get("scope"))
 
     user = _helix_get_self(data["access_token"], cfg["client_id"])
     _save_identity(user["login"], user["id"])
@@ -190,7 +208,10 @@ def _refresh_if_needed():
     }, timeout=10)
     r.raise_for_status()
     data = r.json()
-    _save_tokens(data["access_token"], data.get("refresh_token", cfg["refresh_token"]), data.get("expires_in", 0))
+    _save_tokens(
+        data["access_token"], data.get("refresh_token", cfg["refresh_token"]),
+        data.get("expires_in", 0), data.get("scope"),
+    )
     return data["access_token"]
 
 

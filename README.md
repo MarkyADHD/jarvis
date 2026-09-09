@@ -78,6 +78,15 @@ canned replies.
   and no auto-posting anywhere without you looking first
 - Runs as a background job and tells you out loud (plus opens the
   folder) the moment it's done
+- **Say "clip that" while you're live** and he clips the moment
+  instantly, using Twitch's own real clip creation, then saves it
+  locally too — no waiting for the VOD to end
+- **Say "run ads"** for a real 30-second ad break on your stream
+  (any length up to 180s if you ask, e.g. "run a 60 second ad") — same
+  official Start Commercial endpoint the Twitch dashboard itself uses
+- Both live features need your Twitch connection reconnected once from
+  the settings panel if it predates this — Twitch has no way to add a
+  new permission to an existing connection
 
 ### Show you what he's doing
 - A live animated face (the HUD) that reacts to whether he's idle,
