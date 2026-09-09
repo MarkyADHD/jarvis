@@ -1,0 +1,41 @@
+name: CI
+
+# Deliberately minimal: this project's real tests need actual hardware
+# and live services (Spotify, Twitch, smart lights, a microphone, a
+# Claude Pro login) that a GitHub-hosted runner simply doesn't have --
+# trying to run those here would just fail for reasons that have
+# nothing to do with whether the change is actually broken. What CI CAN
+# usefully catch before a release ships: a syntax error slipping through
+# (confirmed happens -- every fix this session was manually compile-
+# checked by hand, one file at a time, which doesn't scale and is easy
+# to forget a file on), and jarvis_response_v2's own parser tests, which
+# are pure stdlib (json/re only) and need nothing external at all.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  compile-check:
+    name: Python syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile every tracked Python file
+        run: python -m compileall -q .
+
+  response-parser-tests:
+    name: Response parser regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run jarvis_response_v2 tests
+        run: python jarvis_test_response_parser.py
