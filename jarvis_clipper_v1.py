@@ -324,6 +324,25 @@ def start_commercial(length=30):
 
     if r.status_code == 400:
         raise RuntimeError("Twitch refused that -- you need to be live, and only the broadcaster (not a mod) can start ads.")
+
+    if r.status_code == 429:
+        # Confirmed live + in Twitch's own developer community: Start
+        # Commercial is one of a handful of Helix endpoints that reuses
+        # 429 for a reason that has nothing to do with the general API
+        # rate limit -- here, it's Twitch's own ad-break cooldown (you
+        # can't run another ad again immediately after one just ran).
+        # raise_for_status() alone only ever gave a generic, useless
+        # "429 Client Error: Too Many Requests" with no explanation --
+        # the actual reason is in the response body, not the status line.
+        try:
+            detail = str(r.json().get("message", "") or "").strip()
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            "Twitch says you need to wait before running another ad -- there's a "
+            "cooldown between ad breaks." + (f" ({detail})" if detail else "")
+        )
+
     r.raise_for_status()
 
     data = r.json().get("data", [])
