@@ -2,6 +2,7 @@ import os
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -10,7 +11,13 @@ GOOGLE_API_KEY_ENV = "JARVIS_GOOGLE_API_KEY"
 GOOGLE_CX_ENV = "JARVIS_GOOGLE_CX"
 
 SEARCH_TIMEOUT_SECONDS = 15
-PAGE_TIMEOUT_SECONDS = 12
+# Was 12 -- confirmed live as a real contributor to "sometimes 40 second"
+# replies: a single slow/unresponsive page ate a full 12s before giving
+# up, sequentially, once per page. A legitimate page responds in well
+# under this; anything actually taking 12s is far more likely dead or
+# blocking outright than "about to respond a moment later", so failing
+# faster costs almost nothing in practice.
+PAGE_TIMEOUT_SECONDS = 6
 MAX_PAGE_CHARS = 7000
 
 
@@ -417,17 +424,34 @@ def web_research(query, max_results=5):
         if "credentials" in str(e).lower() or "api" in str(e).lower() or "cx" in str(e).lower():
             output["setup_needed"] = True
 
-    for result in output["results"][:3]:
-        source = str(result.get("source", ""))
+    # Fetched concurrently, not one at a time -- these are independent
+    # HTTP requests to different sites, so the old sequential loop made
+    # total latency the SUM of every page's fetch time (worst case,
+    # 3 x PAGE_TIMEOUT_SECONDS if all three happened to be slow) instead
+    # of just the slowest one. Confirmed live as a real contributor to
+    # "sometimes 40 second" replies. Order preserved in the output
+    # (submitted and collected by original result order) even though
+    # they don't necessarily finish in that order, so this doesn't
+    # quietly change downstream ranking/precision behaviour.
+    to_fetch = [
+        r for r in output["results"][:3]
+        if str(r.get("source", "")) != "direct_profile_candidate"
+    ]
 
-        if source == "direct_profile_candidate":
-            continue
-
-        try:
-            page = read_webpage(result["url"])
-            output["pages"].append(page)
-        except Exception as e:
-            output["notes"].append(f"Could not read page: {result.get('url')} | {e}")
+    if to_fetch:
+        with ThreadPoolExecutor(max_workers=len(to_fetch)) as pool:
+            futures = {pool.submit(read_webpage, r["url"]): r for r in to_fetch}
+            pages_by_result = {}
+            for future in as_completed(futures):
+                result = futures[future]
+                try:
+                    pages_by_result[id(result)] = future.result()
+                except Exception as e:
+                    output["notes"].append(f"Could not read page: {result.get('url')} | {e}")
+            for result in to_fetch:
+                page = pages_by_result.get(id(result))
+                if page is not None:
+                    output["pages"].append(page)
 
     return output
 
