@@ -245,11 +245,13 @@ def create_live_clip():
 
     if not ready:
         # Not a failure -- the clip exists on Twitch either way, just
-        # slower to process than expected. Hand back the URL so it's
-        # still usable even without a local download.
+        # slower to process than expected. The URL still goes in the log
+        # (see _run_live_clip_job) for whoever wants it -- just never
+        # spoken out loud, a full clips.twitch.tv URL read aloud is
+        # useless to actually act on.
         raise RuntimeError(
-            f"The clip is still processing on Twitch's side -- it'll be ready "
-            f"shortly at {clip_url}, just took longer than usual to download."
+            "The clip is still processing on Twitch's side -- it took longer "
+            "than usual, but it exists and will be ready shortly."
         )
 
     created = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -258,7 +260,7 @@ def create_live_clip():
     clip_path = output_dir / f"clip_{created}.mp4"
 
     if yt_dlp is None:
-        raise RuntimeError(f"Clip created at {clip_url}, but yt-dlp isn't installed to download it locally.")
+        raise RuntimeError("Clip created on Twitch, but yt-dlp isn't installed to download it locally.")
 
     opts = {"quiet": True, "no_warnings": True, "format": "best", "outtmpl": str(clip_path)}
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -622,7 +624,7 @@ def _requested_ad_length(command):
 def _run_live_clip_job(app_module, spoken_name):
     try:
         clip_path, clip_url = create_live_clip()
-        app_module.speak(f"Clipped that, {spoken_name}.")
+        app_module.speak(f"Clip created, {spoken_name}.")
         try:
             app_module.log(f"Clipper: live clip saved to {clip_path} ({clip_url})")
         except Exception:
