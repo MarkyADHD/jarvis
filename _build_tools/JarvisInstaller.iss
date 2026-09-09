@@ -47,7 +47,7 @@ DisableProgramGroupPage=yes
 
 [Messages]
 WelcomeLabel1=Welcome to the %n[name] Setup Wizard
-WelcomeLabel2=This installs JARVIS -- a personal AI assistant that runs on your own Claude account, controls your PC, plays your music, and runs your smart lights.%n%nCreated by MarkyADHD.%n%nInstalling to C:\AI-Agent (fixed -- several files reference this path directly).
+WelcomeLabel2=This installs JARVIS -- a personal AI assistant that runs on your own Claude account, controls your PC, plays your music, and runs your smart lights.%n%nCreated by MarkyADHD. Tested by Treeloc.%n%nInstalling to C:\AI-Agent (fixed -- several files reference this path directly).
 
 [Types]
 Name: "full"; Description: "Full installation"
