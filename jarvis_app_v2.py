@@ -1486,13 +1486,26 @@ _CODING_TASK_PATTERNS = (
 _PROJECT_BUILD_TARGETS = (
     "website", "web page", "webpage", "web app", "landing page",
     "app", "application", "program", "script", "game", "tool",
+    # Game-dev/server-project phrasing specifically -- "help me code a
+    # fivem server" or "build a minecraft plugin" contains none of the
+    # words above (no "game", no "app"), so it fell through to ordinary
+    # chat's 150s/medium-effort treatment exactly like "make a website"
+    # once did before that got fixed. Real coding work either way.
+    "server", "plugin", "mod", "datapack", "fivem", "minecraft",
+    "discord bot", "resource pack",
 )
 _PROJECT_BUILD_VERBS = (
     "make", "build", "create", "update", "edit", "fix", "change",
     "add to", "improve", "redesign", "rewrite", "modify", "code",
+    "help me", "help with", "write",
 )
 
-CODING_TASK_TIMEOUT_SECONDS = 600.0
+# Was 600s (10 minutes) -- confirmed too tight for "full blown website"
+# or "fivem server" scale requests, which can genuinely run through many
+# tool calls (plan, several files, styling, testing) well past that.
+# Ordinary conversation is untouched -- this ceiling only ever applies
+# once _looks_like_coding_task() below has already said yes.
+CODING_TASK_TIMEOUT_SECONDS = 1800.0
 
 
 def _looks_like_coding_task(text):

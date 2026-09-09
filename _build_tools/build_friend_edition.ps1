@@ -69,12 +69,11 @@ $excludeDirs = @(
     ".maintenance_v2\installations",
     "ai-visualizer\.edge-app-profile",
     "_build_tools",
-    # Jarvis now builds real deliverables (websites, scripts) directly
-    # when asked, straight into the project root by default -- those
-    # are the user's own generated content, not part of Jarvis itself,
-    # and must never end up bundled into the public friend-edition
-    # installer. Add any other project-output folder names here as
-    # they come up.
+    # CLAUDE.md now sends every generated deliverable (websites, game
+    # servers/plugins, scripts) to Desktop\Jarvis Projects\ instead of
+    # this repo, specifically so nothing like this ever needs to land
+    # here again -- kept as a harmless defensive leftover from before
+    # that convention existed, not an actively-needed exclusion anymore.
     "website"
 ) | ForEach-Object { Join-Path $Source $_ }
 
