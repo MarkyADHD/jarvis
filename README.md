@@ -91,11 +91,15 @@ canned replies.
 ### Design your thumbnails — JarvisThumbnails
 - Say "make me a thumbnail for my GTA stream" and he'll actually generate
   one — real image generation, not a template filler
-- Drop your favorite creators' thumbnails (Vanoss, Sm1thy, whoever)
-  into the `Jarvis Thumbnails\Style References` folder on your desktop
-  and he'll match that visual style automatically — bold outlined text,
-  exaggerated expressions, high-contrast pop backgrounds — instead of
-  guessing at a generic look
+- Drop your favorite creators' thumbnails (Vanoss, SMii7Y, whoever) into
+  `Jarvis Thumbnails\Style References` and he'll match that visual
+  style automatically — bold outlined text, exaggerated expressions,
+  high-contrast pop backgrounds — instead of guessing at a generic look.
+  He's explicitly told to copy the STYLE only, never the actual people/
+  characters/mascots in those images — those belong to other creators
+- Drop your own face, character renders, or logos into
+  `Jarvis Thumbnails\My Assets` and those are what actually get
+  featured as the subject of the thumbnail
 - Say "edit this thumbnail to say COMEBACK KING" to change text/colors/
   elements on the last one he made, instead of starting over
 - Runs on a free Google Gemini API key (separate from your Claude
@@ -147,6 +151,14 @@ canned replies.
   Claude, Gemini, the free local brain, or any other connected provider
   right from JarvisCode's own toolbar, independent of whatever normal
   Jarvis is currently set to
+- Remembers the actual conversation — switch providers mid-chat and the
+  new one still knows what you were just talking about, since the
+  history travels with the conversation rather than living inside one
+  provider's own memory. "New Chat" clears it on purpose when you want
+  a clean slate
+- Reads the project's own `CLAUDE.md`/`AGENTS.md` automatically, same
+  as a real terminal Claude Code session would, so he actually knows
+  your established workflow instead of guessing at it
 - Git-aware: a Diff panel shows exactly what changed, and a one-click
   rollback reverts uncommitted changes if something goes wrong — only
   available for projects that are already a git repo

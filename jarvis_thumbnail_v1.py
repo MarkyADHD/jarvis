@@ -39,6 +39,13 @@ from pathlib import Path
 
 THUMBNAILS_ROOT = Path.home() / "Desktop" / "Jarvis Thumbnails"
 STYLE_REFERENCES_DIR = THUMBNAILS_ROOT / "Style References"
+# Explicit separation, per the user's own instruction: Style References
+# teaches LOOK ONLY (composition, bold text treatment, colors, energy) --
+# the actual people/characters/mascots in those images belong to other
+# creators and must never be reproduced. My Assets is where the user's
+# own face/character/logo/game-character renders go, and THOSE are what
+# actually get featured as the subject of a generated thumbnail.
+MY_ASSETS_DIR = THUMBNAILS_ROOT / "My Assets"
 
 # gemini-2.5-flash-image ("nano banana") is Gemini's current image
 # generation/editing model, reachable on the free API tier under a daily
@@ -91,12 +98,12 @@ def _extract_subject(command):
     return c
 
 
-def _load_style_references(limit=MAX_STYLE_REFERENCES):
-    if not STYLE_REFERENCES_DIR.exists():
+def _load_images_from(directory, limit):
+    if not directory.exists():
         return []
 
     files = sorted(
-        (f for f in STYLE_REFERENCES_DIR.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS),
+        (f for f in directory.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS),
         key=lambda f: f.stat().st_mtime,
         reverse=True,
     )
@@ -111,6 +118,14 @@ def _load_style_references(limit=MAX_STYLE_REFERENCES):
     return images
 
 
+def _load_style_references(limit=MAX_STYLE_REFERENCES):
+    return _load_images_from(STYLE_REFERENCES_DIR, limit)
+
+
+def _load_my_assets(limit=MAX_STYLE_REFERENCES):
+    return _load_images_from(MY_ASSETS_DIR, limit)
+
+
 def _safe_filename(text):
     text = re.sub(r"[^a-zA-Z0-9 _-]", "", str(text or "")).strip()
     text = re.sub(r"\s+", "_", text)
@@ -118,17 +133,44 @@ def _safe_filename(text):
 
 
 def generate_thumbnail(subject, edit_image_path=None):
-    """Generates a new thumbnail (or edits one if edit_image_path is given),
-    using any images in STYLE_REFERENCES_DIR as style guides. Returns the
+    """Generates a new thumbnail (or edits one if edit_image_path is given).
+    Style References images teach LOOK ONLY (composition/text treatment/
+    color/energy) -- the prompt explicitly forbids reproducing the actual
+    people/characters/mascots shown in them, since those belong to other
+    creators. My Assets images (the user's own face/character/logo) are
+    what actually gets featured as the subject, when present. Returns the
     saved output Path."""
     from google.genai import types
 
     client = _client()
-    references = _load_style_references()
+    style_refs = _load_style_references()
+    my_assets = _load_my_assets()
 
     contents = []
-    if references:
-        contents.extend(references)
+    if style_refs:
+        contents.extend(style_refs)
+    if my_assets:
+        contents.extend(my_assets)
+
+    style_note = ""
+    if style_refs:
+        style_note = (
+            " Match the VISUAL STYLE of the reference images provided -- "
+            "bold outlined text, exaggerated expressive faces, high-contrast "
+            "pop background, vivid saturated colors, energetic composition. "
+            "Do NOT reproduce, copy, or reference the specific people, "
+            "characters, mascots, logos, or watermarks shown in those "
+            "reference images -- they belong to other creators. They are a "
+            "style guide only, never subject matter."
+        )
+
+    asset_note = ""
+    if my_assets:
+        asset_note = (
+            " Feature the character/person/logo shown in the other "
+            "provided image(s) (the user's own assets) as the actual "
+            "subject of the thumbnail."
+        )
 
     if edit_image_path:
         from PIL import Image
@@ -139,21 +181,19 @@ def generate_thumbnail(subject, edit_image_path=None):
             f"thumbnail -- bold readable text with a thick outline, high "
             f"contrast, vivid colors."
         )
-    elif references:
-        instruction = (
-            f"Create a brand new YouTube/Twitch gaming thumbnail about: "
-            f"{subject or 'the stream'}. Match the visual style of the "
-            f"reference images provided -- bold outlined text, exaggerated "
-            f"expressive faces, high-contrast pop background, vivid "
-            f"saturated colors, no watermarks or logos from the references."
-        )
     else:
         instruction = (
-            f"Create a punchy, high-CTR YouTube/Twitch gaming thumbnail "
-            f"about: {subject or 'the stream'}. Bold text with a thick "
-            f"outline, exaggerated expressive faces if a person is shown, "
-            f"high-contrast vivid colors, clean composition."
+            f"Create a brand new YouTube/Twitch gaming thumbnail about: "
+            f"{subject or 'the stream'}."
+            f"{style_note}"
+            f"{asset_note}"
         )
+        if not style_refs and not my_assets:
+            instruction += (
+                " Bold text with a thick outline, exaggerated expressive "
+                "faces if a person is shown, high-contrast vivid colors, "
+                "clean composition."
+            )
 
     contents.append(instruction)
 

@@ -260,6 +260,12 @@
     }
   });
 
+  document.getElementById("new-chat-btn").addEventListener("click", async () => {
+    await api("/api/clear_chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    chatEl.innerHTML = "";
+    addMsg("system", "Started a new conversation -- previous context cleared.");
+  });
+
   const diffPanel = document.getElementById("diff-panel");
   document.getElementById("diff-btn").addEventListener("click", async () => {
     const d = await api("/api/diff");

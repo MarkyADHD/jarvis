@@ -72,6 +72,9 @@ def _write_json(path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+HISTORY_MAX_TURNS = 20  # 20 entries = 10 user/assistant exchanges kept
+
+
 def _session():
     data = _read_json(SESSION_PATH, {})
     if not isinstance(data, dict):
@@ -80,6 +83,9 @@ def _session():
     data.setdefault("model", None)
     data.setdefault("effort", "medium")
     data.setdefault("project_root", "")
+    data.setdefault("history", [])
+    if not isinstance(data.get("history"), list):
+        data["history"] = []
     return data
 
 
@@ -216,6 +222,25 @@ def _native_folder_picker():
     return folder
 
 
+def _build_history_text(history):
+    """Plain text, not provider-specific state -- this is exactly what
+    makes switching providers mid-conversation still work: the history
+    just gets folded into the next prompt as text, so a brand new Claude
+    call, a Gemini call, or any other adapter all see the same prior
+    exchanges the same way, regardless of which provider actually
+    produced them. Compressed if it's grown large, per the same "small
+    context passes through, big context gets smart-compressed, original
+    never lost" policy used everywhere else."""
+    if not history:
+        return ""
+    lines = []
+    for turn in history:
+        role = "User" if turn.get("role") == "user" else "Assistant"
+        lines.append(f"{role}: {turn.get('content', '')}")
+    text = "\n\n".join(lines)
+    return context_compressor.compress(text, kind="auto", label="conversation history", target_chars=3000)
+
+
 JARVISCODE_SYSTEM_PROMPT = """You are JarvisCode, a coding-focused companion built on the same brain as Jarvis. You help with repositories, software projects, debugging, building applications, and game development. Be direct and concise. When editing/creating files, actually make the changes rather than just describing them, when the current mode allows it."""
 
 
@@ -350,8 +375,16 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 sess = _session()
                 sess["project_root"] = str(Path(folder).resolve())
+                sess["history"] = []  # a new project is a new conversation
                 _save_session(sess)
                 self._send_json({"ok": True, "project_root": sess["project_root"]})
+                return
+
+            if path == "/api/clear_chat":
+                sess = _session()
+                sess["history"] = []
+                _save_session(sess)
+                self._send_json({"ok": True})
                 return
 
             if path == "/api/set_provider":
@@ -448,9 +481,15 @@ class Handler(BaseHTTPRequestHandler):
         root = sess["project_root"] or None
 
         context = _build_project_context(root)
-        prompt = message
+        history_text = _build_history_text(sess.get("history", []))
+
+        prompt_parts = []
+        if history_text:
+            prompt_parts.append(f"[CONVERSATION SO FAR]\n{history_text}")
         if context:
-            prompt = f"[PROJECT CONTEXT]\n{context}\n\n[REQUEST]\n{message}"
+            prompt_parts.append(f"[PROJECT CONTEXT]\n{context}")
+        prompt_parts.append(f"[NEW REQUEST]\n{message}" if prompt_parts else message)
+        prompt = "\n\n".join(prompt_parts)
 
         if provider_id == "claude":
             result = router.run_provider(
@@ -477,6 +516,12 @@ class Handler(BaseHTTPRequestHandler):
             result = router.run_provider(
                 provider_id, prompt, system_prompt=JARVISCODE_SYSTEM_PROMPT, timeout=120,
             )
+
+        if result.get("ok"):
+            sess["history"].append({"role": "user", "content": message})
+            sess["history"].append({"role": "assistant", "content": result.get("result", "")})
+            sess["history"] = sess["history"][-HISTORY_MAX_TURNS:]
+            _save_session(sess)
 
         self._send_json({
             "ok": bool(result.get("ok")),
