@@ -107,6 +107,13 @@ below.
   from other creators' content, style influence only
 - Having anything in `Jarvis Thumbnails\My Assets` tells him to feature
   your own streaming character/persona as the subject
+- **Optional: switch to Gemini as the image backend** from the settings
+  panel — it can actually see your Style References/My Assets as real
+  images instead of a text description, genuinely better style-matching.
+  The catch: Google's free tier gives zero image-generation quota until
+  your API key's project has billing enabled (still $0 if you stay
+  within free limits elsewhere) — if it fails for any reason, Jarvis
+  automatically falls back to the free backend and tells you why
 - Say "edit this thumbnail to say COMEBACK KING" to generate a revised
   version with that change folded in — this regenerates a fresh image
   from an updated description rather than truly editing the same pixels,

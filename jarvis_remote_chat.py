@@ -53,6 +53,7 @@ import jarvis_govee_v1 as govee
 import jarvis_twitch_v1 as twitch
 import jarvis_provider_router_v1 as provider_router
 import jarvis_tailscale_v1 as tailscale
+import jarvis_thumbnail_v1 as thumbnail
 
 
 def process_message(text: str) -> str:
@@ -230,6 +231,18 @@ def settings_tailscale_status() -> dict:
 def settings_tailscale_setup() -> dict:
     result = tailscale.setup_remote_access_flow(spoken_name="Sir")
     return {"ok": True, "message": result.get("reply", "")}
+
+
+def settings_thumbnail_status() -> dict:
+    return {
+        "backend": thumbnail.get_thumbnail_backend(),
+        "gemini_configured": thumbnail.gemini_configured(),
+    }
+
+
+def settings_thumbnail_set_backend(backend: str) -> dict:
+    ok, error = thumbnail.set_thumbnail_backend(backend)
+    return {"ok": ok, "error": error}
 
 
 def settings_save_spotify(client_id: str) -> dict:
@@ -916,6 +929,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(settings_ai_status())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/thumbnail/status":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_thumbnail_status())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
         elif path == "/settings/tailscale/status":
             if not self._authorized():
                 self.send_response(403)
@@ -973,6 +996,7 @@ class Handler(BaseHTTPRequestHandler):
         "/settings/ai/switch": lambda d: settings_ai_switch(
             str(d.get("provider", "")).strip(), bool(d.get("confirm_install"))),
         "/settings/tailscale/setup": lambda d: settings_tailscale_setup(),
+        "/settings/thumbnail/backend": lambda d: settings_thumbnail_set_backend(str(d.get("backend", "")).strip()),
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),
         "/settings/elevenlabs": lambda d: settings_save_elevenlabs(str(d.get("api_key", "")).strip()),
         "/settings/govee": lambda d: settings_save_govee(str(d.get("api_key", "")).strip()),

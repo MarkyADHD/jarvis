@@ -334,6 +334,27 @@ const AV = (() => {
           address + access token to a Desktop notepad.</div>
       </section>
       <section>
+        <h4>Thumbnail Image Backend</h4>
+        <div id="thumbnailStatus" class="status">checking...</div>
+        <div class="row">
+          <select id="thumbnailBackendSelect" style="flex:1;background:rgba(255,255,255,.04);
+            border:1px solid rgba(120,255,190,.2);border-radius:6px;color:#e8f0f2;
+            font:11px 'SF Mono',Menlo,Consolas,monospace;padding:6px 8px">
+            <option value="auto">Automatic (recommended)</option>
+            <option value="gemini">Gemini (real style-matching, needs billing)</option>
+            <option value="pollinations">Always free (Pollinations)</option>
+          </select>
+        </div>
+        <div class="hint">Automatic uses your own GPU if it's set up, else
+          the always-free backend. Gemini can actually see your saved
+          Style References/My Assets as real images instead of a text
+          description -- but Google's free tier gives zero image quota
+          until your Gemini API key's project has billing enabled (still
+          $0 if you stay in the free limits elsewhere). If Gemini fails
+          for any reason, Jarvis automatically falls back and tells you
+          why.</div>
+      </section>
+      <section>
         <h4>Spotify</h4>
         <div id="spotifyStatus" class="status">checking...</div>
         <div class="row">
@@ -670,8 +691,40 @@ const AV = (() => {
       await refreshTailscale();
     });
 
+    async function refreshThumbnail() {
+      const statusEl = panel.querySelector("#thumbnailStatus");
+      const select = panel.querySelector("#thumbnailBackendSelect");
+      try {
+        const r = await fetch(api("/settings/thumbnail/status"), authed({ method: "GET" }));
+        const data = await r.json();
+        select.value = data.backend || "auto";
+        if (data.backend === "gemini" && !data.gemini_configured) {
+          setStatus(statusEl, "Gemini selected, but no Gemini API key saved yet", "err");
+        } else {
+          setStatus(statusEl, "Active: " + select.options[select.selectedIndex].text, "ok");
+        }
+      } catch (e) {
+        setStatus(statusEl, "server unreachable", "err");
+      }
+    }
+
+    panel.querySelector("#thumbnailBackendSelect").addEventListener("change", async (e) => {
+      const statusEl = panel.querySelector("#thumbnailStatus");
+      try {
+        const r = await fetch(api("/settings/thumbnail/backend"), authed({
+          method: "POST", body: JSON.stringify({ backend: e.target.value }),
+        }));
+        const data = await r.json();
+        if (!data.ok) setStatus(statusEl, data.error || "Couldn't save.", "err");
+      } catch (err) {
+        setStatus(statusEl, "server unreachable", "err");
+      }
+      await refreshThumbnail();
+    });
+
     async function refresh() {
       refreshAi();
+      refreshThumbnail();
       refreshTailscale();
       try {
         const r = await fetch(api("/settings/status"), authed({ method: "GET" }));

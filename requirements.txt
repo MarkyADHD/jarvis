@@ -41,6 +41,7 @@ filelock==3.32.5
 flatbuffers==25.12.19
 frozenlist==1.8.0
 fsspec==2026.7.0
+google-genai==2.22.0
 h11==0.16.0
 hf-xet==1.6.0
 httpcore==1.0.9
@@ -168,12 +169,11 @@ vosk==0.3.45
 wasabi==1.1.3
 weasel==1.0.0
 webrtcvad-wheels==2.0.14
-# Was pinned <17.0 for google-genai's own constraint; google-genai
-# itself is gone now (JarvisThumbnails moved to Pollinations.ai, no
-# client library needed), but nothing else in this list needs 17.x
-# specifically either (confirmed: mcp/sse-starlette/vosk all import
-# websockets without a hard version requirement), so left as-is rather
-# than churn a working pin for no functional reason.
+# Pinned <17.0 for google-genai's own constraint (back in this file --
+# JarvisThumbnails gained Gemini as an optional, explicitly-selected
+# backend alongside the always-free Pollinations default). Confirmed
+# nothing else in this list needs 17.x specifically (mcp/sse-starlette/
+# vosk all import websockets without a hard version requirement).
 websockets==16.1.1
 win32_setctime==1.2.0
 winrt-runtime==3.2.1
