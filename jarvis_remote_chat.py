@@ -136,13 +136,18 @@ def process_voice(raw_audio: bytes) -> dict:
 # same secrets store (DPAPI-encrypted) and the same Nanoleaf registry.
 # --------------------------------------------------------------------------
 
+VOICE_REFRESH_FLAG = Path(r"C:\AI-Agent\backtalk\.voice_refresh_needed")
+
+
 def settings_status() -> dict:
     services = settings.configured_services()
     spotify = next((s for s in services if s["env"] == "JARVIS_SPOTIFY_CLIENT_ID"), None)
     nanoleaf_registry = settings.load_nanoleaf_devices()
     keylight_cache = keylight.load_cache()
+    elevenlabs_key = settings.load_secrets().get("ELEVENLABS_API_KEY", "")
     return {
         "spotify_configured": bool(spotify and spotify["configured"]),
+        "elevenlabs_configured": bool(elevenlabs_key),
         "nanoleaf_devices": [
             {"name": d.get("name", ""), "host": d.get("host", ""),
              "device_name": d.get("device_name", "")}
@@ -159,6 +164,29 @@ def settings_status() -> dict:
 
 def settings_save_spotify(client_id: str) -> dict:
     ok, error = settings.save_secret("JARVIS_SPOTIFY_CLIENT_ID", client_id)
+    return {"ok": ok, "error": error}
+
+
+def settings_save_elevenlabs(api_key: str) -> dict:
+    """Voice ID and enabled=true are already set in backtalk.json (a
+    specific voice was already picked -- this only ever needed the key).
+    Clears this process's own cached key immediately (covers /voice
+    replies, which run through backtalk's mouth in this same process),
+    and touches a flag file the MAIN Jarvis process (a separate OS
+    process -- this server can't reach into its memory directly) checks
+    before every reply, so the switch to ElevenLabs happens without
+    needing to restart Jarvis."""
+    ok, error = settings.save_secret("ELEVENLABS_API_KEY", api_key)
+    if ok:
+        try:
+            from backtalk import mouth as _mouth
+            _mouth._el_key_cache = None
+        except Exception:
+            pass
+        try:
+            VOICE_REFRESH_FLAG.touch()
+        except Exception:
+            pass
     return {"ok": ok, "error": error}
 
 
@@ -822,6 +850,7 @@ class Handler(BaseHTTPRequestHandler):
 
     _SETTINGS_ROUTES = {
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),
+        "/settings/elevenlabs": lambda d: settings_save_elevenlabs(str(d.get("api_key", "")).strip()),
         "/settings/nanoleaf/pair": lambda d: settings_nanoleaf_pair(str(d.get("host", "")).strip()),
         "/settings/nanoleaf/connect": lambda d: settings_nanoleaf_connect(
             str(d.get("name", "")).strip(), str(d.get("host", "")).strip(), str(d.get("token", "")).strip()),

@@ -2533,7 +2533,21 @@ def voice_listener_loop(status_callback):
                         last_voice_time = now
                         chunks = list(pre_roll)
                         pre_roll.clear()
-                        set_face_state("listening")
+                        # Only show "listening" for speech we're already
+                        # confident is addressed to Jarvis (an active
+                        # follow-up window after the wake word) -- not
+                        # for every sound above the energy threshold,
+                        # which would flash the animation for ambient
+                        # noise, a TV, or someone else's conversation
+                        # that never turns out to involve Jarvis at all.
+                        # The wake word itself can't be confirmed until
+                        # AFTER this recording stops and gets transcribed
+                        # (no separate real-time wake-word spotter exists
+                        # here), so that first utterance genuinely can't
+                        # show "listening" live -- known, deliberate
+                        # limitation, not an oversight.
+                        if conversation_mode_active():
+                            set_face_state("listening")
 
                     continue
 

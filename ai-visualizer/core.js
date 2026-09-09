@@ -317,6 +317,19 @@ const AV = (() => {
         </div>
       </section>
       <section>
+        <h4>Upgrade Jarvis's Voice</h4>
+        <div id="elevenlabsStatus" class="status">checking...</div>
+        <div class="row">
+          <input id="elevenlabsInput" type="password" placeholder="ElevenLabs API Key">
+          <button id="elevenlabsSave">Save</button>
+        </div>
+        <div class="hint">Optional, paid ElevenLabs subscription --
+          swaps Jarvis's default voice for a more natural one. Quick
+          how-to: sign up at elevenlabs.io, open your profile (top
+          right) &gt; API Keys, create/copy a key, paste it above and
+          Save. Takes effect automatically, no restart needed.</div>
+      </section>
+      <section>
         <h4>Nanoleaf</h4>
         <div id="nanoleafList"></div>
         <div class="row">
@@ -537,6 +550,9 @@ const AV = (() => {
         setStatus(panel.querySelector("#spotifyStatus"),
           data.spotify_configured ? "✓ configured" : "not configured",
           data.spotify_configured ? "ok" : "");
+        setStatus(panel.querySelector("#elevenlabsStatus"),
+          data.elevenlabs_configured ? "✓ configured -- premium voice active" : "not configured -- using default voice",
+          data.elevenlabs_configured ? "ok" : "");
         renderNanoleafList(data.nanoleaf_devices || [], data.nanoleaf_default || "");
         const kl = data.keylight_devices || [];
         setStatus(panel.querySelector("#keylightStatus"),
@@ -563,6 +579,22 @@ const AV = (() => {
         }));
         const data = await r.json();
         if (data.ok) { input.value = ""; setStatus(statusEl, "✓ saved", "ok"); }
+        else setStatus(statusEl, data.error || "save failed", "err");
+      } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+    });
+
+    panel.querySelector("#elevenlabsSave").addEventListener("click", async () => {
+      const input = panel.querySelector("#elevenlabsInput");
+      const value = input.value.trim();
+      const statusEl = panel.querySelector("#elevenlabsStatus");
+      if (!value) return;
+      setStatus(statusEl, "saving...");
+      try {
+        const r = await fetch(api("/settings/elevenlabs"), authed({
+          method: "POST", body: JSON.stringify({ api_key: value }),
+        }));
+        const data = await r.json();
+        if (data.ok) { input.value = ""; setStatus(statusEl, "✓ saved -- premium voice active", "ok"); }
         else setStatus(statusEl, data.error || "save failed", "err");
       } catch (e) { setStatus(statusEl, "connection failed", "err"); }
     });

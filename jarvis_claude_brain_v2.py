@@ -29,6 +29,36 @@ BACKTALK_DIR = Path(r"C:\AI-Agent\backtalk")
 if str(BACKTALK_DIR) not in sys.path:
     sys.path.insert(0, str(BACKTALK_DIR))
 
+# The HUD's settings panel (served by jarvis_remote_chat.py, a SEPARATE
+# process from this one) saves a new ElevenLabs key via
+# jarvis_settings_v1.save_secret() -- that persists it to disk and sets
+# os.environ in whichever process calls it, but that's remote_chat's own
+# process, not this one, so it can't reach into THIS process's memory to
+# update anything directly. This flag file is the bridge: touched by the
+# settings save, checked here (in the process that actually does TTS)
+# right before every utterance, cheap enough to cost nothing on the
+# common case where it doesn't exist.
+VOICE_REFRESH_FLAG = BACKTALK_DIR / ".voice_refresh_needed"
+
+
+def _refresh_voice_if_needed():
+    if not VOICE_REFRESH_FLAG.exists():
+        return
+    try:
+        import os
+        import jarvis_settings_v1 as _settings_v1
+        key = _settings_v1.load_secrets().get("ELEVENLABS_API_KEY", "")
+        if key:
+            os.environ["ELEVENLABS_API_KEY"] = key
+        from backtalk import mouth as _mouth_module
+        _mouth_module._el_key_cache = None
+    except Exception:
+        pass
+    try:
+        VOICE_REFRESH_FLAG.unlink()
+    except Exception:
+        pass
+
 
 def _fix_pythonw_stdio():
     """Jarvis normally runs under pythonw.exe (no console window), where
@@ -441,6 +471,7 @@ def speak_kokoro_blocking(text: str, stop_event=None, poll: float = 0.02) -> Non
     wait_done(), because wait_done() has no way to react to an interrupt
     mid-sentence.
     """
+    _refresh_voice_if_needed()
     mouth = _get_mouth()
     mouth.say(text)
 

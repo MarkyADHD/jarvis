@@ -1782,9 +1782,13 @@ def _ptt_capture_and_run():
             # that with margin before opening a second stream.
             time.sleep(0.5)
 
-        transcript = backtalk_ears.record_held(
-            is_held=lambda: keyboard.is_pressed("home"),
-        )
+        app.set_face_state("listening")
+        try:
+            transcript = backtalk_ears.record_held(
+                is_held=lambda: keyboard.is_pressed("home"),
+            )
+        finally:
+            app.set_face_state("idle")
 
         if transcript:
             try:
