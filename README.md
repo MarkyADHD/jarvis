@@ -57,7 +57,9 @@ canned replies.
 - **Elgato Key Light** — power, brightness, colour temperature, with
   one-click auto-discovery on your network
 - **Govee** — power, brightness, colour, colour temperature, via your
-  own Govee API key (no per-device pairing needed)
+  own Govee API key (no per-device pairing needed). Checks every 10
+  minutes for any newly-connected Govee light and announces it by name
+  the first time it sees it
 - Add or remove any of these yourself from the in-HUD settings panel —
   no code editing required, no restarting anything
 
@@ -198,6 +200,16 @@ canned replies.
   individual developers (confirmed, not assumed), and even if it were,
   Jarvis won't spend your money without you confirming it in the
   moment — this is that boundary by design, not a workaround
+
+### Download games for you, even remotely
+- "Download Portal 2 on Steam" resolves the real game and asks which
+  drive you want it on — say "E drive" and he actually starts the
+  install. Built for exactly the "a preorder just unlocked and I'm not
+  at my PC" case: trigger it from your phone over remote chat, confirm
+  the install location in Steam's own picker when you're back
+- Steam has no way to force an install to a specific drive
+  programmatically (checked, not guessed) — Jarvis gets it started and
+  tells you whether that drive already has a Steam library set up
 
 ### Keep himself current
 - Ask him to update and he pulls the latest code straight from this

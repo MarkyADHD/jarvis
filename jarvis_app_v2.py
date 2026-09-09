@@ -45,6 +45,7 @@ import jarvis_twitch_v1 as twitch_v1
 import jarvis_clipper_v1 as clipper_v1
 import jarvis_thumbnail_v1 as thumbnail_v1
 import jarvis_uber_v1 as uber_v1
+import jarvis_steam_v1 as steam_v1
 import jarvis_provider_router_v1 as provider_router
 import jarvis_onboarding_v1 as onboarding_v1
 import jarvis_discord_v1 as discord_v1
@@ -507,6 +508,10 @@ def quick_handle_command_v2(command):
     uber_result = uber_v1.uber_command_fast(c, name, app)
     if uber_result:
         return finish_plan_v3(uber_result, c, name, "uber")
+
+    steam_result = steam_v1.steam_command_fast(c, name, app)
+    if steam_result:
+        return finish_plan_v3(steam_result, c, name, "steam")
 
     if c in {"open jarviscode", "open jarvis code", "launch jarviscode", "launch jarvis code", "start jarviscode", "start jarvis code"}:
         try:
@@ -2102,6 +2107,15 @@ def install_v2(headless=False):
     try:
         threading.Thread(
             target=update_check_v1.background_check_loop,
+            args=(app, refresh_spoken_name),
+            daemon=True,
+        ).start()
+    except Exception:
+        pass
+
+    try:
+        threading.Thread(
+            target=govee_v1.background_new_device_check_loop,
             args=(app, refresh_spoken_name),
             daemon=True,
         ).start()

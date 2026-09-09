@@ -42,14 +42,30 @@ Dependencies:
     requests
 """
 
+import json
 import os
 import re
+import time
+from pathlib import Path
 
 import requests
 
 BASE_URL = "https://openapi.api.govee.com/router/api/v1"
 REQUEST_TIMEOUT = 6.0
 ENV_API_KEY = "GOVEE_API_KEY"
+
+MEMORY_ROOT = Path("E:/JarvisMemory")
+if not MEMORY_ROOT.exists():
+    MEMORY_ROOT = Path("C:/AI-Agent/JarvisMemory")
+SETTINGS_DIR = MEMORY_ROOT / "settings"
+KNOWN_DEVICES_PATH = SETTINGS_DIR / "govee_known_devices.json"
+
+# 30 req/min is Govee's own rate limit for the devices-list endpoint --
+# checking every 10 minutes is generous headroom for "announce a new
+# light soon after it's added," not a background job that costs anything
+# meaningful in quota or resources between checks.
+NEW_DEVICE_CHECK_INTERVAL_S = 600
+NEW_DEVICE_FIRST_CHECK_DELAY_S = 30
 
 # Same spoken colour set as Hue/Nanoleaf.
 COLOURS = {
@@ -239,6 +255,79 @@ def status():
         for d in devices
     ]
     return {"count": len(items), "devices": items}, ""
+
+
+def _load_known_device_ids():
+    try:
+        if not KNOWN_DEVICES_PATH.exists():
+            return set()
+        data = json.loads(KNOWN_DEVICES_PATH.read_text(encoding="utf-8"))
+        return set(data) if isinstance(data, list) else set()
+    except Exception:
+        return set()
+
+
+def _save_known_device_ids(ids):
+    try:
+        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+        KNOWN_DEVICES_PATH.write_text(json.dumps(sorted(ids)), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def check_for_new_devices():
+    """Returns the list of device dicts that weren't in the known set
+    before this call, and persists the updated set immediately (not
+    just in memory) so a crash/restart right after a real new-device
+    announcement doesn't announce the same light again next time it
+    comes back up. Never raises -- not configured, offline, or a bad
+    key all just mean "nothing to report" for a background check, not
+    something that should ever interrupt anything else Jarvis is doing."""
+    if not is_configured():
+        return []
+
+    try:
+        devices = list_devices()
+    except Exception:
+        return []
+
+    known = _load_known_device_ids()
+    current_ids = {str(d.get("device", "")) for d in devices if d.get("device")}
+
+    # First run ever (no known-devices file yet) -- treat everything
+    # found as already-known instead of announcing the user's entire
+    # existing light collection as "new" the moment this feature ships.
+    first_run = not KNOWN_DEVICES_PATH.exists()
+
+    new_ids = current_ids - known
+    new_devices = [d for d in devices if str(d.get("device", "")) in new_ids]
+
+    _save_known_device_ids(current_ids | known)
+
+    return [] if first_run else new_devices
+
+
+def background_new_device_check_loop(app_module, spoken_name_fn):
+    """Call once from install_v2() in a daemon thread, same convention as
+    jarvis_update_check_v1.background_check_loop. Checks promptly after
+    startup, then every NEW_DEVICE_CHECK_INTERVAL_S for the life of the
+    process."""
+    time.sleep(NEW_DEVICE_FIRST_CHECK_DELAY_S)
+    while True:
+        try:
+            new_devices = check_for_new_devices()
+            if new_devices:
+                name = spoken_name_fn() if callable(spoken_name_fn) else "Sir"
+                names = ", ".join(
+                    str(d.get("deviceName", "") or d.get("sku", "a new Govee device"))
+                    for d in new_devices
+                )
+                plural = "s" if len(new_devices) > 1 else ""
+                if app_module is not None and hasattr(app_module, "speak"):
+                    app_module.speak(f"I found a new Govee light{plural} connected, {name}: {names}.")
+        except Exception:
+            pass
+        time.sleep(NEW_DEVICE_CHECK_INTERVAL_S)
 
 
 def is_govee_request(command):
