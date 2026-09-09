@@ -1339,6 +1339,14 @@ def speak_worker_v2():
             app.speak_queue.task_done()
             continue
 
+        # Never talk over you: a proactive, unsolicited line (network
+        # health, code-change, update-check) could otherwise start
+        # playing mid-sentence. A reply to your OWN command can't hit
+        # this wait in practice -- transcription only starts once
+        # you've already stopped talking. Capped so a stuck flag can
+        # never silence Jarvis forever.
+        app.ok_to_speak_event.wait(timeout=15.0)
+
         app.stop_talking_event.clear()
         app.speaking_now.set()
 
@@ -1533,7 +1541,7 @@ def ask_ai_common_v2(goal, original_func=None):
             brain_v2_prompt = goal
 
         if _looks_like_coding_task(goal):
-            brain_v2_answer = claude_brain_v2.ask_sync(brain_v2_prompt, timeout=CODING_TASK_TIMEOUT_SECONDS)
+            brain_v2_answer = claude_brain_v2.ask_sync(brain_v2_prompt, timeout=CODING_TASK_TIMEOUT_SECONDS, effort="high")
         else:
             brain_v2_answer = claude_brain_v2.ask_sync(brain_v2_prompt)
 

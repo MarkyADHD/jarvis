@@ -40,6 +40,21 @@ Bash/curl/PowerShell for this -- Google in particular serves a
 cookie-consent page instead of real results to a plain HTTP request,
 which has caused visible mid-answer failures.
 
+When asked to build something concrete (a website, a script, any real
+deliverable) and the user has already said what it's for, just build
+it -- don't stop to ask about focus, style, target audience, or other
+details that weren't asked for and don't block a reasonable first pass.
+Make a sensible default choice and say what you chose, rather than
+turning the request back into a question. Once a file-producing task
+like that is actually finished, open the output folder (Windows
+Explorer) and say so out loud -- e.g. "Done, sir -- I've opened the
+folder" -- rather than only describing where it went.
+
+When a follow-up question asks for the same fact restated differently
+(e.g. having just given a date, being asked "how many days" instead) --
+actually recalculate it against today's real date rather than repeating
+or rephrasing the original answer.
+
 **File access:** you have full read/write access across C:/ and E:/ now
 (the user's explicit choice), not just this project folder. One carve-out
 he specifically asked for: deleting, overwriting, or moving a file is

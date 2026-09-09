@@ -265,6 +265,9 @@ def _run_coro(coro, timeout: float):
     return future.result(timeout=timeout)
 
 
+DEFAULT_EFFORT = "medium"
+
+
 async def _get_brain():
     global _BRAIN
 
@@ -275,8 +278,26 @@ async def _get_brain():
 
     brain = WarmBrain(can_use_tool=_can_use_tool)
     await brain.start()
+    # Medium is the default for every ordinary request -- confirmed via
+    # the CLI's own /effort command that medium is deliberately the
+    # "handles most tasks" tier, with high reserved for when it's
+    # actually needed (ask_sync bumps to high only for requests that
+    # look like real coding/self-edit work, then resets back to medium
+    # right after -- see the effort handling there).
+    try:
+        await brain.command(f"/effort {DEFAULT_EFFORT}")
+    except Exception:
+        pass
     _BRAIN = brain
     return _BRAIN
+
+
+async def _set_effort(level: str):
+    brain = await _get_brain()
+    try:
+        await brain.command(f"/effort {level}")
+    except Exception:
+        pass
 
 
 async def _reset_brain():
@@ -314,7 +335,7 @@ async def _ask_stream_collect(prompt: str) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
-def ask_sync(prompt: str, timeout: float = 150.0) -> Dict[str, Any]:
+def ask_sync(prompt: str, timeout: float = 150.0, effort: Optional[str] = None) -> Dict[str, Any]:
     """Ask the persistent, tool-enabled Claude brain. Blocks the calling
     (synchronous) thread until the full reply has streamed in.
 
@@ -323,6 +344,14 @@ def ask_sync(prompt: str, timeout: float = 150.0) -> Dict[str, Any]:
     existing plan/HUD/logging pipeline is request/response, not stream-
     aware end to end, and teaching it to be would be a much larger change
     than swapping the brain and the voice engine underneath it.
+
+    effort: pass "high" for a request that genuinely needs it (real
+    coding/self-edit work -- see jarvis_app_v2.py's _looks_like_coding_task).
+    Medium is the default for everything else, confirmed via the CLI's
+    own /effort command as the tier that "handles most tasks" -- this
+    bumps to high only around this one call, then unconditionally resets
+    back to medium afterward (even on failure/timeout), so a heavy
+    request never leaves every later ordinary question running hot.
     """
     note_possible_confirmation(prompt)
 
@@ -332,17 +361,32 @@ def ask_sync(prompt: str, timeout: float = 150.0) -> Dict[str, Any]:
     except Exception:
         signals = None
 
+    raised_effort = bool(effort and effort != DEFAULT_EFFORT)
+
     try:
-        with _BRAIN_LOCK:
+        if raised_effort:
             try:
-                result = _run_coro(_ask_stream_collect(prompt), timeout=timeout)
-            except Exception as e:
-                return {"ok": False, "error": str(e), "result": ""}
+                _run_coro(_set_effort(effort), timeout=10)
+            except Exception:
+                pass
 
-        if not result:
-            return {"ok": False, "error": "empty reply", "result": ""}
+        try:
+            with _BRAIN_LOCK:
+                try:
+                    result = _run_coro(_ask_stream_collect(prompt), timeout=timeout)
+                except Exception as e:
+                    return {"ok": False, "error": str(e), "result": ""}
 
-        return {"ok": True, "error": "", "result": result}
+            if not result:
+                return {"ok": False, "error": "empty reply", "result": ""}
+
+            return {"ok": True, "error": "", "result": result}
+        finally:
+            if raised_effort:
+                try:
+                    _run_coro(_set_effort(DEFAULT_EFFORT), timeout=10)
+                except Exception:
+                    pass
     finally:
         # Whatever happens next (a fallback chain throwing before speak()
         # is ever reached, a caller bug, anything) must not leave the face

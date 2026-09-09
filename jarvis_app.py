@@ -386,6 +386,21 @@ speaking_now = threading.Event()
 stop_talking_event = threading.Event()
 sleep_requested = threading.Event()
 autopilot_running = threading.Event()
+# SET when it's OK to speak (quiet), CLEARED while real speech is
+# actively being captured (mirrors the mic loop's own local
+# recording_active, which nothing outside that loop can see) -- this
+# polarity (not a plain "user_is_talking" flag) is deliberate:
+# threading.Event.wait() blocks until an event becomes SET, there is no
+# built-in "wait until clear", so speak_worker_v2 can only usefully
+# .wait() on "quiet", not on "talking". Checked there so a proactive,
+# unsolicited announcement (network health, code-change, update-check)
+# waits for a genuine pause instead of talking over whatever you're
+# currently saying. A reply to your OWN command never needs this:
+# transcription only starts once you've already stopped talking, so it
+# can't fire while this is clear anyway. Starts set (quiet) since
+# nothing has been said yet at startup.
+ok_to_speak_event = threading.Event()
+ok_to_speak_event.set()
 live_view_running = threading.Event()
 
 busy_lock = threading.Lock()
@@ -2505,6 +2520,7 @@ def voice_listener_loop(status_callback):
                                 live_interrupt_bytes = 0
                                 clear_mic_queue()
                                 recording_active = False
+                                ok_to_speak_event.set()
                                 chunks = []
                                 pre_roll.clear()
                                 started_while_jarvis_was_speaking = False
@@ -2528,6 +2544,7 @@ def voice_listener_loop(status_callback):
 
                     if is_voice:
                         recording_active = True
+                        ok_to_speak_event.clear()
                         started_while_jarvis_was_speaking = speaking_now.is_set()
                         speech_start_time = now
                         last_voice_time = now
@@ -2568,6 +2585,7 @@ def voice_listener_loop(status_callback):
                     heard_during_speech = started_while_jarvis_was_speaking or speaking_now.is_set()
 
                     recording_active = False
+                    ok_to_speak_event.set()
                     chunks = []
                     pre_roll.clear()
                     started_while_jarvis_was_speaking = False
