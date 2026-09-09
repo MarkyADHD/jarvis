@@ -305,6 +305,10 @@ a huge amount of what works today only works because of that.
 Need help, found a bug, or just want to hang out with other people
 running Jarvis? **[discord.gg/marky](https://discord.gg/marky)**
 
+If Jarvis has been useful to you and you'd like to support the project,
+**[buymeacoffee.com/markyadhd](https://buymeacoffee.com/markyadhd)** —
+entirely optional, always appreciated, never required.
+
 ## License
 
 MIT — see **LICENSE.txt**. Free to use, modify, and share. Third-party
