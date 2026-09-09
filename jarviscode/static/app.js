@@ -166,14 +166,22 @@
     });
   });
 
-  async function applyProviderChange(confirmInstall) {
+  // providerChanged matters: switching the PROVIDER dropdown must never
+  // send modelSelect's current value along with it -- that value still
+  // belongs to whichever provider was active a moment ago (e.g. an
+  // Ollama model name), and sending it as part of a switch TO Claude is
+  // exactly the glitch reported ("provider claude and model qwen" after
+  // bouncing to Free Local AI and back). Only the model/effort dropdown
+  // handlers, where the provider itself didn't change, should forward
+  // modelSelect's value.
+  async function applyProviderChange(confirmInstall, providerChanged) {
     const chosen = providerSelect.value;
     const res = await api("/api/set_provider", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         provider: chosen,
-        model: modelSelect.value,
+        model: providerChanged ? null : modelSelect.value,
         effort: effortSelect.value || "medium",
         confirm_install: !!confirmInstall,
       }),
@@ -185,12 +193,14 @@
       );
       if (ok) {
         addMsg("system", "Installing " + (res.label || chosen) + "...");
-        return applyProviderChange(true);
+        return applyProviderChange(true, providerChanged);
       }
       // Declined -- revert the dropdown to whatever's actually active.
       const s = await api("/api/state");
       providerSelect.value = s.active_provider;
       state.provider = s.active_provider;
+      populateModels(s.models, s.active_model);
+      populateEffort(s.effort_levels, s.active_effort);
       return;
     }
 
@@ -198,6 +208,8 @@
       addMsg("error", res.error || "Couldn't switch provider.");
       const s = await api("/api/state");
       providerSelect.value = s.active_provider;
+      populateModels(s.models, s.active_model);
+      populateEffort(s.effort_levels, s.active_effort);
       return;
     }
 
@@ -207,9 +219,9 @@
     populateEffort(m.effort_levels, "medium");
   }
 
-  providerSelect.addEventListener("change", () => applyProviderChange(false));
-  modelSelect.addEventListener("change", () => applyProviderChange(false));
-  effortSelect.addEventListener("change", () => applyProviderChange(false));
+  providerSelect.addEventListener("change", () => applyProviderChange(false, true));
+  modelSelect.addEventListener("change", () => applyProviderChange(false, false));
+  effortSelect.addEventListener("change", () => applyProviderChange(false, false));
 
   async function send() {
     const input = document.getElementById("message-input");

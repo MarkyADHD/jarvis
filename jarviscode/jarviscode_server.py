@@ -345,8 +345,19 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": reason or "provider not ready"})
                     return
 
+                # The glitch this fixes: switching providers used to store
+                # whatever model string the client sent verbatim, even
+                # when that model belonged to the PREVIOUS provider (e.g.
+                # "qwen2.5vl:7b" surviving a switch to Claude, since the
+                # dropdown's old value gets sent before it's repopulated).
+                # Validating against this provider's own real model list
+                # -- and resetting to None (each adapter's own default)
+                # when it doesn't belong -- makes a stale carry-over
+                # impossible regardless of what the frontend sends.
+                requested_model = body.get("model") or None
+                valid_models = router.list_models(provider_id)
                 sess["provider"] = provider_id
-                sess["model"] = body.get("model") or None
+                sess["model"] = requested_model if requested_model in valid_models else None
                 sess["effort"] = str(body.get("effort", "medium") or "medium")
                 _save_session(sess)
                 self._send_json({"ok": True})
