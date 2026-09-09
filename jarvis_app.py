@@ -39,6 +39,40 @@ import jarvis_code_watch_v1 as code_watch_v1
 import jarvis_network_health_v1 as network_health_v1
 import jarvis_settings_v1 as settings_v1
 
+# The HUD's "listening" animation reads this same signal-bus file that
+# jarvis_claude_brain_v2.py already uses for "thinking"/"idle" (backtalk's
+# own signals module) -- but nothing in this file's own mic-capture loop
+# ever set "listening", so the animation was never disabled/broken, it
+# was just never wired up here in the first place when the newer voice
+# pipeline was integrated. Module-level, guarded import: this file has to
+# keep working even if backtalk isn't present for some reason (headless/
+# remote-chat use, or an environment without it installed).
+#
+# The actual backtalk package lives one directory level below the repo
+# folder (C:\AI-Agent\backtalk\backtalk\, not C:\AI-Agent\backtalk\
+# itself), so a plain `from backtalk import signals` resolves the OUTER
+# folder as a namespace package instead and fails with "cannot import
+# name 'signals' from 'backtalk' (unknown location)" -- confirmed this
+# exact failure the hard way before adding this, matching the same
+# sys.path fix jarvis_claude_brain_v2.py already needed for its own
+# `from backtalk...` imports.
+_BACKTALK_DIR = str(Path(r"C:\AI-Agent\backtalk"))
+if _BACKTALK_DIR not in sys.path:
+    sys.path.insert(0, _BACKTALK_DIR)
+
+try:
+    from backtalk import signals as _face_signals
+except Exception:
+    _face_signals = None
+
+
+def set_face_state(name):
+    if _face_signals is not None:
+        try:
+            _face_signals.set_state(name)
+        except Exception:
+            pass
+
 try:
     import mss
     MSS_AVAILABLE = True
@@ -2494,6 +2528,7 @@ def voice_listener_loop(status_callback):
                         last_voice_time = now
                         chunks = list(pre_roll)
                         pre_roll.clear()
+                        set_face_state("listening")
 
                     continue
 
@@ -2517,6 +2552,14 @@ def voice_listener_loop(status_callback):
                     chunks = []
                     pre_roll.clear()
                     started_while_jarvis_was_speaking = False
+                    # Safe default the moment capture ends -- ask_sync
+                    # (jarvis_claude_brain_v2) overrides this to "thinking"
+                    # a moment later if the utterance actually gets sent to
+                    # the brain; resetting here first means anything that
+                    # DOESN'T end up going to the brain (no wake word, not
+                    # in conversation mode, an empty transcript) doesn't
+                    # leave the face stuck showing "listening" forever.
+                    set_face_state("idle")
 
                     try:
                         text = transcribe_with_whisper(audio_blob)
