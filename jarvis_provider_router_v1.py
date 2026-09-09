@@ -230,6 +230,34 @@ def set_active_ollama_model(model_name):
     _write_json(BRAIN_SETTINGS_PATH, data)
 
 
+EFFORT_LEVELS = ("low", "medium", "high")
+
+# Real, verified model ids (from this environment's own system context),
+# not guessed -- the one provider whose exact catalog was actually known
+# at the time this was written. Every other provider deliberately does
+# NOT get a hardcoded model list here: JarvisCode/settings show "default"
+# for those instead of fabricating options, per the explicit "do not
+# hard-code fake model options" requirement -- querying each provider's
+# real catalog live is future work, not something to fake now.
+CLAUDE_MODELS = ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-fable-5-1")
+
+
+def list_models(provider_id):
+    if provider_id == "claude":
+        return list(CLAUDE_MODELS)
+    if provider_id == "ollama":
+        models = _ollama_list_models()
+        return models if models else [OLLAMA_FALLBACK_MODEL]
+    return ["default"]
+
+
+def list_effort_levels(provider_id):
+    # Only Claude Code's CLI has a confirmed --effort flag (checked its
+    # own docs/flags before wiring this in). Other providers don't get a
+    # fabricated list of levels they may not actually support.
+    return list(EFFORT_LEVELS) if provider_id == "claude" else []
+
+
 def find_cli(name):
     return shutil.which(name) if name else None
 
@@ -505,12 +533,19 @@ def _ensure_minimax_opencode_config():
     _write_json(creds_path, creds)
 
 
-def run_provider(provider_id, prompt, *, system_prompt="", timeout=DEFAULT_TIMEOUT, effort="medium"):
+def run_provider(provider_id, prompt, *, system_prompt="", timeout=DEFAULT_TIMEOUT, effort="medium",
+                  model=None, tools="", max_turns=1, cwd=None):
     """Same {ok, result, error} shape as jarvis_claude_code_v1._run() and
     jarvis_claude_brain_v2.ask_sync() so callers don't need to care which
-    provider actually answered."""
+    provider actually answered. model/tools/max_turns/cwd are honored for
+    Claude (JarvisCode's Ask/Edit/Agent modes need real tool scoping and
+    multi-turn runs, not just single-shot chat) and best-effort ignored
+    elsewhere -- only Claude's adapter is a real tool-using agent today."""
     if provider_id == "claude":
-        return claude_v1._run(prompt, system_prompt=system_prompt, effort=effort, timeout=timeout, max_turns=1, tools="")
+        return claude_v1._run(
+            prompt, system_prompt=system_prompt, model=model or "", effort=effort,
+            timeout=timeout, max_turns=max_turns, tools=tools, cwd=cwd,
+        )
 
     if provider_id == "ollama":
         return _run_ollama(prompt, system_prompt, timeout)

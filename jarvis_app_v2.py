@@ -45,6 +45,7 @@ import jarvis_twitch_v1 as twitch_v1
 import jarvis_clipper_v1 as clipper_v1
 import jarvis_thumbnail_v1 as thumbnail_v1
 import jarvis_provider_router_v1 as provider_router
+import jarvis_onboarding_v1 as onboarding_v1
 import jarvis_discord_v1 as discord_v1
 import jarvis_tailscale_v1 as tailscale_v1
 import jarvis_room_lights_v1 as room_lights_v1
@@ -501,6 +502,23 @@ def quick_handle_command_v2(command):
     thumbnail_result = thumbnail_v1.thumbnail_command_fast(c, name, app)
     if thumbnail_result:
         return finish_plan_v3(thumbnail_result, c, name, "thumbnail")
+
+    if c in {"open jarviscode", "open jarvis code", "launch jarviscode", "launch jarvis code", "start jarviscode", "start jarvis code"}:
+        try:
+            subprocess.Popen(
+                [sys.executable, "jarviscode_app.py"],
+                cwd=r"C:\AI-Agent",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"Opening JarvisCode, {name}.", "steps": []},
+                c, name, "jarviscode_launch",
+            )
+        except Exception as e:
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"I couldn't open JarvisCode, {name}: {e}", "steps": []},
+                c, name, "jarviscode_launch",
+            )
 
     brain_result = provider_router.brain_command_fast(c, name, app)
     if brain_result:
@@ -2059,6 +2077,7 @@ def install_v2(headless=False):
     _launch_visualizer_face_v2()
     _launch_remote_chat_v2()
     _launch_mini_bar_v2()
+    _launch_onboarding_wizard_v2()
 
     try:
         claude_brain_v2.prewarm_voice_async()
@@ -2116,6 +2135,25 @@ def _launch_visualizer_face_v2():
     except Exception as e:
         try:
             app.log(f"JARVIS face window failed to start: {e}")
+        except Exception:
+            pass
+
+
+def _launch_onboarding_wizard_v2():
+    """First-launch welcome wizard (Phase 2). Cheap to call every startup
+    -- jarvis_onboarding_v1.main() checks should_show_wizard() itself and
+    exits immediately for every existing/already-configured install, so
+    this is a no-op subprocess spawn-and-exit on the common path, not a
+    real cost. Plain-script launch, same reasoning as the face window."""
+    try:
+        subprocess.Popen(
+            [sys.executable, "jarvis_onboarding_v1.py"],
+            cwd=r"C:\AI-Agent",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception as e:
+        try:
+            app.log(f"Onboarding wizard failed to start: {e}")
         except Exception:
             pass
 

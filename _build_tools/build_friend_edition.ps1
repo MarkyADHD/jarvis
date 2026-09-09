@@ -68,6 +68,7 @@ $excludeDirs = @(
     "SearchResponseHygieneV5", "ToolIntelligenceV1", "NEW JARVIS",
     ".maintenance_v2\installations",
     "ai-visualizer\.edge-app-profile",
+    "jarviscode\.edge-app-profile",
     "_build_tools",
     # CLAUDE.md now sends every generated deliverable (websites, game
     # servers/plugins, scripts) to Desktop\Jarvis Projects\ instead of

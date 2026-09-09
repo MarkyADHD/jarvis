@@ -131,6 +131,26 @@ canned replies.
 - The face HUD is viewable remotely too, so you can check in on him
   the same way you would sitting in front of the PC
 
+### JarvisCode — a separate app for real coding work
+- Say "open jarviscode" for a standalone companion app built specifically
+  for repositories and software projects — normal Jarvis stays your
+  everyday assistant, JarvisCode is where the coding-focused work
+  happens, in its own window
+- Open any project folder, see its real file tree, and chat about it —
+  JarvisCode reads the actual project structure into context
+  automatically, not just whatever you type
+- **Ask / Edit / Agent modes**: Ask just answers questions read-only;
+  Edit can create and modify files; Agent can also run real commands
+  (install dependencies, run tests, fix what breaks) and keep working
+  multi-step until the task's done
+- Uses the exact same provider system as the rest of Jarvis — pick
+  Claude, Gemini, the free local brain, or any other connected provider
+  right from JarvisCode's own toolbar, independent of whatever normal
+  Jarvis is currently set to
+- Git-aware: a Diff panel shows exactly what changed, and a one-click
+  rollback reverts uncommitted changes if something goes wrong — only
+  available for projects that are already a git repo
+
 ### Run on a different brain
 - **Claude isn't required anymore.** Jarvis ships with a genuinely free
   local AI brain installed automatically during setup (no account, no
@@ -147,6 +167,12 @@ canned replies.
   pulled straight into that same free local brain (~5GB, no GPU
   required — runs fine on CPU, just slower than with one).
 - "What model are you using" / "list available models" any time.
+- **First launch:** a one-time welcome window lets you pick Claude,
+  Gemini, or the free local brain up front, with real hardware detection
+  (GPU/VRAM/RAM) so the local option's speed is set right the first
+  time, not guessed at. Skippable, and never shown again once you've
+  picked (or on any machine that already had Claude installed before
+  this existed — nothing changes for you).
 - Only affects general questions and self-editing — Spotify, lights,
   Twitch, thumbnails, and every other control feature stay exactly as
   they are no matter which brain is active, since none of them are

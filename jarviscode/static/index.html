@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>JarvisCode</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <span id="project-name">No project open</span>
+      <button id="open-folder-btn" title="Open a project folder">Open Folder</button>
+    </div>
+    <div id="file-tree"></div>
+  </div>
+
+  <div id="main">
+    <div id="topbar">
+      <span id="app-title">JarvisCode</span>
+      <div id="mode-switch">
+        <button class="mode-btn active" data-mode="ask">Ask</button>
+        <button class="mode-btn" data-mode="edit">Edit</button>
+        <button class="mode-btn" data-mode="agent">Agent</button>
+      </div>
+      <button id="diff-btn" title="Show git diff">Diff</button>
+    </div>
+
+    <div id="chat"></div>
+
+    <div id="composer">
+      <div id="provider-bar">
+        <label>Provider
+          <select id="provider-select"></select>
+        </label>
+        <label>Model
+          <select id="model-select"></select>
+        </label>
+        <label id="effort-wrap">Effort
+          <select id="effort-select"></select>
+        </label>
+      </div>
+      <div id="input-row">
+        <textarea id="message-input" placeholder="Ask JarvisCode about this project..." rows="2"></textarea>
+        <button id="send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="diff-panel" class="hidden">
+    <div id="diff-header">
+      <span>Changes</span>
+      <div>
+        <button id="rollback-btn">Roll back all</button>
+        <button id="close-diff-btn">Close</button>
+      </div>
+    </div>
+    <pre id="diff-content"></pre>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
