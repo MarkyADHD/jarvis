@@ -43,31 +43,75 @@ canned replies.
 - Web search that actually reads the results and gives you a real
   answer, not just a list of links
 - Attach files/images and have him work with them directly
+- Discord voice controls (mute, deafen, disconnect, jump to a server)
+  by voice, built on real keypresses — never your Discord account
+  credentials or token
 
 ### Run your music and your lights
-- Full Spotify control by voice
+- Full Spotify control by voice, including exact-track requests ("play
+  \<song\> by \<artist\>") and artist-only requests ("play some \<artist\>")
+  when you don't have a specific song in mind — resolved against
+  Spotify's real catalogue, not a guess
 - **Nanoleaf** panels — power, brightness, colour, scenes, all by voice
 - **Philips Hue** — power, brightness, colour, colour temperature
 - **Elgato Key Light** — power, brightness, colour temperature, with
   one-click auto-discovery on your network
+- **Govee** — power, brightness, colour, colour temperature, via your
+  own Govee API key (no per-device pairing needed)
 - Add or remove any of these yourself from the in-HUD settings panel —
   no code editing required, no restarting anything
+
+### See your screen — JarvisVision
+- Ask "what's on my screen", "what does this error mean", or "what
+  should I click", and he'll actually look and answer — installed and
+  ready automatically, no manual model setup
+
+### Cut your own highlight clips — JarvisClipper
+- Say "find clips from my last stream" and he'll go through your most
+  recent Twitch VOD on his own: scan the audio for loud/exciting
+  moments, then actually judge each one with Claude for whether it
+  reads like a real clip-worthy moment — a joke landing, a big
+  reaction, something quotable — rather than just cutting whatever was
+  loudest (which, unfiltered, is just the stream intro half the time)
+- Saved to a local folder for you to review and post yourself — no
+  subscription service standing between your stream and your clips,
+  and no auto-posting anywhere without you looking first
+- Runs as a background job and tells you out loud (plus opens the
+  folder) the moment it's done
 
 ### Show you what he's doing
 - A live animated face (the HUD) that reacts to whether he's idle,
   listening, thinking, or speaking — several visual styles to choose
   from
-- A small always-on chat bar built right into that HUD, so you can
-  type instead of talk when you'd rather stay quiet
+- A small floating bar that hovers above your taskbar while you're
+  actually talking to him — mic input in blue, his own voice in green
+  — and fades away again once the conversation's over, so it's never
+  in the way the rest of the time
+- A small always-on chat bar built right into the HUD, so you can type
+  instead of talk when you'd rather stay quiet
 - A gear-icon settings panel, right there in the HUD, for connecting
-  Spotify/Nanoleaf/Hue/Key Light without ever touching a config file
+  Spotify/Nanoleaf/Hue/Key Light/Govee without ever touching a config
+  file
+- Tells you out loud when his own code has just changed, so a self-
+  edit is never invisible
 
 ### Reach you when you're not home
-- Talk to him from your phone over voice or text, anywhere, through a
-  private [Tailscale](https://tailscale.com) connection — never
-  exposed to the open internet, never port-forwarded
+- One command ("set up remote access") gets Tailscale installed,
+  configured, and running, then drops a notepad on your desktop with
+  the exact links you need — no manual networking setup
+- Talk to him from your phone over voice or text, anywhere, through
+  that private Tailscale connection — never exposed to the open
+  internet, never port-forwarded
 - The face HUD is viewable remotely too, so you can check in on him
   the same way you would sitting in front of the PC
+
+### Keep himself current
+- Ask him to update and he pulls the latest code straight from this
+  GitHub repo and restarts himself — no re-running the installer, no
+  losing your settings or memory
+- Tells you when your internet connection is running slow, and
+  automatically talks in the right units (°F/mph or °C/km/h) for
+  wherever you actually are
 
 ### Remember things
 - Long-term memory that persists across restarts — he remembers what
@@ -84,12 +128,17 @@ than telling you he can't.
 
 ## What you'll need
 
-- A Claude account (yours — never shared, never attached to anyone
-  else's)
+- **A [Claude](https://claude.com) Pro subscription or higher** (Pro,
+  Max, Team, or Enterprise — $17-20/mo on Pro, billed to your own
+  account, never shared). This is a hard requirement, not optional:
+  Jarvis's brain is Claude Code, and Claude Code itself needs at least
+  Pro — there is no free tier that works here, and no way around it.
 - Windows 10/11
 - A microphone and speakers (or headphones)
-- Optional: Spotify, Nanoleaf, Philips Hue, or Elgato Key Light, if
-  you want those integrations
+- Optional: Spotify, Nanoleaf, Philips Hue, Elgato Key Light, or
+  Govee, if you want those integrations
+- Optional: Twitch, if you want stream title/category control or
+  JarvisClipper's automatic VOD highlight clipping
 - Optional: [Tailscale](https://tailscale.com) if you want to reach
   him from your phone
 
@@ -114,9 +163,18 @@ this repo, and drop them in alongside the code.
 
 ## Updating
 
-New versions get tagged and published as installer Releases. Re-run
-the installer to update — your own memory, API keys, and settings live
-outside the installed folder's tracked files and won't be touched.
+New versions get tagged and published as installer Releases, and every
+push to `main` is a real, working update — this is not a "check in
+occasionally" project.
+
+- **Just ask him:** "Jarvis, update yourself" pulls the latest code
+  straight from this repo and restarts — the normal way, no installer
+  needed.
+- **Manually, from a Release:** re-run the latest `JarvisSetup.exe`.
+- **Manually, from git:** `git pull` inside the installed folder.
+
+Either way, your own memory, API keys, and settings live outside the
+tracked files and are never touched by an update.
 
 ## License
 

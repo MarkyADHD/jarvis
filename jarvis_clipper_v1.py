@@ -3,12 +3,26 @@ Jarvis Clipper V1
 ==================
 
 Goes through your past Twitch VODs and cuts candidate highlight clips
-automatically, based on the VOD's own audio -- loudness spikes (real
-excitement/reaction moments) plus what was actually said at each spike
-(transcribed with the same faster-whisper backtalk already uses for
-voice input). Saves clips to a local folder for you to review; does NOT
-auto-post anywhere (a deliberate scope decision -- auto-posting to each
-social platform is its own real OAuth-per-platform project).
+automatically. Saves clips to a local folder for you to review; does
+NOT auto-post anywhere (a deliberate scope decision -- auto-posting to
+each social platform is its own real OAuth-per-platform project).
+
+TWO-STAGE DETECTION, NOT JUST LOUDNESS: the first version picked clips
+purely off loudness spikes, which confirmed-live caught the stream
+INTRO (a loud stinger/hype music sting, no actual content) as a
+"highlight." Loudness is still stage one -- it is a cheap way to narrow
+a multi-hour VOD down to a shortlist of moments worth a second look, and
+it never has to be perfect, just not miss things. Stage two is what
+makes this different from a generic loudness-spike tool (like the
+StreamLadder-style subscriptions this is meant to replace): every
+shortlisted moment gets transcribed and handed to Claude, which actually
+judges whether it reads like a genuine clip-worthy moment (a joke
+landing, a big reaction, a quotable line) versus stream noise (intro/
+outro stings, ad breaks, dead air, mundane chatter that just happened to
+be loud). Only what Claude approves gets cut. The first ~100 seconds of
+every VOD are skipped outright before any of this -- that window is
+almost always intro/stinger territory on a stream, cheap and reliable to
+rule out without needing a judgment call at all.
 
 WHY AUDIO, NOT CHAT: Twitch's Helix API has no VOD chat-replay endpoint
 at all -- confirmed live. The only way to pull VOD chat is an
@@ -66,6 +80,7 @@ except Exception:
     yt_dlp = None
 
 import jarvis_twitch_v1 as twitch
+import jarvis_claude_code_v1 as claude_v1
 
 MEMORY_ROOT = Path("E:/JarvisMemory")
 if not MEMORY_ROOT.exists():
@@ -87,6 +102,23 @@ ANALYSIS_WINDOW_SECONDS = 1.0
 PEAK_MIN_ABSOLUTE_RMS = 400.0  # int16 PCM RMS floor
 PEAK_MEDIAN_MULTIPLE = 1.8
 MIN_GAP_BETWEEN_CLIPS_SECONDS = 90  # don't cut two clips from the same moment
+
+# Loudness only has to narrow the field, not pick winners -- gather more
+# candidates than the final clip count so Claude's judgment pass (see
+# judge_candidates below) has real options to choose between rather than
+# rubber-stamping whatever loudness already capped at the final number.
+CANDIDATE_POOL_SIZE = 15
+
+# Almost always intro/stinger/hype-music territory on a stream, not
+# actual content -- confirmed live as the cause of the stream intro
+# getting clipped. Ruled out before any judgment call, not left to
+# Claude to catch every time.
+INTRO_SKIP_SECONDS = 100
+
+# How much audio around each candidate spike gets transcribed for
+# Claude's judgment call -- wide enough to capture a whole reaction/joke,
+# not just the loudest half-second of it.
+JUDGE_WINDOW_SECONDS = 15
 
 
 def _run(cmd, timeout=None):
@@ -161,10 +193,13 @@ def _rms_curve(wav_path, window_seconds=ANALYSIS_WINDOW_SECONDS):
     return levels, window_seconds
 
 
-def find_highlight_timestamps(wav_path, max_clips=DEFAULT_MAX_CLIPS):
-    """Returns up to `max_clips` (timestamp_seconds, score) pairs, highest
+def find_candidate_timestamps(wav_path, pool_size=CANDIDATE_POOL_SIZE):
+    """Returns up to `pool_size` (timestamp_seconds, score) pairs, highest
     score first, spaced at least MIN_GAP_BETWEEN_CLIPS_SECONDS apart so
-    the same moment doesn't produce several near-duplicate clips."""
+    the same moment doesn't produce several near-duplicate candidates,
+    with the VOD's intro window ruled out entirely. This is a SHORTLIST
+    for Claude's judgment pass, not the final answer -- loudness alone
+    already confirmed-live it isn't reliable enough to cut straight from."""
     levels, window_seconds = _rms_curve(wav_path)
     if not levels:
         return []
@@ -175,7 +210,7 @@ def find_highlight_timestamps(wav_path, max_clips=DEFAULT_MAX_CLIPS):
     candidates = [
         (i * window_seconds, level)
         for i, level in enumerate(levels)
-        if level >= threshold
+        if level >= threshold and i * window_seconds >= INTRO_SKIP_SECONDS
     ]
     candidates.sort(key=lambda c: c[1], reverse=True)
 
@@ -183,11 +218,119 @@ def find_highlight_timestamps(wav_path, max_clips=DEFAULT_MAX_CLIPS):
     for ts, score in candidates:
         if all(abs(ts - c[0]) >= MIN_GAP_BETWEEN_CLIPS_SECONDS for c in chosen):
             chosen.append((ts, score))
-        if len(chosen) >= max_clips:
+        if len(chosen) >= pool_size:
             break
 
-    chosen.sort(key=lambda c: c[0])  # chronological in the output, not score order
+    chosen.sort(key=lambda c: c[0])  # chronological, not score order
     return chosen
+
+
+def _extract_audio_window(wav_path, center_seconds, half_window_seconds=JUDGE_WINDOW_SECONDS):
+    """Slices a window directly out of the already-downloaded full-VOD
+    WAV rather than re-fetching anything from the stream -- the analysis
+    pass already paid for this audio once."""
+    with wave.open(str(wav_path), "rb") as wf:
+        rate = wf.getframerate()
+        n_frames = wf.getnframes()
+        start_frame = max(0, int((center_seconds - half_window_seconds) * rate))
+        end_frame = min(n_frames, int((center_seconds + half_window_seconds) * rate))
+        wf.setpos(start_frame)
+        raw = wf.readframes(max(0, end_frame - start_frame))
+    return np.frombuffer(raw, dtype=np.int16)
+
+
+def transcribe_candidates(wav_path, candidates):
+    """Each candidate gets a real transcript of the audio around it --
+    this is what Claude's judgment call actually reads. A candidate that
+    fails to transcribe (music, muted DMCA segment) still gets kept in
+    the pool with an empty transcript; Claude sees that and can judge
+    accordingly (usually rejecting it) rather than it just vanishing."""
+    from backtalk import ears as backtalk_ears
+
+    results = []
+    for ts, score in candidates:
+        try:
+            pcm = _extract_audio_window(wav_path, ts)
+            transcript = backtalk_ears.transcribe(pcm) if pcm.size else ""
+        except Exception as e:
+            print(f"[clipper] transcribe_candidates failed at {ts}s: {e}", file=sys.stderr)
+            transcript = ""
+        results.append({"timestamp_seconds": ts, "score": score, "transcript": transcript})
+    return results
+
+
+_JUDGE_SYSTEM_PROMPT = """You are curating short highlight clips from a livestream VOD for social media (TikTok/YouTube Shorts/Instagram Reels).
+
+You will be given a numbered list of candidate moments, each with a timestamp and a transcript of roughly 30 seconds of speech around that moment. These candidates were already pre-filtered by audio loudness, so some are genuinely exciting moments and others are just loud stream noise (ad breaks, dead air, someone bumping their mic, mundane chatter that happened to be loud).
+
+Judge each candidate on whether it would actually make a good standalone social media clip: a joke landing, a big reaction, a surprising or quotable moment, genuine excitement. Reject anything that reads as mundane, incoherent, an ad/sponsor read, or has no real content (e.g. an empty or nonsense transcript).
+
+Respond with ONLY a JSON array, one object per candidate, in the same order given:
+[{"index": 0, "keep": true, "reason": "one short phrase why"}, ...]
+
+No other text before or after the JSON."""
+
+
+def judge_candidates(candidates, vod_title, max_clips=DEFAULT_MAX_CLIPS):
+    """Sends the transcribed candidate pool to Claude and returns only
+    the ones it judged worth keeping, best/earliest first, capped at
+    max_clips. Falls back to the top-scoring candidates by loudness alone
+    if the Claude call fails or its response can't be parsed -- a broken
+    judgment call should degrade to the old behaviour, not produce zero
+    clips."""
+    if not candidates:
+        return []
+
+    lines = [f'VOD title: "{vod_title}"', "", "Candidates:"]
+    for i, c in enumerate(candidates):
+        mm, ss = divmod(int(c["timestamp_seconds"]), 60)
+        transcript = c["transcript"].strip() or "(no speech detected)"
+        lines.append(f'{i}. [{mm:02d}:{ss:02d}] "{transcript}"')
+
+    prompt = "\n".join(lines)
+
+    result = claude_v1._run(
+        prompt,
+        system_prompt=_JUDGE_SYSTEM_PROMPT,
+        effort="medium",
+        max_turns=1,
+        tools="",
+    )
+
+    if not result.get("ok"):
+        print(f"[clipper] judge_candidates: Claude call failed ({result.get('error')}), "
+              f"falling back to loudness ranking", file=sys.stderr)
+        return _fallback_rank_by_score(candidates, max_clips)
+
+    try:
+        raw = result["result"].strip()
+        start, end = raw.find("["), raw.rfind("]")
+        judgments = json.loads(raw[start:end + 1])
+    except Exception as e:
+        print(f"[clipper] judge_candidates: couldn't parse Claude's response ({e}), "
+              f"falling back to loudness ranking", file=sys.stderr)
+        return _fallback_rank_by_score(candidates, max_clips)
+
+    approved = []
+    for j in judgments:
+        try:
+            idx = int(j.get("index"))
+            if j.get("keep") and 0 <= idx < len(candidates):
+                entry = dict(candidates[idx])
+                entry["reason"] = str(j.get("reason", "")).strip()
+                approved.append(entry)
+        except Exception:
+            continue
+
+    return approved[:max_clips]
+
+
+def _fallback_rank_by_score(candidates, max_clips):
+    ranked = sorted(candidates, key=lambda c: c["score"], reverse=True)[:max_clips]
+    for c in ranked:
+        c.setdefault("reason", "")
+    ranked.sort(key=lambda c: c["timestamp_seconds"])
+    return ranked
 
 
 # -------------------------------------------------------------------------
@@ -210,40 +353,6 @@ def cut_clip(stream_url, center_seconds, output_path,
         raise RuntimeError(
             f"ffmpeg couldn't cut that clip: {result.stderr.decode(errors='replace')[-400:]}"
         )
-
-
-def label_clip(clip_path):
-    """A short transcript of the clip's own audio, used as a human-
-    readable hint for what the moment actually was -- e.g. "no way that
-    just happened" tells you more than "clip_03.mp4" does. Best-effort:
-    a clip that fails to transcribe (music-only, muted DMCA segment,
-    pure noise) still gets saved, just without a text label."""
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_path = tmp.name
-        cmd = ["ffmpeg", "-y", "-i", str(clip_path), "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", tmp_path]
-        result = _run(cmd, timeout=60)
-        if result.returncode != 0:
-            return ""
-
-        with wave.open(tmp_path, "rb") as wf:
-            pcm = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-
-        from backtalk import ears as backtalk_ears
-        return backtalk_ears.transcribe(pcm)
-    except Exception as e:
-        # Best-effort by design (a music-only or muted clip genuinely has
-        # nothing to transcribe), but still worth a trace -- an import or
-        # config failure here silently produced an empty label on every
-        # single clip once already, which looked identical to "just no
-        # speech in this one" until traced directly.
-        print(f"[clipper] label_clip failed: {e}", file=sys.stderr)
-        return ""
-    finally:
-        try:
-            Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
-            pass
 
 
 # -------------------------------------------------------------------------
@@ -274,14 +383,23 @@ def make_clips_from_vod(vod, max_clips=DEFAULT_MAX_CLIPS,
     if not duration:
         raise RuntimeError("Could not determine the VOD's length.")
 
-    report(f"Scanning {duration // 60} minutes of audio for highlight moments...")
+    report(f"Scanning {duration // 60} minutes of audio for loud moments...")
     with tempfile.TemporaryDirectory(prefix="jarvis_clipper_") as tmp_dir:
         audio_path = Path(tmp_dir) / "full_audio.wav"
         _extract_full_audio(stream_url, audio_path, duration=duration)
-        spikes = find_highlight_timestamps(audio_path, max_clips=max_clips)
+        pool = find_candidate_timestamps(audio_path)
 
-    if not spikes:
-        return []
+        if not pool:
+            return [], None
+
+        report(f"Transcribing {len(pool)} candidate moments...")
+        transcribed = transcribe_candidates(audio_path, pool)
+
+    report("Asking Claude which ones are actually clip-worthy...")
+    approved = judge_candidates(transcribed, vod.get("title", ""), max_clips=max_clips)
+
+    if not approved:
+        return [], None
 
     created = datetime.now().strftime("%Y-%m-%d_%H%M")
     folder_name = f"{created}_{_safe_folder_name(vod.get('title', 'vod'))}"
@@ -289,23 +407,23 @@ def make_clips_from_vod(vod, max_clips=DEFAULT_MAX_CLIPS,
     output_dir.mkdir(parents=True, exist_ok=True)
 
     clips = []
-    for i, (ts, score) in enumerate(spikes, start=1):
-        report(f"Cutting clip {i} of {len(spikes)}...")
+    for i, candidate in enumerate(approved, start=1):
+        report(f"Cutting clip {i} of {len(approved)}...")
         clip_path = output_dir / f"clip_{i:02d}.mp4"
         try:
-            cut_clip(stream_url, ts, clip_path, clip_seconds=clip_seconds)
+            cut_clip(stream_url, candidate["timestamp_seconds"], clip_path, clip_seconds=clip_seconds)
         except Exception as e:
             report(f"Clip {i} failed: {e}")
             continue
 
-        label = label_clip(clip_path)
         clips.append({
             "file": clip_path.name,
             "vod_id": vod.get("id", ""),
             "vod_title": vod.get("title", ""),
-            "timestamp_seconds": ts,
-            "score": round(score, 1),
-            "transcript_snippet": label,
+            "timestamp_seconds": candidate["timestamp_seconds"],
+            "score": round(candidate["score"], 1),
+            "reason": candidate.get("reason", ""),
+            "transcript_snippet": candidate.get("transcript", ""),
         })
 
     manifest_path = output_dir / "manifest.json"
