@@ -9,6 +9,7 @@ jarvis_live_debug.log
 # --- Environments (each machine builds its own) ---
 venv/
 backtalk/.venv/
+vision_training/.venv/
 __pycache__/
 *.pyc
 
