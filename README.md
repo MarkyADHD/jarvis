@@ -131,6 +131,22 @@ canned replies.
 - The face HUD is viewable remotely too, so you can check in on him
   the same way you would sitting in front of the PC
 
+### Run on a different brain
+- Claude is the default and the most tested, but say "switch to gemini"
+  (or Qwen, Codex, Kiro, Minimax, OpenCode) and Jarvis installs that
+  provider's own CLI automatically and starts answering through it
+  instead — no reinstalling Jarvis itself
+- **This is the answer if you don't have a Claude subscription**: Gemini
+  and OpenCode both run on genuinely free tiers, no card needed
+- Say "download qwen locally" for a version that runs entirely on your
+  own GPU — real model weights (~19GB), no cloud calls at all once
+  it's pulled. Needs real VRAM (16GB+) to be usable
+- "What model are you using" / "list available models" any time
+- Only affects general questions and self-editing — Spotify, lights,
+  Twitch, thumbnails, and every other control feature stay exactly as
+  they are no matter which brain is active, since none of them are
+  actually implemented as AI tool calls in the first place
+
 ### Keep himself current
 - Ask him to update and he pulls the latest code straight from this
   GitHub repo and restarts himself — no re-running the installer, no

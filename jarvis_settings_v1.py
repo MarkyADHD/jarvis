@@ -87,6 +87,18 @@ SECRET_SERVICES = {
         "env": "GEMINI_API_KEY",
         "label": "Gemini API Key",
     },
+    "qwen api key": {
+        "env": "QWEN_API_KEY",
+        "label": "Qwen API Key",
+    },
+    "kiro api key": {
+        "env": "KIRO_API_KEY",
+        "label": "Kiro API Key",
+    },
+    "minimax api key": {
+        "env": "MINIMAX_API_KEY",
+        "label": "Minimax API Key",
+    },
 }
 
 WAKE_ALIASES = (
