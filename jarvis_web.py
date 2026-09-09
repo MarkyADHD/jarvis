@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+import jarvis_context_compressor_v1 as context_compressor
+
 
 GOOGLE_API_KEY_ENV = "JARVIS_GOOGLE_API_KEY"
 GOOGLE_CX_ENV = "JARVIS_GOOGLE_CX"
@@ -397,10 +399,24 @@ def read_webpage(url):
 
     text = strip_html(html)
 
+    # Was a blind text[:MAX_PAGE_CHARS] -- cuts wherever the character
+    # count happens to land, mid-sentence, possibly right before the one
+    # fact/number/URL that mattered, with zero regard for what's actually
+    # in the page. strip_html() already collapsed the page into one flat
+    # line (its own clean_text() call), so the compressor's line-based
+    # logic needs real line breaks to have anything to work with -- these
+    # sentence-boundary breaks are inserted just for that, not shown to
+    # anyone, cheap and reversible (retrieve_original() still returns the
+    # exact flat text, not this pseudo-line version).
+    pseudo_lined = re.sub(r"(?<=[.!?])\s+", "\n", text)
+    compressed_text = context_compressor.compress(
+        pseudo_lined, kind="auto", label=title or url, target_chars=MAX_PAGE_CHARS,
+    )
+
     return {
         "title": title,
         "url": url,
-        "text": text[:MAX_PAGE_CHARS],
+        "text": compressed_text,
     }
 
 
@@ -495,7 +511,19 @@ def format_web_context(web_data):
         for i, page in enumerate(pages, start=1):
             lines.append(f"{i}. {page.get('title', '')}")
             lines.append(f"   URL: {page.get('url', '')}")
-            lines.append(f"   Text: {page.get('text', '')[:2500]}")
+            # Was a second blind [:2500] slice stacked on top of
+            # read_webpage()'s own cap -- risked cutting the compressor's
+            # ref-id footer in half, or re-truncating exactly the
+            # protected content read_webpage() had just preserved.
+            # Compressing again at this tighter combined-pages budget is
+            # smart about it instead (min_size lower here on purpose --
+            # this runs on already-compressed text, so it should still
+            # activate well under the general 3000-char default).
+            page_text = context_compressor.compress(
+                page.get("text", ""), kind="auto", label=page.get("title", ""),
+                min_size=1500, target_chars=2500,
+            )
+            lines.append(f"   Text: {page_text}")
 
     if not results and not pages:
         lines.append("\nNo useful web results were found.")
