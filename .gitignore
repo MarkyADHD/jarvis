@@ -18,6 +18,20 @@ voices/
 vosk_model/
 piper_runtime/
 voice_cache/
+
+# --- Local AI model weights (Phase 1/2 provider router) ---
+# Ollama itself stores pulled models under the user profile
+# (~/.ollama/models), never inside this repo, so nothing here should
+# ever actually trigger -- this is a safety net against ever
+# accidentally committing a multi-gigabyte model file, not a fix for an
+# existing leak (confirmed clean: nothing matching these patterns is
+# tracked or present in the working tree as of when this was added).
+*.gguf
+*.safetensors
+*.ggml
+models/
+local_models/
+jarviscode/models/
 *.bak_*
 piper_windows_amd64.zip
 vosk-model-*.zip

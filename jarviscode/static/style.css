@@ -2,7 +2,7 @@
   --bg: #0a0e14;
   --panel: #10151d;
   --border: #1e2733;
-  --accent: #00d2ff;
+  --accent: #8fe8b8;
   --text: #e6edf3;
   --text-dim: #8b98a5;
   --user-bubble: #17232e;
@@ -94,6 +94,11 @@ html, body {
   gap: 16px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
+}
+#hud-canvas {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
 }
 #app-title {
   font-weight: 700;

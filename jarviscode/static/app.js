@@ -4,7 +4,57 @@
     provider: null,
     model: null,
     effort: "medium",
+    busy: false,
   };
+
+  // Small self-contained animated "Jarvis style" HUD -- a pulsing green
+  // ring/core, same #8fe8b8 accent the main Jarvis face HUD already
+  // uses (ai-visualizer/core.js's gear icon and settings panel), so
+  // JarvisCode reads as the same product rather than a different app.
+  // Deliberately just a canvas + requestAnimationFrame loop, no new
+  // dependency, no shared server with the real HUD -- idle breathing
+  // pulse normally, faster/brighter spin while state.busy is true (a
+  // request is in flight).
+  (function initHud() {
+    const canvas = document.getElementById("hud-canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width, h = canvas.height;
+    const cx = w / 2, cy = h / 2;
+    let t = 0;
+
+    function frame() {
+      t += state.busy ? 0.09 : 0.03;
+      ctx.clearRect(0, 0, w, h);
+
+      const baseR = 9;
+      const pulse = Math.sin(t * (state.busy ? 3 : 1.4)) * (state.busy ? 2.5 : 1.5);
+      const r = baseR + pulse;
+
+      // Outer ring, rotating slowly, brighter/faster while busy.
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(t * (state.busy ? 1.4 : 0.4));
+      ctx.strokeStyle = state.busy ? "rgba(143,232,184,0.9)" : "rgba(143,232,184,0.45)";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 6, 0, Math.PI * 1.5);
+      ctx.stroke();
+      ctx.restore();
+
+      // Core.
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      grad.addColorStop(0, state.busy ? "rgba(180,255,220,0.95)" : "rgba(143,232,184,0.85)");
+      grad.addColorStop(1, "rgba(143,232,184,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
 
   const chatEl = document.getElementById("chat");
   const treeEl = document.getElementById("file-tree");
@@ -116,24 +166,50 @@
     });
   });
 
-  async function applyProviderChange() {
-    await api("/api/set_provider", {
+  async function applyProviderChange(confirmInstall) {
+    const chosen = providerSelect.value;
+    const res = await api("/api/set_provider", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        provider: providerSelect.value,
+        provider: chosen,
         model: modelSelect.value,
         effort: effortSelect.value || "medium",
+        confirm_install: !!confirmInstall,
       }),
     });
-    const m = await api("/api/models?provider=" + encodeURIComponent(providerSelect.value));
+
+    if (res.needs_install) {
+      const ok = confirm(
+        (res.label || chosen) + " isn't installed yet. Install it now? (" + res.install_summary + ")"
+      );
+      if (ok) {
+        addMsg("system", "Installing " + (res.label || chosen) + "...");
+        return applyProviderChange(true);
+      }
+      // Declined -- revert the dropdown to whatever's actually active.
+      const s = await api("/api/state");
+      providerSelect.value = s.active_provider;
+      state.provider = s.active_provider;
+      return;
+    }
+
+    if (!res.ok) {
+      addMsg("error", res.error || "Couldn't switch provider.");
+      const s = await api("/api/state");
+      providerSelect.value = s.active_provider;
+      return;
+    }
+
+    state.provider = chosen;
+    const m = await api("/api/models?provider=" + encodeURIComponent(chosen));
     populateModels(m.models, null);
     populateEffort(m.effort_levels, "medium");
   }
 
-  providerSelect.addEventListener("change", applyProviderChange);
-  modelSelect.addEventListener("change", applyProviderChange);
-  effortSelect.addEventListener("change", applyProviderChange);
+  providerSelect.addEventListener("change", () => applyProviderChange(false));
+  modelSelect.addEventListener("change", () => applyProviderChange(false));
+  effortSelect.addEventListener("change", () => applyProviderChange(false));
 
   async function send() {
     const input = document.getElementById("message-input");
@@ -142,6 +218,7 @@
     input.value = "";
     addMsg("user", text);
     const thinking = addMsg("assistant", "Thinking...");
+    state.busy = true;
 
     try {
       const res = await api("/api/chat", {
@@ -158,6 +235,8 @@
     } catch (e) {
       thinking.remove();
       addMsg("error", String(e));
+    } finally {
+      state.busy = false;
     }
   }
 

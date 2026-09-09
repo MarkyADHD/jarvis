@@ -231,6 +231,21 @@ class Handler(BaseHTTPRequestHandler):
                 })
                 return
 
+            if path == "/api/provider_ready":
+                provider_id = (qs.get("provider") or [""])[0]
+                meta = router.PROVIDERS.get(provider_id)
+                if not meta:
+                    self._send_json({"error": "unknown provider"}, 400)
+                    return
+                ready, reason = router.is_ready(provider_id)
+                self._send_json({
+                    "ready": ready,
+                    "reason": reason,
+                    "needs_install": (not ready) and bool(meta.get("install_cmd")),
+                    "install_summary": " ".join(meta["install_cmd"]) if meta.get("install_cmd") else "",
+                })
+                return
+
             if path == "/api/tree":
                 sess = _session()
                 if not sess["project_root"]:
@@ -298,9 +313,38 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/set_provider":
                 sess = _session()
                 provider_id = str(body.get("provider", "")).strip()
-                if provider_id not in router.PROVIDERS:
+                meta = router.PROVIDERS.get(provider_id)
+                if not meta:
                     self._send_json({"ok": False, "error": "unknown provider"}, 400)
                     return
+
+                confirm_install = bool(body.get("confirm_install"))
+                ready, reason = router.is_ready(provider_id)
+
+                if not ready and meta.get("install_cmd") and not confirm_install:
+                    # Ask before installing anything, per explicit
+                    # instruction -- the frontend shows a confirm dialog
+                    # and re-sends this same request with confirm_install
+                    # true if the user actually wants it installed.
+                    self._send_json({
+                        "ok": False,
+                        "needs_install": True,
+                        "install_summary": " ".join(meta["install_cmd"]),
+                        "label": meta["label"],
+                    })
+                    return
+
+                if not ready and meta.get("install_cmd") and confirm_install:
+                    ok, error = router.install_provider(provider_id)
+                    if not ok:
+                        self._send_json({"ok": False, "error": f"Install failed: {error}"})
+                        return
+                    ready, reason = router.is_ready(provider_id)
+
+                if not ready:
+                    self._send_json({"ok": False, "error": reason or "provider not ready"})
+                    return
+
                 sess["provider"] = provider_id
                 sess["model"] = body.get("model") or None
                 sess["effort"] = str(body.get("effort", "medium") or "medium")

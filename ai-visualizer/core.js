@@ -309,6 +309,21 @@ const AV = (() => {
     panel.id = "jarvisSettings";
     panel.innerHTML = `
       <section>
+        <h4>AI Brain</h4>
+        <div id="aiStatus" class="status">checking...</div>
+        <div class="row">
+          <select id="aiProviderSelect" style="flex:1;background:rgba(255,255,255,.04);
+            border:1px solid rgba(120,255,190,.2);border-radius:6px;color:#e8f0f2;
+            font:11px 'SF Mono',Menlo,Consolas,monospace;padding:6px 8px"></select>
+          <button id="aiSwitch">Switch</button>
+        </div>
+        <div class="hint">Which AI actually answers Jarvis's questions
+          and handles self-editing. Claude is the default whenever it's
+          installed; Free Local AI needs no account and runs on your own
+          PC. Switching to a provider that isn't installed yet will ask
+          before installing anything.</div>
+      </section>
+      <section>
         <h4>Spotify</h4>
         <div id="spotifyStatus" class="status">checking...</div>
         <div class="row">
@@ -555,7 +570,61 @@ const AV = (() => {
       });
     }
 
+    async function refreshAi() {
+      try {
+        const r = await fetch(api("/settings/ai/status"), authed({ method: "GET" }));
+        const data = await r.json();
+        const select = panel.querySelector("#aiProviderSelect");
+        select.innerHTML = "";
+        (data.providers || []).forEach((p) => {
+          const opt = document.createElement("option");
+          opt.value = p.id;
+          opt.textContent = p.label + (p.free ? "" : " (paid)");
+          if (p.id === data.active_provider) opt.selected = true;
+          select.appendChild(opt);
+        });
+        const label = (data.providers || []).find((p) => p.id === data.active_provider);
+        setStatus(panel.querySelector("#aiStatus"),
+          "Active: " + (label ? label.label : data.active_provider) +
+          (data.active_ollama_model ? " (" + data.active_ollama_model + ")" : ""), "ok");
+      } catch (e) {
+        setStatus(panel.querySelector("#aiStatus"), "server unreachable", "err");
+      }
+    }
+
+    async function switchAiProvider(providerId, confirmInstall) {
+      const statusEl = panel.querySelector("#aiStatus");
+      setStatus(statusEl, "switching...", "");
+      try {
+        const r = await fetch(api("/settings/ai/switch"), authed({
+          method: "POST",
+          body: JSON.stringify({ provider: providerId, confirm_install: !!confirmInstall }),
+        }));
+        const data = await r.json();
+        if (data.needs_install) {
+          const ok = confirm((data.label || providerId) + " isn't installed yet. Install it now? (" + data.install_summary + ")");
+          if (ok) return switchAiProvider(providerId, true);
+          await refreshAi();
+          return;
+        }
+        if (!data.ok) {
+          setStatus(statusEl, data.error || "Switch failed.", "err");
+          await refreshAi();
+          return;
+        }
+        await refreshAi();
+      } catch (e) {
+        setStatus(statusEl, "server unreachable", "err");
+      }
+    }
+
+    panel.querySelector("#aiSwitch").addEventListener("click", () => {
+      const providerId = panel.querySelector("#aiProviderSelect").value;
+      switchAiProvider(providerId, false);
+    });
+
     async function refresh() {
+      refreshAi();
       try {
         const r = await fetch(api("/settings/status"), authed({ method: "GET" }));
         const data = await r.json();

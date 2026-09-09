@@ -51,6 +51,7 @@ import jarvis_keylight_v1 as keylight
 import jarvis_hue_v1 as hue
 import jarvis_govee_v1 as govee
 import jarvis_twitch_v1 as twitch
+import jarvis_provider_router_v1 as provider_router
 
 
 def process_message(text: str) -> str:
@@ -163,6 +164,50 @@ def settings_status() -> dict:
         ],
         "hue_connected": bool(hue.resolve_bridge()[0]),
     }
+
+
+def settings_ai_status() -> dict:
+    active = provider_router.get_active_provider()
+    return {
+        "providers": [
+            {"id": pid, "label": m["label"], "free": m["free"], "kind": m["kind"]}
+            for pid, m in provider_router.PROVIDERS.items()
+        ],
+        "active_provider": active,
+        "active_ollama_model": provider_router.get_active_ollama_model() if active == "ollama" else "",
+    }
+
+
+def settings_ai_switch(provider_id: str, confirm_install: bool) -> dict:
+    """Same "ask before installing" contract as JarvisCode's own
+    /api/set_provider -- shared here rather than duplicated so Jarvis's
+    settings panel and JarvisCode can't drift into two different
+    behaviors for the identical decision."""
+    meta = provider_router.PROVIDERS.get(provider_id)
+    if not meta:
+        return {"ok": False, "error": "unknown provider"}
+
+    ready, reason = provider_router.is_ready(provider_id)
+
+    if not ready and meta.get("install_cmd") and not confirm_install:
+        return {
+            "ok": False,
+            "needs_install": True,
+            "install_summary": " ".join(meta["install_cmd"]),
+            "label": meta["label"],
+        }
+
+    if not ready and meta.get("install_cmd") and confirm_install:
+        ok, error = provider_router.install_provider(provider_id)
+        if not ok:
+            return {"ok": False, "error": f"Install failed: {error}"}
+        ready, reason = provider_router.is_ready(provider_id)
+
+    if not ready:
+        return {"ok": False, "error": reason or "provider not ready"}
+
+    provider_router.set_active_provider(provider_id)
+    return {"ok": True}
 
 
 def settings_save_spotify(client_id: str) -> dict:
@@ -838,6 +883,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(settings_status())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/ai/status":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_ai_status())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
         elif path == "/settings/twitch/status":
             if not self._authorized():
                 self.send_response(403)
@@ -882,6 +937,8 @@ class Handler(BaseHTTPRequestHandler):
             self._proxy_to_visualizer()
 
     _SETTINGS_ROUTES = {
+        "/settings/ai/switch": lambda d: settings_ai_switch(
+            str(d.get("provider", "")).strip(), bool(d.get("confirm_install"))),
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),
         "/settings/elevenlabs": lambda d: settings_save_elevenlabs(str(d.get("api_key", "")).strip()),
         "/settings/govee": lambda d: settings_save_govee(str(d.get("api_key", "")).strip()),
