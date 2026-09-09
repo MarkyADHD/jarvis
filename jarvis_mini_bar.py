@@ -19,11 +19,24 @@ no new signal system, just a second, much lighter-weight reader of the
 one that already exists.
 
 Visibility rule: hidden by default. Shows the moment state is anything
-other than "idle" (listening, thinking, or speaking). The 30-second
-hide countdown only starts once state actually RETURNS to idle after
-having been thinking/speaking (i.e. once Jarvis has finished a reply,
-not from whenever the bar first appeared) -- any further activity
-before that timer elapses cancels it and keeps the bar shown.
+other than "idle" (listening, thinking, or speaking), fading in rather
+than snapping. The 15-second hide countdown only starts once state
+actually RETURNS to idle after having been thinking/speaking (i.e. once
+Jarvis has finished a reply, not from whenever the bar first appeared)
+-- any further activity before that timer elapses cancels it and keeps
+the bar shown. Hiding fades out the same way it fades in.
+
+Bar colour reacts to whichever voice is actually live: mic input while
+you're talking (state "listening") draws in blue, Jarvis's own TTS
+playback while he's talking (state "speaking") draws in green. Outside
+those two states -- thinking, or idle during the hide countdown -- the
+bar draws as a flat, dim line rather than whatever waveform sample last
+happened to be on disk. Earlier versions kept re-drawing the last loud
+speech frame after Jarvis actually stopped talking, which looked like
+the bar was "stuck" mid-word; the fix is to only ever draw a real
+waveform when its own kind tag matches the current live state AND it
+was written within the last third of a second (older than that means
+nobody is feeding it any more, e.g. speech ended between polls).
 
 Deliberately a plain script (not a frozen exe), single-instance guarded
 via a bound local port, matching every other auxiliary Jarvis process
@@ -52,10 +65,15 @@ BAR_WIDTH = 220
 BAR_HEIGHT = 46
 TASKBAR_MARGIN = 8
 POLL_MS = 80
-HIDE_AFTER_IDLE_SECONDS = 30.0
+HIDE_AFTER_IDLE_SECONDS = 15.0
+WAVEFORM_STALE_SECONDS = 0.35  # older than this = nobody is feeding it now
+
+FADE_STEP_MS = 20
+FADE_STEP = 0.15  # alpha change per fade tick -- ~7 ticks (~140ms) to fully fade
 
 TRANSPARENT_KEY = "#010203"  # near-black, never used by the drawn bars
-BAR_COLOR = "#8fe8b8"        # same accent teal/green used across the HUD
+BAR_COLOR_SPEAK = "#8fe8b8"   # Jarvis talking -- same teal/green used across the HUD
+BAR_COLOR_LISTEN = "#7ec8ff"  # you talking -- distinct blue so it's obvious whose voice it is
 BAR_COLOR_DIM = "#3a5048"
 
 
@@ -90,12 +108,18 @@ def _read_state() -> str:
 
 
 def _read_waveform():
+    """Returns (samples, kind, age_seconds). kind is "speaking" or
+    "listening" (see backtalk.signals.feed_waveform/feed_mic_waveform);
+    age_seconds is how long ago it was written, used to detect a stale
+    (no-longer-being-fed) file rather than trusting whatever's on disk."""
     try:
         data = json.loads(WAVEFORM_FILE.read_text(encoding="utf-8"))
-        samples = data.get("samples") or []
-        return [abs(float(s)) for s in samples]
+        samples = [abs(float(s)) for s in (data.get("samples") or [])]
+        kind = data.get("kind", "speaking")
+        age = time.time() - float(data.get("ts", 0))
+        return samples, kind, age
     except Exception:
-        return []
+        return [], "speaking", 999.0
 
 
 class MiniBar:
@@ -118,10 +142,13 @@ class MiniBar:
         self._make_click_through()
 
         self.visible = False
+        self.root.attributes("-alpha", 0.0)
         self.root.withdraw()
 
         self._last_active_state = "idle"
         self._idle_since = None  # time.time() when state returned to idle after thinking/speaking
+        self._fade_target = 0.0
+        self._fade_done_cb = None
 
         self._poll()
 
@@ -152,7 +179,7 @@ class MiniBar:
             styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_NOACTIVATE,
         )
 
-    def _draw(self, samples):
+    def _draw(self, samples, color):
         self.canvas.delete("all")
         n = 28
         if samples:
@@ -173,19 +200,51 @@ class MiniBar:
             x1 = x0 + bar_w
             y0 = mid_y - h / 2
             y1 = mid_y + h / 2
-            color = BAR_COLOR if norm > 0.08 else BAR_COLOR_DIM
-            self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="")
+            fill = color if norm > 0.08 else BAR_COLOR_DIM
+            self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline="")
 
     def _show(self):
-        if not self.visible:
-            self.visible = True
-            self._position()
-            self.root.deiconify()
+        if self.visible:
+            return
+        self.visible = True
+        self._position()
+        self.root.deiconify()
+        self._fade_to(1.0)
 
     def _hide(self):
-        if self.visible:
-            self.visible = False
-            self.root.withdraw()
+        if not self.visible:
+            return
+        self._fade_to(0.0, on_done=self._finish_hide)
+
+    def _finish_hide(self):
+        self.visible = False
+        self.root.withdraw()
+
+    def _fade_to(self, target, on_done=None):
+        self._fade_target = target
+        self._fade_done_cb = on_done
+        self._fade_step()
+
+    def _fade_step(self):
+        try:
+            current = float(self.root.attributes("-alpha"))
+        except Exception:
+            current = self._fade_target
+        target = self._fade_target
+        if abs(current - target) <= FADE_STEP:
+            new = target
+        else:
+            new = current + (FADE_STEP if target > current else -FADE_STEP)
+        try:
+            self.root.attributes("-alpha", new)
+        except Exception:
+            pass
+        if new != target:
+            self.root.after(FADE_STEP_MS, self._fade_step)
+        elif self._fade_done_cb:
+            cb = self._fade_done_cb
+            self._fade_done_cb = None
+            cb()
 
     def _poll(self):
         state = _read_state()
@@ -205,7 +264,16 @@ class MiniBar:
                 self._idle_since = None
 
         if self.visible:
-            self._draw(_read_waveform())
+            samples, kind, age = _read_waveform()
+            live_kind = "listening" if state == "listening" else "speaking" if state == "speaking" else None
+            if live_kind and kind == live_kind and age < WAVEFORM_STALE_SECONDS:
+                color = BAR_COLOR_LISTEN if kind == "listening" else BAR_COLOR_SPEAK
+                self._draw(samples, color)
+            else:
+                # Not actively fed right now (thinking, or coasting down
+                # to idle) -- draw the flat resting line instead of
+                # whatever loud frame was last on disk.
+                self._draw([], BAR_COLOR_DIM)
 
         self._last_active_state = state
         self.root.after(POLL_MS, self._poll)

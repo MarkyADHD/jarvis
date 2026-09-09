@@ -36,6 +36,7 @@ import webrtcvad
 
 from backtalk.config import CFG
 from backtalk.vlog import log
+from backtalk import signals
 
 RATE = 16000
 FRAME_MS = 30
@@ -411,7 +412,9 @@ def record_held(is_held, max_s: float = 60.0, min_s: float = 0.25) -> str | None
     with _open_mic() as stream:
         while is_held() and len(frames) * FRAME_MS / 1000 < max_s:
             block, _ = stream.read(FRAME_LEN)
-            frames.append(block[:, 0].copy())
+            mono = block[:, 0].copy()
+            frames.append(mono)
+            signals.feed_mic_waveform(mono)
         # a small tail so the last word isn't clipped at release
         for _ in range(6):
             block, _ = stream.read(FRAME_LEN)
