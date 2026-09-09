@@ -43,6 +43,7 @@ import jarvis_govee_v1 as govee_v1
 import jarvis_update_check_v1 as update_check_v1
 import jarvis_twitch_v1 as twitch_v1
 import jarvis_clipper_v1 as clipper_v1
+import jarvis_thumbnail_v1 as thumbnail_v1
 import jarvis_discord_v1 as discord_v1
 import jarvis_tailscale_v1 as tailscale_v1
 import jarvis_room_lights_v1 as room_lights_v1
@@ -495,6 +496,10 @@ def quick_handle_command_v2(command):
     clipper_result = clipper_v1.clipper_command_fast(c, name, app)
     if clipper_result:
         return finish_plan_v3(clipper_result, c, name, "clipper")
+
+    thumbnail_result = thumbnail_v1.thumbnail_command_fast(c, name, app)
+    if thumbnail_result:
+        return finish_plan_v3(thumbnail_result, c, name, "thumbnail")
 
     discord_result = discord_v1.discord_command_fast(c, name, app)
     if discord_result:

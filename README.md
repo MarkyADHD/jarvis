@@ -88,6 +88,23 @@ canned replies.
   the settings panel if it predates this — Twitch has no way to add a
   new permission to an existing connection
 
+### Design your thumbnails — JarvisThumbnails
+- Say "make me a thumbnail for my GTA stream" and he'll actually generate
+  one — real image generation, not a template filler
+- Drop your favorite creators' thumbnails (Vanoss, Sm1thy, whoever)
+  into the `Jarvis Thumbnails\Style References` folder on your desktop
+  and he'll match that visual style automatically — bold outlined text,
+  exaggerated expressions, high-contrast pop backgrounds — instead of
+  guessing at a generic look
+- Say "edit this thumbnail to say COMEBACK KING" to change text/colors/
+  elements on the last one he made, instead of starting over
+- Runs on a free Google Gemini API key (separate from your Claude
+  subscription, no credit card needed) — Claude itself is text-only and
+  can't generate images at any tier, so this is the one feature in
+  Jarvis that leans on a second AI provider
+- Saved to `Jarvis Thumbnails` on your desktop, folder opens
+  automatically the moment it's ready
+
 ### Show you what he's doing
 - A live animated face (the HUD) that reacts to whether he's idle,
   listening, thinking, or speaking — several visual styles to choose
@@ -148,6 +165,9 @@ than telling you he can't.
   Govee, if you want those integrations
 - Optional: Twitch, if you want stream title/category control or
   JarvisClipper's automatic VOD highlight clipping
+- Optional: a free [Gemini API key](https://aistudio.google.com/apikey)
+  (no card needed) if you want JarvisThumbnails' thumbnail generation
+  and editing
 - Optional: [Tailscale](https://tailscale.com) if you want to reach
   him from your phone
 

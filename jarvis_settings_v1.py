@@ -83,6 +83,10 @@ SECRET_SERVICES = {
         "env": "GOVEE_API_KEY",
         "label": "Govee API Key",
     },
+    "gemini api key": {
+        "env": "GEMINI_API_KEY",
+        "label": "Gemini API Key",
+    },
 }
 
 WAKE_ALIASES = (
