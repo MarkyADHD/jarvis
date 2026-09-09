@@ -1,64 +1,50 @@
 """
-Jarvis Brain Providers V1
+Jarvis Provider Router V1
 ===========================
 
-Lets the user swap which AI actually answers Jarvis's general questions
-and handles self-editing/diagnostic tasks -- "use gemini as my brain",
-picked from the settings panel or by voice -- instead of being locked to
-Claude. This exists specifically so someone without a Claude Pro
-subscription can still run Jarvis on a free backend.
+Phase 1 of "Claude is no longer a required dependency": one real
+provider registry that both of Jarvis's previously-separate AI code
+paths route through, plus a genuine zero-setup local fallback.
 
-WHY THIS WAS SAFE TO ADD WITHOUT TOUCHING PC CONTROL/SPOTIFY/LIGHTS/ETC:
-confirmed by reading the live code first -- none of Jarvis's device or
-system control features are implemented as AI tool-calls. They're all
-deterministic Python `*_command_fast()` routers (see jarvis_spotify_v2,
-jarvis_keylight_v1, jarvis_clipper_v1, this project's own convention).
-The AI "brain" is only ever used for two things: general conversational
-answers (jarvis_claude_brain_v2.ask_sync, the fallback after every fast
-router below has passed) and self-diagnosis/self-editing
-(jarvis_claude_code_v1.diagnose_project and friends, Claude-only,
-untouched by this module on purpose -- self-modification stays on the
-model that's actually been tested doing it). Swapping the brain only
-changes who answers plain questions; it never touches Jarvis's own
-control surface.
+Supersedes jarvis_brain_providers_v1.py (deleted, nothing else imported
+it -- confirmed via repo-wide grep before removing it).
 
-HOW EACH PROVIDER WORKS: every one of these (Claude Code, Gemini CLI,
-Qwen Code, Codex CLI, Kiro CLI, OpenCode) is its own standalone coding
-agent with a documented headless mode: pipe a prompt in, get a finished
-answer out, no different in shape from jarvis_claude_code_v1._run()'s
-existing subprocess pattern -- confirmed against each project's own docs
-before writing this. Minimax is the one exception: there is no
-standalone Minimax agent CLI at all, only a raw pay-per-token API, so
-its adapter routes through OpenCode configured with Minimax as the
-underlying model -- OpenCode supplies the actual tool-use loop.
+WHY THIS WAS NEEDED, CONFIRMED BY READING THE LIVE CODE FIRST: Jarvis
+had two unrelated AI call paths, not one -- jarvis_claude_code_v1.py
+(stateless, one `claude` CLI subprocess per call) and
+jarvis_claude_brain_v2.py (a persistent warm session using the actual
+claude_agent_sdk directly). Last session's jarvis_brain_providers_v1
+only sat in front of the second one. This module is still deliberately
+scoped the same way -- only the general-answer fallback path
+(ask_active_brain, called from jarvis_app_v2.ask_ai_common_v2) is
+provider-aware. Narrow internal judgment calls (clip curation, self-
+diagnosis) stay on jarvis_claude_code_v1 directly, unchanged, on
+purpose: they already degrade gracefully without Claude (the clipper
+falls back to loudness-only ranking) and widening their scope isn't
+needed to make Jarvis usable without a Claude subscription.
 
-WHAT'S LIVE-VERIFIED VS. DOCS-ONLY: Claude's adapter is the existing,
-already-proven jarvis_claude_code_v1 code, unchanged. Every other
-adapter here was implemented against each project's own current
-documentation but NOT run against a real account from this machine (no
-Gemini/Qwen/OpenAI/Kiro/Minimax key was available at the time this was
-written) -- confirmed live testing is still owed once a real key exists
-for each, per this project's own "never hide failed tests" rule. Expect
-to need to nudge exact CLI flag names once a real run surfaces a
-mismatch; the fallback path (raw stdout if JSON parsing fails) exists
-specifically to absorb small doc/reality drift without hard-failing.
+THE ACTUAL "CLAUDE NO LONGER REQUIRED" MECHANISM: confirmed live
+(curl http://localhost:11434/api/tags on this machine) that
+setup_environment.ps1 ALREADY installs Ollama and pulls qwen2.5vl:7b for
+every single friend install, unconditionally, for JarvisVision -- and
+confirmed that model's own capabilities list includes plain
+"completion", not just vision. That means a genuinely free, zero-extra-
+setup local brain already sits on disk for every existing and new
+install; it was just never wired up as a selectable provider. So
+get_active_provider() defaults to "claude" ONLY when Claude Code is
+actually installed and found; otherwise it quietly defaults to "ollama"
+instead of failing -- no wizard, no migration step, no action needed
+from anyone. Existing Claude users see zero change (Claude is found,
+stays default). This is Phase 1's whole answer to Section D/E/N from
+the approved plan without needing the first-run wizard yet (that's
+Phase 2).
 
-"Download and run locally" (Qwen only, real weights via Ollama on the
-user's own GPU) is a genuinely different, much heavier path than the
-other providers' cloud CLIs -- only triggered by an explicit phrase
-("download qwen locally"/"set up qwen locally"), never by just
-switching the active provider, and it warns about size before pulling.
-Only Qwen gets this: Claude/Gemini/Codex/Kiro are all closed-weight,
-nothing to download; Minimax's own open weights are ~230B parameters
-even quantized down, not a realistic local run for typical hardware, so
-that combination is deliberately not offered here.
-
-Examples:
-    Jarvis switch to gemini
-    Jarvis use claude as my brain
-    Jarvis what model are you using
-    Jarvis list available models
-    Jarvis download qwen locally
+Every non-Claude, non-Ollama adapter here (Gemini/Qwen-cloud/Codex/Kiro/
+Minimax/OpenCode) is carried over unchanged from last session's
+jarvis_brain_providers_v1 -- same caveat applies: built against each
+provider's own current docs, not live-verified from this machine (no
+account for any of them existed here). Ollama's adapter IS live-verified
+-- confirmed against the real local server above.
 """
 import json
 import os
@@ -72,6 +58,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import requests
+
 import jarvis_claude_code_v1 as claude_v1
 
 MEMORY_ROOT = Path("E:/JarvisMemory")
@@ -82,13 +70,18 @@ SETTINGS_DIR = MEMORY_ROOT / "settings"
 SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
 BRAIN_SETTINGS_PATH = SETTINGS_DIR / "brain_provider.json"
 
-DEFAULT_PROVIDER = "claude"
 DEFAULT_TIMEOUT = 150
-QWEN_LOCAL_MODEL = "qwen3-coder:30b"  # ~19GB pull, single-consumer-GPU class
+OLLAMA_BASE = "http://localhost:11434"
+# Same model setup_environment.ps1 already pulls for JarvisVision on
+# every install -- reused here so "free local brain" needs nothing extra
+# on any machine that's already run the normal installer.
+OLLAMA_FALLBACK_MODEL = "qwen2.5vl:7b"
+# A smaller, text-only pull offered specifically for "download qwen
+# locally" -- not the vision model above, a real general-purpose local
+# chat model, sized to actually be usable on a wider range of hardware
+# than a 30B coding-specific model would be.
+OLLAMA_TEXT_MODEL = "qwen2.5:7b"
 
-# key_env is the jarvis_settings_v1 secret each provider's cloud API needs.
-# install_cmd is None for Claude (already required for Jarvis itself) and
-# for the two providers whose installers aren't plain npm packages.
 PROVIDERS = {
     "claude": {
         "label": "Claude",
@@ -97,7 +90,16 @@ PROVIDERS = {
         "install_cmd": None,
         "key_env": None,
         "free": False,
-        "notes": "Jarvis's original brain. Needs Claude Pro or higher.",
+        "notes": "Jarvis's preferred brain. Needs Claude Pro or higher.",
+    },
+    "ollama": {
+        "label": "Free Local AI",
+        "kind": "local",
+        "cli_name": None,
+        "install_cmd": None,
+        "key_env": None,
+        "free": True,
+        "notes": "Runs entirely on your own PC via Ollama -- already installed by Jarvis's own setup for JarvisVision, genuinely free, no account needed.",
     },
     "gemini": {
         "label": "Gemini",
@@ -116,19 +118,6 @@ PROVIDERS = {
         "key_env": "QWEN_API_KEY",
         "free": True,
         "notes": "Alibaba DashScope's free tier. Runs on their servers, not yours.",
-    },
-    "qwen_local": {
-        "label": "Qwen (downloaded, runs on your own GPU)",
-        "kind": "local",
-        "cli_name": "qwen",
-        "install_cmd": ["npm", "install", "-g", "@qwen-code/qwen-code@latest"],
-        "key_env": None,
-        "free": True,
-        "notes": (
-            f"Downloads real weights ({QWEN_LOCAL_MODEL}, ~19GB) via Ollama "
-            "and runs entirely on your own GPU -- needs real VRAM (16GB+ for "
-            "a usable model), not realistic on every machine."
-        ),
     },
     "codex": {
         "label": "Codex (OpenAI)",
@@ -173,10 +162,12 @@ PROVIDERS = {
 
 SPOKEN_ALIASES = {
     "claude": "claude",
+    "ollama": "ollama",
+    "local ai": "ollama",
+    "free local ai": "ollama",
     "gemini": "gemini",
     "qwen": "qwen",
     "qwen cloud": "qwen",
-    "qwen local": "qwen_local",
     "codex": "codex",
     "kiro": "kiro",
     "minimax": "minimax",
@@ -200,10 +191,23 @@ def _write_json(path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _default_provider():
+    """Claude if it's actually installed (every existing user, unchanged
+    experience); otherwise the free local model that's already sitting on
+    disk from JarvisVision's own setup, rather than failing. This is the
+    entire "Claude is no longer required" mechanism for brand-new users --
+    no wizard needed for the default to already be usable."""
+    if claude_v1.find_cli() is not None:
+        return "claude"
+    return "ollama"
+
+
 def get_active_provider():
     data = _read_json(BRAIN_SETTINGS_PATH, {})
-    provider = data.get("active", DEFAULT_PROVIDER)
-    return provider if provider in PROVIDERS else DEFAULT_PROVIDER
+    provider = data.get("active")
+    if provider in PROVIDERS:
+        return provider
+    return _default_provider()
 
 
 def set_active_provider(provider_id):
@@ -212,20 +216,58 @@ def set_active_provider(provider_id):
     _write_json(BRAIN_SETTINGS_PATH, data)
 
 
+def get_active_ollama_model():
+    data = _read_json(BRAIN_SETTINGS_PATH, {})
+    model = str(data.get("ollama_model", "") or "").strip()
+    if model:
+        return model
+    return _ollama_auto_model() or OLLAMA_FALLBACK_MODEL
+
+
+def set_active_ollama_model(model_name):
+    data = _read_json(BRAIN_SETTINGS_PATH, {})
+    data["ollama_model"] = model_name
+    _write_json(BRAIN_SETTINGS_PATH, data)
+
+
 def find_cli(name):
-    return shutil.which(name)
+    return shutil.which(name) if name else None
+
+
+def _ollama_list_models():
+    try:
+        r = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=3)
+        r.raise_for_status()
+        return [m.get("name", "") for m in r.json().get("models", []) if m.get("name")]
+    except Exception:
+        return []
+
+
+def _ollama_auto_model():
+    """Prefers whatever's already pulled over guessing -- a fresh Jarvis
+    install already has OLLAMA_FALLBACK_MODEL from JarvisVision setup, but
+    if the user later pulls something else and picks it, respect that."""
+    models = _ollama_list_models()
+    if not models:
+        return None
+    if OLLAMA_FALLBACK_MODEL in models:
+        return OLLAMA_FALLBACK_MODEL
+    return models[0]
 
 
 def is_ready(provider_id):
-    """CLI installed (or Claude, always considered installed) and, if it
-    needs one, an API key configured. Doesn't check Ollama for qwen_local
-    -- that's handled separately since it's a much heavier setup step."""
     meta = PROVIDERS.get(provider_id)
     if not meta:
         return False, "unknown provider"
 
     if provider_id == "claude":
         return claude_v1.find_cli() is not None, "Claude Code CLI not found"
+
+    if provider_id == "ollama":
+        models = _ollama_list_models()
+        if not models:
+            return False, "Ollama isn't running or has no models pulled yet"
+        return True, ""
 
     if not find_cli(meta["cli_name"]):
         return False, f"{meta['label']}'s CLI isn't installed yet"
@@ -255,11 +297,7 @@ def install_provider(provider_id, progress_cb=None):
         note(f"Installing {meta['label']}'s CLI ({' '.join(meta['install_cmd'])})...")
         try:
             proc = subprocess.run(
-                meta["install_cmd"],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                shell=False,
+                meta["install_cmd"], capture_output=True, text=True, timeout=300, shell=False,
             )
         except Exception as e:
             return False, f"Install failed: {e}"
@@ -268,10 +306,7 @@ def install_provider(provider_id, progress_cb=None):
             return False, clean_stderr(proc.stderr) or "Install failed."
 
         if not find_cli(meta["cli_name"]):
-            return False, (
-                f"{meta['label']} installed but its command isn't on PATH yet "
-                f"-- may need Jarvis restarted."
-            )
+            return False, f"{meta['label']} installed but its command isn't on PATH yet -- may need Jarvis restarted."
 
         return True, ""
 
@@ -288,9 +323,6 @@ def _json_result(text):
         return json.loads(text)
     except Exception:
         pass
-    # Some of these CLIs print one JSON object per line (JSONL); the final
-    # line is usually the completed result -- same defensive pattern
-    # jarvis_claude_code_v1 already relies on for odd output shapes.
     for line in reversed(text.splitlines()):
         line = line.strip()
         if not line:
@@ -315,12 +347,35 @@ def _extract_text(data, raw_stdout):
     return str(raw_stdout or "").strip()
 
 
+def _run_ollama(prompt, system_prompt, timeout):
+    model = get_active_ollama_model()
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    started = time.time()
+    try:
+        r = requests.post(
+            f"{OLLAMA_BASE}/api/chat",
+            json={"model": model, "messages": messages, "stream": False},
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        return {"ok": False, "error": f"Ollama call failed ({model}): {e}", "result": ""}
+
+    result = str((data.get("message") or {}).get("content", "") or "").strip()
+    return {
+        "ok": bool(result),
+        "result": result,
+        "error": "" if result else "Ollama returned an empty response",
+        "elapsed": round(time.time() - started, 3),
+    }
+
+
 def _run_generic_cli(cli_path, extra_args, prompt, system_prompt, timeout):
-    """Shared subprocess pattern for every CLI-based adapter: pipe the
-    prompt (system prompt prepended, since not every one of these has a
-    confirmed dedicated system-prompt flag) over stdin -- same Windows
-    command-line-length workaround jarvis_claude_code_v1._run() already
-    needed -- and read back JSON, falling back to raw stdout."""
     stdin_text = prompt
     if system_prompt:
         stdin_text = f"[SYSTEM INSTRUCTIONS]\n{system_prompt}\n\n[USER]\n{prompt}"
@@ -328,14 +383,8 @@ def _run_generic_cli(cli_path, extra_args, prompt, system_prompt, timeout):
     started = time.time()
     try:
         proc = subprocess.run(
-            [cli_path] + extra_args,
-            input=stdin_text,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            timeout=timeout,
-            shell=False,
+            [cli_path] + extra_args, input=stdin_text, text=True, encoding="utf-8",
+            errors="replace", capture_output=True, timeout=timeout, shell=False,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timed out", "result": ""}
@@ -345,12 +394,10 @@ def _run_generic_cli(cli_path, extra_args, prompt, system_prompt, timeout):
     data = _json_result(proc.stdout)
     result = _extract_text(data, proc.stdout)
     ok = bool(proc.returncode == 0 and result)
-    error = clean_stderr(proc.stderr) if not ok else ""
-
     return {
         "ok": ok,
         "result": result,
-        "error": error,
+        "error": "" if ok else clean_stderr(proc.stderr),
         "elapsed": round(time.time() - started, 3),
     }
 
@@ -360,14 +407,7 @@ def _run_gemini_like(provider_id, prompt, system_prompt, timeout):
     cli_path = find_cli(meta["cli_name"])
     if not cli_path:
         return {"ok": False, "error": f"{meta['label']} CLI not installed", "result": ""}
-
-    return _run_generic_cli(
-        cli_path,
-        ["--output-format", "json"],
-        prompt,
-        system_prompt,
-        timeout,
-    )
+    return _run_generic_cli(cli_path, ["--output-format", "json"], prompt, system_prompt, timeout)
 
 
 def _run_codex(prompt, system_prompt, timeout):
@@ -383,14 +423,8 @@ def _run_codex(prompt, system_prompt, timeout):
 
         try:
             proc = subprocess.run(
-                [cli_path, "exec", "--json", "-o", out_file],
-                input=stdin_text,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                timeout=timeout,
-                shell=False,
+                [cli_path, "exec", "--json", "-o", out_file], input=stdin_text, text=True,
+                encoding="utf-8", errors="replace", capture_output=True, timeout=timeout, shell=False,
             )
         except subprocess.TimeoutExpired:
             return {"ok": False, "error": "timed out", "result": ""}
@@ -402,30 +436,18 @@ def _run_codex(prompt, system_prompt, timeout):
             result = Path(out_file).read_text(encoding="utf-8").strip()
         except Exception:
             pass
-
         if not result:
             result = _extract_text(_json_result(proc.stdout), proc.stdout)
 
         ok = bool(proc.returncode == 0 and result)
-        return {
-            "ok": ok,
-            "result": result,
-            "error": "" if ok else clean_stderr(proc.stderr),
-        }
+        return {"ok": ok, "result": result, "error": "" if ok else clean_stderr(proc.stderr)}
 
 
 def _run_kiro(prompt, system_prompt, timeout):
     cli_path = find_cli("kiro")
     if not cli_path:
         return {"ok": False, "error": "Kiro CLI not installed", "result": ""}
-
-    return _run_generic_cli(
-        cli_path,
-        ["chat", "--no-interactive", "--trust-tools"],
-        prompt,
-        system_prompt,
-        timeout,
-    )
+    return _run_generic_cli(cli_path, ["chat", "--no-interactive", "--trust-tools"], prompt, system_prompt, timeout)
 
 
 def _run_opencode_like(prompt, system_prompt, timeout, model_flag=None):
@@ -444,13 +466,8 @@ def _run_opencode_like(prompt, system_prompt, timeout, model_flag=None):
     started = time.time()
     try:
         proc = subprocess.run(
-            [cli_path] + args + [stdin_text],
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            timeout=timeout,
-            shell=False,
+            [cli_path] + args + [stdin_text], text=True, encoding="utf-8", errors="replace",
+            capture_output=True, timeout=timeout, shell=False,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timed out", "result": ""}
@@ -459,18 +476,10 @@ def _run_opencode_like(prompt, system_prompt, timeout, model_flag=None):
 
     result = proc.stdout.strip()
     ok = bool(proc.returncode == 0 and result)
-    return {
-        "ok": ok,
-        "result": result,
-        "error": "" if ok else clean_stderr(proc.stderr),
-    }
+    return {"ok": ok, "result": result, "error": "" if ok else clean_stderr(proc.stderr)}
 
 
 def _ensure_minimax_opencode_config():
-    """Writes (or refreshes) an OpenCode custom-provider block pointing at
-    Minimax's OpenAI-compatible endpoint, using MINIMAX_API_KEY. OpenCode's
-    own config schema per its docs at time of writing; least-verified path
-    in this module since it was never run against a real Minimax key."""
     config_dir = Path.home() / ".config" / "opencode"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "config.json"
@@ -503,8 +512,14 @@ def run_provider(provider_id, prompt, *, system_prompt="", timeout=DEFAULT_TIMEO
     if provider_id == "claude":
         return claude_v1._run(prompt, system_prompt=system_prompt, effort=effort, timeout=timeout, max_turns=1, tools="")
 
-    if provider_id in ("gemini", "qwen", "qwen_local"):
-        return _run_gemini_like(provider_id if provider_id != "qwen_local" else "qwen", prompt, system_prompt, timeout)
+    if provider_id == "ollama":
+        return _run_ollama(prompt, system_prompt, timeout)
+
+    if provider_id == "qwen":
+        return _run_gemini_like("qwen", prompt, system_prompt, timeout)
+
+    if provider_id == "gemini":
+        return _run_gemini_like("gemini", prompt, system_prompt, timeout)
 
     if provider_id == "codex":
         return _run_codex(prompt, system_prompt, timeout)
@@ -523,10 +538,11 @@ def run_provider(provider_id, prompt, *, system_prompt="", timeout=DEFAULT_TIMEO
 
 
 def ask_active_brain(prompt, *, spoken_name="Sir", timeout=DEFAULT_TIMEOUT, effort=None):
-    """Drop-in replacement call site for claude_brain_v2.ask_sync(): if
-    Claude is the active provider (the default), delegates straight to the
-    existing warm-session brain, completely unchanged. Anything else goes
-    through this module's own per-call CLI adapters instead."""
+    """Drop-in replacement for the old direct claude_brain_v2.ask_sync()
+    call site: if Claude is active (the default whenever it's actually
+    installed), delegates straight to the existing warm-session brain,
+    completely unchanged. Anything else -- including the "Claude isn't
+    installed" default of "ollama" -- goes through this module's adapters."""
     provider_id = get_active_provider()
 
     if provider_id == "claude":
@@ -596,27 +612,25 @@ def _run_switch_job(app_module, spoken_name, provider_id):
 
 def _run_qwen_local_download_job(app_module, spoken_name):
     try:
-        if not find_cli("ollama"):
+        ollama_cli = find_cli("ollama")
+        if not ollama_cli:
             app_module.speak(
-                f"I need Ollama installed first for local Qwen, {spoken_name} -- "
-                f"grab it from ollama.com, then ask me again."
+                f"I need Ollama for local Qwen, {spoken_name}, and it's not on PATH -- "
+                f"it should have been installed by Jarvis's own setup already, try restarting Jarvis first."
             )
             return
 
-        app_module.log(f"Brain: pulling {QWEN_LOCAL_MODEL} via Ollama (~19GB)...")
+        app_module.log(f"Brain: pulling {OLLAMA_TEXT_MODEL} via Ollama...")
         proc = subprocess.run(
-            ["ollama", "pull", QWEN_LOCAL_MODEL],
-            capture_output=True, text=True, timeout=3600, shell=False,
+            [ollama_cli, "pull", OLLAMA_TEXT_MODEL], capture_output=True, text=True, timeout=3600, shell=False,
         )
         if proc.returncode != 0:
             app_module.speak(f"The Qwen download failed, {spoken_name}: {clean_stderr(proc.stderr)}")
             return
 
-        if not find_cli("qwen"):
-            install_provider("qwen_local")
-
-        set_active_provider("qwen_local")
-        app_module.speak(f"Qwen's downloaded and set as my brain, {spoken_name} -- running locally on your GPU now.")
+        set_active_ollama_model(OLLAMA_TEXT_MODEL)
+        set_active_provider("ollama")
+        app_module.speak(f"Qwen's downloaded and set as my brain, {spoken_name} -- running locally on your PC now.")
     except Exception as e:
         try:
             app_module.speak(f"The local Qwen setup hit an error, {spoken_name}: {e}")
@@ -626,7 +640,7 @@ def _run_qwen_local_download_job(app_module, spoken_name):
 
 def is_brain_request(command):
     c = _strip_wake(command)
-    if any(p in c for p in ("as my brain", "switch to", "use claude", "use gemini", "use qwen", "use codex", "use kiro", "use minimax", "use opencode")):
+    if any(p in c for p in ("as my brain", "switch to", "use claude", "use gemini", "use qwen", "use codex", "use kiro", "use minimax", "use opencode", "use ollama", "use local ai", "use free local ai")):
         return True
     if c in {"what model are you using", "what brain are you using", "list available models", "list models", "list brains", "show available brains"}:
         return True
@@ -643,14 +657,12 @@ def brain_command_fast(command, spoken_name="Sir", app_module=None):
 
     if "download qwen locally" in c or "set up qwen locally" in c or "install qwen locally" in c:
         threading.Thread(target=_run_qwen_local_download_job, args=(app_module, spoken_name), daemon=True).start()
-        return _reply(
-            f"Starting the local Qwen setup, {spoken_name} -- that's about a 19 gigabyte "
-            f"download, could take a while depending on your connection."
-        )
+        return _reply(f"Starting the local Qwen setup, {spoken_name} -- that's a real download, could take a few minutes.")
 
     if c in {"what model are you using", "what brain are you using"}:
         provider_id = get_active_provider()
-        return _reply(f"I'm currently running on {PROVIDERS[provider_id]['label']}, {spoken_name}.")
+        extra = f" ({get_active_ollama_model()})" if provider_id == "ollama" else ""
+        return _reply(f"I'm currently running on {PROVIDERS[provider_id]['label']}{extra}, {spoken_name}.")
 
     if c in {"list available models", "list models", "list brains", "show available brains"}:
         parts = [f"{m['label']} ({'free' if m['free'] else 'paid'})" for m in PROVIDERS.values()]

@@ -132,16 +132,21 @@ canned replies.
   the same way you would sitting in front of the PC
 
 ### Run on a different brain
-- Claude is the default and the most tested, but say "switch to gemini"
-  (or Qwen, Codex, Kiro, Minimax, OpenCode) and Jarvis installs that
-  provider's own CLI automatically and starts answering through it
-  instead — no reinstalling Jarvis itself
-- **This is the answer if you don't have a Claude subscription**: Gemini
-  and OpenCode both run on genuinely free tiers, no card needed
-- Say "download qwen locally" for a version that runs entirely on your
-  own GPU — real model weights (~19GB), no cloud calls at all once
-  it's pulled. Needs real VRAM (16GB+) to be usable
-- "What model are you using" / "list available models" any time
+- **Claude isn't required anymore.** Jarvis ships with a genuinely free
+  local AI brain installed automatically during setup (no account, no
+  card, runs entirely on your own PC) — if you skip Claude sign-in, or
+  don't have a subscription, Jarvis just works on that instead, with
+  zero extra steps.
+- Claude is still the preferred default whenever it's actually
+  installed and signed in — existing users see no change at all.
+- Say "switch to gemini" (or Qwen, Codex, Kiro, Minimax, OpenCode, or
+  "switch to ollama"/"free local ai") and Jarvis installs whatever's
+  needed automatically and starts answering through it instead — no
+  reinstalling Jarvis itself.
+- Say "download qwen locally" for a second, general-purpose local model
+  pulled straight into that same free local brain (~5GB, no GPU
+  required — runs fine on CPU, just slower than with one).
+- "What model are you using" / "list available models" any time.
 - Only affects general questions and self-editing — Spotify, lights,
   Twitch, thumbnails, and every other control feature stay exactly as
   they are no matter which brain is active, since none of them are
@@ -170,11 +175,17 @@ than telling you he can't.
 
 ## What you'll need
 
-- **A [Claude](https://claude.com) Pro subscription or higher** (Pro,
-  Max, Team, or Enterprise — $17-20/mo on Pro, billed to your own
-  account, never shared). This is a hard requirement, not optional:
-  Jarvis's brain is Claude Code, and Claude Code itself needs at least
-  Pro — there is no free tier that works here, and no way around it.
+- **Nothing paid, actually.** Jarvis runs on a genuinely free local AI
+  brain out of the box (installed automatically, no account needed) if
+  you skip Claude sign-in during setup or don't have a subscription.
+- Optional: a **[Claude](https://claude.com) Pro subscription or
+  higher** (Pro, Max, Team, or Enterprise — $17-20/mo on Pro, billed to
+  your own account, never shared) if you want Claude specifically as
+  the brain — it's the most capable option and Jarvis's own preferred
+  default when it's available, but it's no longer required. Switch
+  between Claude, Gemini, and other providers any time by saying
+  "switch to gemini" (or whichever), or just stick with the free local
+  option.
 - Windows 10/11
 - A microphone and speakers (or headphones)
 - Optional: Spotify, Nanoleaf, Philips Hue, Elgato Key Light, or

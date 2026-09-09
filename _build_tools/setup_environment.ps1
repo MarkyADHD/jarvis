@@ -486,61 +486,78 @@ if ($ffmpegExe) {
 
 Say ""
 Say "===================================================="
-Say "  Claude Code -- Jarvis's brain"
+Say "  Claude Code -- optional, Jarvis's preferred brain"
 Say "===================================================="
 Say ""
 
-# --- Node.js check (needed for npm, needed for Claude Code) ---
+# Claude Code used to be a hard requirement here (forced Node.js install,
+# forced npm install, forced blocking `claude login`). It no longer is --
+# Jarvis now has a real provider router (jarvis_provider_router_v1.py)
+# that falls back to the free local Ollama brain (already installed a
+# few steps up for JarvisVision, same qwen2.5vl:7b model) whenever Claude
+# Code isn't found, with zero action needed from anyone. So this whole
+# section is now best-effort and non-fatal, same pattern as Tailscale/
+# Ollama/FFmpeg above -- nothing after this point depends on it
+# succeeding. Existing users who already have Claude Code installed and
+# logged in see no change at all: the router still defaults to Claude
+# whenever it's actually present.
 $npm = Get-Command npm -ErrorAction SilentlyContinue
 if (-not $npm) {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($winget) {
-        Say "Node.js not found -- installing via winget (needed for Claude Code)..."
+        Say "Node.js not found -- installing via winget (needed for Claude Code and other AI providers)..."
         winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements --silent
-        # winget just changed PATH machine/user-wide; this process's own
-        # PATH won't see it until refreshed from the registry.
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                     [System.Environment]::GetEnvironmentVariable("Path", "User")
         $npm = Get-Command npm -ErrorAction SilentlyContinue
     }
-    if (-not $npm) {
-        Write-Host "Node.js is required for Claude Code and could not be installed automatically." -ForegroundColor Red
-        Write-Host "Install it from https://nodejs.org (LTS version), then run this script again." -ForegroundColor Yellow
-        Read-Host "Press Enter to close"
-        exit 1
-    }
-}
-Say "Found: npm $(& npm --version)"
-
-# --- Claude Code CLI ---
-$claude = Get-Command claude -ErrorAction SilentlyContinue
-if (-not $claude) {
-    Say "Installing Claude Code..."
-    & npm install -g @anthropic-ai/claude-code
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
-                [System.Environment]::GetEnvironmentVariable("Path", "User")
-    $claude = Get-Command claude -ErrorAction SilentlyContinue
 }
 
-if (-not $claude) {
-    Write-Host "Claude Code install didn't complete -- run 'npm install -g @anthropic-ai/claude-code' yourself, then 'claude login'." -ForegroundColor Red
+if (-not $npm) {
+    Write-Host "Node.js could not be installed automatically -- skipping Claude Code, this is optional." -ForegroundColor Yellow
+    Write-Host "Jarvis will run on the free local AI brain instead. Install Node.js yourself later if you want Claude: https://nodejs.org" -ForegroundColor Yellow
 } else {
-    Say "Claude Code installed."
+    Say "Found: npm $(& npm --version)"
 
-    # Heuristic for "already logged in": Claude Code's own credential
-    # file in the user profile, entirely separate from this project
-    # folder -- the same reason the original owner's login could never
-    # have shipped with this copy in the first place.
-    $credFile = Join-Path $env:USERPROFILE ".claude\.credentials.json"
-    if (Test-Path $credFile) {
-        Say "Claude Code already has a login on this machine -- skipping." "Green"
+    $claude = Get-Command claude -ErrorAction SilentlyContinue
+    if (-not $claude) {
+        Say "Installing Claude Code..."
+        try {
+            & npm install -g @anthropic-ai/claude-code
+        } catch { }
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                    [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $claude = Get-Command claude -ErrorAction SilentlyContinue
+    }
+
+    if (-not $claude) {
+        Write-Host "Claude Code install didn't complete -- skipping, this is optional." -ForegroundColor Yellow
+        Write-Host "Jarvis will run on the free local AI brain instead. Install it yourself later: 'npm install -g @anthropic-ai/claude-code', then 'claude login', or just tell Jarvis 'switch to claude' once it's installed." -ForegroundColor Yellow
     } else {
-        Say ""
-        Say "One more step: sign in with YOUR OWN Claude account (not the" "White"
-        Say "original owner's -- this is separate per-machine, per-user login)." "White"
-        Say "This opens your browser for a normal Claude/Anthropic sign-in." "White"
-        Say ""
-        & claude login
+        Say "Claude Code installed."
+
+        # Heuristic for "already logged in": Claude Code's own credential
+        # file in the user profile, entirely separate from this project
+        # folder -- the same reason the original owner's login could
+        # never have shipped with this copy in the first place.
+        $credFile = Join-Path $env:USERPROFILE ".claude\.credentials.json"
+        if (Test-Path $credFile) {
+            Say "Claude Code already has a login on this machine -- skipping." "Green"
+        } else {
+            Say ""
+            Say "Optional: sign in now with YOUR OWN Claude account (not the" "White"
+            Say "original owner's -- this is separate per-machine, per-user login)" "White"
+            Say "if you want Claude as your brain. You can skip this and Jarvis" "White"
+            Say "will use the free local AI brain instead -- sign in any time" "White"
+            Say "later by telling Jarvis 'switch to claude'." "White"
+            Say ""
+            $signInChoice = Read-Host "Sign in to Claude now? (y/N)"
+            if ($signInChoice.Trim().ToUpper() -eq "Y") {
+                & claude login
+            } else {
+                Say "Skipped -- Jarvis will use the free local AI brain for now." "Gray"
+            }
+        }
     }
 }
 

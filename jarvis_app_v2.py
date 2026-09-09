@@ -44,7 +44,7 @@ import jarvis_update_check_v1 as update_check_v1
 import jarvis_twitch_v1 as twitch_v1
 import jarvis_clipper_v1 as clipper_v1
 import jarvis_thumbnail_v1 as thumbnail_v1
-import jarvis_brain_providers_v1 as brain_providers_v1
+import jarvis_provider_router_v1 as provider_router
 import jarvis_discord_v1 as discord_v1
 import jarvis_tailscale_v1 as tailscale_v1
 import jarvis_room_lights_v1 as room_lights_v1
@@ -502,9 +502,9 @@ def quick_handle_command_v2(command):
     if thumbnail_result:
         return finish_plan_v3(thumbnail_result, c, name, "thumbnail")
 
-    brain_result = brain_providers_v1.brain_command_fast(c, name, app)
+    brain_result = provider_router.brain_command_fast(c, name, app)
     if brain_result:
-        return finish_plan_v3(brain_result, c, name, "brain_providers")
+        return finish_plan_v3(brain_result, c, name, "provider_router")
 
     discord_result = discord_v1.discord_command_fast(c, name, app)
     if discord_result:
@@ -1614,11 +1614,11 @@ def ask_ai_common_v2(goal, original_func=None):
             brain_v2_prompt = goal
 
         if _looks_like_coding_task(goal):
-            brain_v2_answer = brain_providers_v1.ask_active_brain(
+            brain_v2_answer = provider_router.ask_active_brain(
                 brain_v2_prompt, spoken_name=name, timeout=CODING_TASK_TIMEOUT_SECONDS, effort="high",
             )
         else:
-            brain_v2_answer = brain_providers_v1.ask_active_brain(brain_v2_prompt, spoken_name=name)
+            brain_v2_answer = provider_router.ask_active_brain(brain_v2_prompt, spoken_name=name)
 
         if brain_v2_answer.get("ok"):
             brain_v2_reply = str(brain_v2_answer.get("result", "") or "").strip()
@@ -1653,7 +1653,7 @@ def ask_ai_common_v2(goal, original_func=None):
 
                 return plan
     except Exception as e:
-        _record_v3_error("claude_brain_v2.ask_sync", e)
+        _record_v3_error("provider_router.ask_active_brain", e)
 
     if claude_v1.enabled():
         try:
