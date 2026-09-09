@@ -47,8 +47,19 @@ New-Item -ItemType Directory -Path $Destination | Out-Null
 
 Write-Host "Copying $Source -> $Destination (this takes a few minutes)..." -ForegroundColor Cyan
 
-$excludeDirs = @(
-    ".git",
+# Bare names (no path separator) so robocopy's /XD matches them by name
+# at ANY depth in the tree, not just at the repo root. Confirmed live
+# this was NOT true before this fix: Join-Path-ing "__pycache__" to
+# $Source turns it into the single absolute path C:\AI-Agent\__pycache__,
+# which excludes only a root-level __pycache__ -- a nested one (e.g.
+# jarviscode\__pycache__, found by actually inspecting a real export
+# after JarvisCode was added) copied straight through untouched. Every
+# past export likely leaked nested __pycache__ dirs the same way.
+$excludeDirsByName = @(
+    "__pycache__", ".git"
+)
+
+$excludeDirsByPath = @(
     "venv", "backtalk\.venv", "backtalk\logs",
     # vision_training's own isolated venv carries CUDA-enabled torch plus
     # the rest of the fine-tuning stack (multiple GB) -- confirmed this
@@ -57,8 +68,8 @@ $excludeDirs = @(
     # and climbing before the compile was caught and killed mid-run.
     # This is dev-only tooling for building Jarvis's own vision model,
     # never something a friend's install needs to run Jarvis itself.
-    "vision_training\.venv", "vision_training\__pycache__",
-    "__pycache__", "build", "dist",
+    "vision_training\.venv",
+    "build", "dist",
     "JarvisMemory", "voice_cache", "temp_screenshots",
     "conversation_v4_backups", "intelligence_v3_backups",
     "link_search_v4_backups", "search_intelligence_backups",
@@ -77,6 +88,8 @@ $excludeDirs = @(
     # that convention existed, not an actively-needed exclusion anymore.
     "website"
 ) | ForEach-Object { Join-Path $Source $_ }
+
+$excludeDirs = $excludeDirsByName + $excludeDirsByPath
 
 $excludeFiles = @(
     "*_backup_*.py",
