@@ -407,17 +407,135 @@ def _score_track(track, query, title_hint="", artist_hint=""):
     return score
 
 
+#  A genuinely unrelated result (Spotify's plain-text search returns
+# SOMETHING for almost any words at all) scores 0-14 in practice --
+# stray shared filler words plus popularity, no real title/artist
+# signal. A real match, even a loose one (substring artist only, no
+# title match), clears 60. Calibrated against live Spotify results for
+# both a real loosely-transcribed request and a made-up nonsense one.
+MIN_ACCEPTABLE_SCORE = 20
+
+
 def best_track(query, title_hint="", artist_hint=""):
     tracks = search_track(query, limit=10)
+    used_query = query
+
+    if not tracks and (title_hint or artist_hint):
+        # Field-filtered queries (track:"X" artist:"Y", built by
+        # parse_play_request) need Spotify's own artist string to be a
+        # close literal match -- confirmed live this fails hard for a
+        # stylised artist name speech-to-text can't say as written
+        # (bbno$ spoken aloud transcribes to "baby no money", and
+        # artist:"baby no money" returns zero results even though the
+        # track is right there). A plain free-text search has no such
+        # requirement -- Spotify's own fuzzy matching plus the scoring
+        # below (word overlap, substring, popularity) finds it anyway.
+        # Only worth trying when there's a hint to fall back to, so a
+        # genuinely nonexistent track still correctly returns nothing.
+        fallback_query = " ".join(p for p in (title_hint, artist_hint) if p).strip()
+        if fallback_query and fallback_query != query:
+            tracks = search_track(fallback_query, limit=10)
+            used_query = fallback_query
+
     if not tracks:
         return None
 
     tracks.sort(
-        key=lambda t: _score_track(t, query, title_hint, artist_hint),
+        key=lambda t: _score_track(t, used_query, title_hint, artist_hint),
         reverse=True,
     )
+    best = tracks[0]
 
-    return tracks[0]
+    # The free-text fallback above trades precision for recall -- it
+    # will always return SOMETHING, so without this a genuinely
+    # nonexistent song silently played a random unrelated track instead
+    # of honestly saying it couldn't be found. Only enforced when there
+    # is a hint to score against at all.
+    if (title_hint or artist_hint) and _score_track(best, used_query, title_hint, artist_hint) < MIN_ACCEPTABLE_SCORE:
+        return None
+
+    return best
+
+
+# -------------------------------------------------------------------------
+# Artist-only playback -- "play songs by X" / "play some X" with no
+# specific track named. Resolves the artist and hands Spotify's own
+# player a context_uri (spotify:artist:<id>), the same context an
+# artist's own page "Play" button uses -- Spotify handles picking and
+# rotating through their catalogue itself, no guessing a track title
+# required (and no risk of an LLM hallucinating a song that doesn't
+# exist, which asking a language model to "pick a song" would risk).
+# -------------------------------------------------------------------------
+
+def search_artist(query, limit=5):
+    body, status, raw = _request(
+        "GET", "/search",
+        params={"q": query, "type": "artist", "limit": int(limit)},
+    )
+    if status != 200 or not body:
+        return []
+    try:
+        return list(body["artists"]["items"])
+    except Exception:
+        return []
+
+
+def _score_artist(artist, query):
+    name = norm(artist.get("name", ""))
+    q = norm(query)
+
+    score = 0
+    if name == q:
+        score += 100
+    elif q in name or name in q:
+        score += 70
+
+    q_words = set(q.split())
+    name_words = set(name.split())
+    score += len(q_words & name_words) * 4
+
+    try:
+        score += min(int(artist.get("popularity", 0)) // 10, 10)
+    except Exception:
+        pass
+
+    return score
+
+
+def best_artist(query):
+    artists = search_artist(query, limit=5)
+    if not artists:
+        return None
+
+    artists.sort(key=lambda a: _score_artist(a, query), reverse=True)
+    best = artists[0]
+
+    # Same reasoning as MIN_ACCEPTABLE_SCORE for tracks -- Spotify's
+    # artist search still returns something for near-nonsense queries,
+    # so a real match needs to actually clear a bar rather than just be
+    # "whatever came back first".
+    if _score_artist(best, query) < MIN_ACCEPTABLE_SCORE:
+        return None
+
+    return best
+
+
+def play_artist(name):
+    artist = best_artist(name)
+    if not artist:
+        return False, f"I couldn't find an artist called {name} on Spotify.", None
+
+    ok, status, error = play_context_uri(f"spotify:artist:{artist['id']}")
+    if ok:
+        return True, "", artist
+
+    if status == 403:
+        return False, (
+            "Spotify refused playback. This usually means the account is not Premium, "
+            f"the token is missing playback permission, or the selected device is restricted. {error}"
+        ), artist
+
+    return False, error or f"Spotify playback failed with HTTP {status}.", artist
 
 
 def devices():
@@ -724,6 +842,35 @@ def track_display(track):
     return f"{title} by {artists}" if artists else title
 
 
+def parse_play_artist_request(command):
+    """"play songs by <artist>" / "play some <artist>" / "play <artist>'s
+    music" -- no specific track named, so this resolves to Spotify's own
+    artist context (spotify:artist:<id>, the same thing an artist page's
+    own "Play" button uses) rather than parse_play_request's exact-track
+    matching. Checked BEFORE parse_play_request in spotify_command_fast
+    on purpose: "play songs by bbno$" would otherwise match
+    parse_play_request's bare "X by Y" pattern with the literal word
+    "songs" as the track title, which is wrong."""
+    c = apply_spoken_aliases(str(command or "").strip())
+
+    patterns = [
+        r"^(?:jarvis\s+)?play\s+(?:some\s+)?songs?\s+by\s+(.+?)[.!?]*$",
+        r"^(?:jarvis\s+)?play\s+(?:a\s+|some\s+)?(?:random\s+)?(?:song|track)\s+by\s+(.+?)[.!?]*$",
+        r"^(?:jarvis\s+)?play\s+(?:some\s+)?(.+?)'s\s+music[.!?]*$",
+        r"^(?:jarvis\s+)?play\s+(?:some\s+)?(.+?)\s+music[.!?]*$",
+        r"^(?:jarvis\s+)?play\s+some\s+(.+?)[.!?]*$",
+    ]
+
+    for pattern in patterns:
+        m = re.match(pattern, c, flags=re.IGNORECASE)
+        if m:
+            artist = m.group(1).strip(" \"'")
+            if artist:
+                return {"artist": artist}
+
+    return None
+
+
 def parse_play_request(command):
     c = apply_spoken_aliases(str(command or "").strip())
     low = norm(c)
@@ -827,6 +974,9 @@ def is_spotify_v2_request(command):
     if "connect spotify" in c or "spotify connect" in c:
         return True
 
+    if parse_play_artist_request(command):
+        return True
+
     if parse_play_request(command):
         return True
 
@@ -872,6 +1022,15 @@ def spotify_command_fast(command, spoken_name="Sir", app_module=None):
         return _reply(
             f"I couldn't start your tunes: {error} {spoken_name}."
         )
+
+    artist_request = parse_play_artist_request(command)
+    if artist_request:
+        ok, error, artist = play_artist(artist_request["artist"])
+
+        if ok:
+            return _reply(f"Playing {artist['name']}, {spoken_name}.")
+
+        return _reply(f"{error} {spoken_name}.")
 
     request = parse_play_request(command)
     if request:

@@ -251,6 +251,12 @@ def intent_family(text: Any) -> str:
     # of "play <song> by bbno$ struggles to find the exact song."
     if re.search(r"^play\s+.+\s+by\s+.+$", c):
         return "spotify"
+    # "play some <artist>" / "play <artist>'s music" / "play <artist>
+    # music" -- an artist-only request with no "by" and no track named
+    # at all (jarvis_spotify_v2.parse_play_artist_request resolves these
+    # to Spotify's own artist context instead of a specific track).
+    if re.search(r"^play\s+some\s+.+$", c) or re.search(r"^play\s+.+('s)?\s+music$", c):
+        return "spotify"
     if any(w in c for w in ("pause music", "resume music", "next song", "previous song", "volume")):
         return "media"
     if any(w in c for w in ("nanoleaf", "key light", "keylight", "room lights", "the lights", "govee")):
