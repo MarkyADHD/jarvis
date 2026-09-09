@@ -56,6 +56,7 @@ import jarvis_tool_intelligence_v1 as tool_v1
 import jarvis_conversation_v4 as conversation_v4
 import jarvis_claude_code_v1 as claude_v1
 import jarvis_claude_brain_v2 as claude_brain_v2
+import jarvis_world_time_v1 as world_time_v1
 
 
 _original_log = getattr(app, "log", None)
@@ -525,6 +526,19 @@ def quick_handle_command_v2(command):
 
     c = aliases_v1.apply_aliases(c)
     family = intelligence_v3.intent_family(c)
+
+    # WORLD CLOCK PRECHECK
+    # Checked ahead of link/tool intelligence and web-search routing on
+    # purpose: "what time is it in India" was getting misread by the tool
+    # planner as a PC-control goal (it tried to "open a clock app" with
+    # india as a window-focus target) on some phrasings, and by the web-
+    # search heuristic as a fresh-info lookup on others -- both wrong,
+    # and the web path returned scraped junk instead of a real answer
+    # (confirmed live for India). Returns None (falls through completely
+    # unchanged) for any place this fixed table doesn't recognise.
+    world_time_result = world_time_v1.world_time_fast(c, spoken_name=name)
+    if world_time_result:
+        return finish_plan_v3(world_time_result, c, name, "world_time")
 
     # LINK INTELLIGENCE V1 PRECHECK
     # Direct/profile navigation beats generic browser/search routing.

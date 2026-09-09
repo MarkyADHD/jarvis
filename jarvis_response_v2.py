@@ -129,8 +129,26 @@ def clean_reply(reply, name="Sir"):
     for old, new in replacements:
         reply = reply.replace(old, new)
 
-    reply = re.sub(r'^\{\s*"reply"\s*:\s*"', "", reply).strip()
-    reply = re.sub(r'"\s*,\s*"steps"\s*:\s*\[\]\s*\}\s*$', "", reply).strip()
+    # Last-resort net for JSON relaxed_json_loads couldn't parse at all --
+    # truncated model output (cut off mid-string by a token limit) leaves
+    # unbalanced braces, which find_balanced_json can never close, so the
+    # dict branch above never fires and the raw JSON skeleton is still
+    # sitting in `reply` at this point. EVERY system prompt in this
+    # codebase asks for {"mode": "chat", "reply": "...", "steps": []} --
+    # not the bare {"reply": "..."} this used to assume -- so a leading
+    # "mode" (or any other key) before "reply" used to survive straight
+    # into speech, which is what came out as the audible "mode chat
+    # reply ..." bug once TTS dropped the punctuation.
+    _JSON_STRING = r'"(?:[^"\\]|\\.)*"'
+    _JSON_SCALAR = rf'(?:{_JSON_STRING}|\[[^\]]*\]|true|false|null|-?\d+(?:\.\d+)?)'
+    reply = re.sub(
+        rf'^\{{\s*(?:"[A-Za-z_]+"\s*:\s*{_JSON_SCALAR}\s*,\s*)*"reply"\s*:\s*"',
+        "", reply,
+    ).strip()
+    reply = re.sub(
+        rf'"\s*(?:,\s*"[A-Za-z_]+"\s*:\s*{_JSON_SCALAR})*\s*\}}\s*$',
+        "", reply,
+    ).strip()
 
     if name:
         reply = re.sub(

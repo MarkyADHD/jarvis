@@ -38,6 +38,15 @@ waveform when its own kind tag matches the current live state AND it
 was written within the last third of a second (older than that means
 nobody is feeding it any more, e.g. speech ended between polls).
 
+Visual style: a small heads-up-display readout rather than a plain
+equaliser strip -- four dim corner brackets frame the widget, a broken
+scanline baseline runs to a centre "arc reactor" core (a bright disc over
+a dimmer halo, faking glow since Tk canvas items have no real per-shape
+alpha), and the waveform is mirrored outward from that core rather than
+running left-to-right, so the loudest sound always reads as closest to
+the centre. The core breathes on a slow pulse while resting so the
+widget never looks simply dead between words.
+
 Deliberately a plain script (not a frozen exe), single-instance guarded
 via a bound local port, matching every other auxiliary Jarvis process
 in this project (jarvis_face_window.py, jarvis_remote_chat.py) --
@@ -46,6 +55,7 @@ process-relaunch quirk that specifically affects frozen executables on
 this machine.
 """
 import json
+import math
 import socket
 import time
 import tkinter as tk
@@ -61,8 +71,8 @@ WAVEFORM_FILE = SIGNALS_DIR / ".voice_waveform"
 _SINGLE_INSTANCE_PORT = 8794
 _single_instance_socket = None
 
-BAR_WIDTH = 220
-BAR_HEIGHT = 46
+BAR_WIDTH = 240
+BAR_HEIGHT = 54
 TASKBAR_MARGIN = 8
 POLL_MS = 80
 HIDE_AFTER_IDLE_SECONDS = 15.0
@@ -75,6 +85,39 @@ TRANSPARENT_KEY = "#010203"  # near-black, never used by the drawn bars
 BAR_COLOR_SPEAK = "#8fe8b8"   # Jarvis talking -- same teal/green used across the HUD
 BAR_COLOR_LISTEN = "#7ec8ff"  # you talking -- distinct blue so it's obvious whose voice it is
 BAR_COLOR_DIM = "#3a5048"
+
+# Fixed HUD "chrome" -- the corner brackets and baseline never change
+# colour with state, the same way a heads-up display's frame stays put
+# while only the reactive readout inside it changes. Kept dim/desaturated
+# on purpose so the reactive waveform and core are always the brightest
+# thing in the widget.
+FRAME_COLOR = "#2c4048"
+CORNER_LEN = 10       # px each bracket arm reaches from the corner
+CORNER_INSET = 3
+CORE_RADIUS_MIN = 3.0
+CORE_RADIUS_MAX = 9.0
+CORE_PULSE_PERIOD_S = 2.6  # slow "breathing" cycle while resting
+
+
+def _peak_norm(levels) -> float:
+    """Raw int16-magnitude samples -> a 0..1 loudness used to size the
+    core. 12000 (well under the 32768 int16 ceiling) is loud-speech
+    level, so the core reaches full size on normal talking rather than
+    needing a near-clipping shout."""
+    if not levels:
+        return 0.0
+    return min(1.0, max(levels) / 12000.0)
+
+
+def _dim_hex(color: str, factor: float) -> str:
+    """A darker shade of an accent colour, for the glow-halo trick: Tk
+    canvas items have no real per-shape alpha, so a soft "glow" is faked
+    by drawing a bigger, dimmer copy of a shape behind the bright one
+    rather than an actually-translucent one."""
+    color = color.lstrip("#")
+    r, g, b = (int(color[i:i + 2], 16) for i in (0, 2, 4))
+    r, g, b = (max(0, min(255, int(c * factor))) for c in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def _ensure_single_instance() -> bool:
@@ -179,29 +222,92 @@ class MiniBar:
             styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_NOACTIVATE,
         )
 
-    def _draw(self, samples, color):
+    def _draw_corner_brackets(self):
+        """Four HUD-style corner brackets (an L-shaped pair of short
+        lines per corner) framing the widget -- the classic sci-fi
+        targeting-reticle chrome, here just enough of it to read as a
+        HUD readout rather than a plain equaliser bar."""
+        w, h, ins, arm = BAR_WIDTH, BAR_HEIGHT, CORNER_INSET, CORNER_LEN
+        corners = (
+            ((ins, ins), (1, 0), (0, 1)),                    # top-left
+            ((w - ins, ins), (-1, 0), (0, 1)),                # top-right
+            ((ins, h - ins), (1, 0), (0, -1)),                # bottom-left
+            ((w - ins, h - ins), (-1, 0), (0, -1)),           # bottom-right
+        )
+        for (cx, cy), (hx, hy), (vx, vy) in corners:
+            self.canvas.create_line(
+                cx, cy, cx + hx * arm, cy + hy * arm,
+                fill=FRAME_COLOR, width=2,
+            )
+            self.canvas.create_line(
+                cx, cy, cx + vx * arm, cy + vy * arm,
+                fill=FRAME_COLOR, width=2,
+            )
+
+    def _draw(self, samples, color, resting: bool):
         self.canvas.delete("all")
-        n = 28
+        self._draw_corner_brackets()
+
+        mid_y = BAR_HEIGHT / 2
+        core_x = BAR_WIDTH / 2
+        core_gap = 20  # dead zone either side of the core the bars don't enter
+
+        # Thin baseline scanline across the full width, broken only where
+        # the core sits -- the "reactive readout" and the arc-reactor
+        # core both sit ON this line rather than floating independently.
+        self.canvas.create_line(6, mid_y, core_x - core_gap, mid_y, fill=FRAME_COLOR)
+        self.canvas.create_line(core_x + core_gap, mid_y, BAR_WIDTH - 6, mid_y, fill=FRAME_COLOR)
+
+        half_n = 11
         if samples:
-            step = max(1, len(samples) // n)
-            levels = [max(samples[i:i + step], default=0.0) for i in range(0, len(samples), step)][:n]
+            step = max(1, len(samples) // half_n)
+            levels = [max(samples[i:i + step], default=0.0) for i in range(0, len(samples), step)][:half_n]
         else:
-            levels = [0.0] * n
+            levels = [0.0] * half_n
 
         peak = max(levels) if levels and max(levels) > 0 else 1.0
-        gap = 3
-        bar_w = (BAR_WIDTH - gap * (n + 1)) / n
-        mid_y = BAR_HEIGHT / 2
+        gap = 4
+        bar_w = 5
+        span = core_x - core_gap - 6
 
+        # Mirrored from the centre outward -- a HUD voice readout, not a
+        # left-to-right equaliser -- so the loudest bars always sit
+        # nearest the core and the whole thing stays visually symmetric.
         for i, level in enumerate(levels):
             norm = min(1.0, level / peak) if peak else 0.0
-            h = max(2, norm * (BAR_HEIGHT - 8))
-            x0 = gap + i * (bar_w + gap)
-            x1 = x0 + bar_w
-            y0 = mid_y - h / 2
-            y1 = mid_y + h / 2
-            fill = color if norm > 0.08 else BAR_COLOR_DIM
-            self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline="")
+            bar_h = max(2, norm * (BAR_HEIGHT - 14))
+            y0, y1 = mid_y - bar_h / 2, mid_y + bar_h / 2
+            offset = core_gap + i * (bar_w + gap)
+            if offset + bar_w > core_gap + span:
+                break
+            fill = color if norm > 0.1 else FRAME_COLOR
+            for cx in (core_x - offset - bar_w, core_x + offset):
+                self.canvas.create_rectangle(cx, y0, cx + bar_w, y1, fill=fill, outline="")
+
+        # Arc-reactor core: a dim halo behind a bright centre, size
+        # driven by the loudest current sample when active, or a slow
+        # breathing pulse while resting so the bar doesn't look dead
+        # between words.
+        if resting:
+            phase = (time.time() % CORE_PULSE_PERIOD_S) / CORE_PULSE_PERIOD_S
+            pulse = (math.sin(phase * 2 * math.pi) + 1) / 2
+            radius = CORE_RADIUS_MIN + (CORE_RADIUS_MAX - CORE_RADIUS_MIN) * 0.35 * pulse
+            core_color = FRAME_COLOR
+            halo_color = FRAME_COLOR
+        else:
+            radius = CORE_RADIUS_MIN + (CORE_RADIUS_MAX - CORE_RADIUS_MIN) * _peak_norm(levels)
+            core_color = color
+            halo_color = _dim_hex(color, 0.35)
+
+        self.canvas.create_oval(
+            core_x - radius * 1.8, mid_y - radius * 1.8,
+            core_x + radius * 1.8, mid_y + radius * 1.8,
+            fill=halo_color, outline="",
+        )
+        self.canvas.create_oval(
+            core_x - radius, mid_y - radius, core_x + radius, mid_y + radius,
+            fill=core_color, outline="",
+        )
 
     def _show(self):
         if self.visible:
@@ -268,12 +374,13 @@ class MiniBar:
             live_kind = "listening" if state == "listening" else "speaking" if state == "speaking" else None
             if live_kind and kind == live_kind and age < WAVEFORM_STALE_SECONDS:
                 color = BAR_COLOR_LISTEN if kind == "listening" else BAR_COLOR_SPEAK
-                self._draw(samples, color)
+                self._draw(samples, color, resting=False)
             else:
                 # Not actively fed right now (thinking, or coasting down
-                # to idle) -- draw the flat resting line instead of
-                # whatever loud frame was last on disk.
-                self._draw([], BAR_COLOR_DIM)
+                # to idle) -- draw the resting frame (breathing core,
+                # bars flat) instead of whatever loud frame was last on
+                # disk.
+                self._draw([], BAR_COLOR_DIM, resting=True)
 
         self._last_active_state = state
         self.root.after(POLL_MS, self._poll)

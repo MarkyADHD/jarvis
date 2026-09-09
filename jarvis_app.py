@@ -37,6 +37,7 @@ import requests
 import jarvis_interrupt_v1 as interrupt_v1
 import jarvis_code_watch_v1 as code_watch_v1
 import jarvis_network_health_v1 as network_health_v1
+import jarvis_world_time_v1 as world_time_v1
 import jarvis_settings_v1 as settings_v1
 
 # The HUD's "listening" animation reads this same signal-bus file that
@@ -1198,6 +1199,16 @@ def local_date_time_fast(command):
     c = normalize_transcript(command)
 
     if not is_local_date_time_question(c):
+        return None
+
+    # "what time is it" is a SUBSTRING of "what time is it in India" --
+    # without this guard this function answered every "time/date in
+    # <place>" question with the machine's own local time and silently
+    # dropped the location. world_time_fast (checked earlier in
+    # quick_handle_command) already handles the places it recognises;
+    # if this trips and got this far, the place wasn't recognised, so
+    # defer instead of confidently giving the wrong city's time.
+    if world_time_v1.is_world_time_question(c):
         return None
 
     name = get_user_spoken_name_safe()
@@ -3605,6 +3616,10 @@ def quick_handle_command(command):
     if is_safeword(c):
         trigger_sleep_mode()
         return {"mode": "action", "reply": "", "steps": []}
+
+    world_time_result = world_time_v1.world_time_fast(c, spoken_name=spoken_name())
+    if world_time_result:
+        return world_time_result
 
     date_time_result = local_date_time_fast(c)
     if date_time_result:
