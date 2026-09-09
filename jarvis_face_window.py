@@ -152,6 +152,7 @@ _JARVIS_SCRIPT_NAMES = (
     "jarvis_app_v2.py",
     "jarvis_remote_chat.py",
     "jarvis_face_window.py",
+    "jarvis_mini_bar.py",
 )
 
 

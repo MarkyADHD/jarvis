@@ -379,6 +379,7 @@ def _quit_all_jarvis_processes():
     my_pid = os.getpid()
     script_names = (
         "jarvis_app_v2.py", "jarvis_remote_chat.py", "jarvis_face_window.py",
+        "jarvis_mini_bar.py",
     )
     for proc in psutil.process_iter(["pid", "name", "cmdline", "cwd"]):
         try:

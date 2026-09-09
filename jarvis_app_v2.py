@@ -1983,6 +1983,7 @@ def install_v2(headless=False):
 
     _launch_visualizer_face_v2()
     _launch_remote_chat_v2()
+    _launch_mini_bar_v2()
 
     try:
         claude_brain_v2.prewarm_voice_async()
@@ -2040,6 +2041,26 @@ def _launch_visualizer_face_v2():
     except Exception as e:
         try:
             app.log(f"JARVIS face window failed to start: {e}")
+        except Exception:
+            pass
+
+
+def _launch_mini_bar_v2():
+    """Start jarvis_mini_bar.py -- the small click-through bar that
+    hovers above the taskbar while actively talking to Jarvis. Same
+    plain-script + own single-instance guard pattern as the face window
+    and remote-chat launchers above, for the same reason (frozen exes
+    hit a confirmed relaunch-storm bug on this machine; plain scripts
+    haven't)."""
+    try:
+        subprocess.Popen(
+            [sys.executable, "jarvis_mini_bar.py"],
+            cwd=r"C:\AI-Agent",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception as e:
+        try:
+            app.log(f"JARVIS mini bar failed to start: {e}")
         except Exception:
             pass
 
