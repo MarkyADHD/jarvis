@@ -196,6 +196,11 @@
         return applyProviderChange(true, providerChanged);
       }
       // Declined -- revert the dropdown to whatever's actually active.
+      // Used to do this completely silently (a real reported symptom:
+      // "I press codex, press switch, it does nothing but revert to
+      // claude") -- a dismissed confirm() with no follow-up message
+      // reads as broken, not as "you said no." Now says so explicitly.
+      addMsg("system", "Skipped installing " + (res.label || chosen) + " -- staying on the current brain.");
       const s = await api("/api/state");
       providerSelect.value = s.active_provider;
       state.provider = s.active_provider;
@@ -205,7 +210,12 @@
     }
 
     if (!res.ok) {
-      addMsg("error", res.error || "Couldn't switch provider.");
+      // Genuinely can't-miss-it, not just a chat line that might scroll
+      // by unnoticed -- same reported symptom class as above, a failed
+      // switch needs to be impossible to mistake for "did nothing."
+      const msg = res.error || "Couldn't switch provider.";
+      addMsg("error", msg);
+      alert((res.label || chosen) + " couldn't be switched to:\n\n" + msg);
       const s = await api("/api/state");
       providerSelect.value = s.active_provider;
       populateModels(s.models, s.active_model);

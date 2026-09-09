@@ -614,11 +614,16 @@ const AV = (() => {
         if (data.needs_install) {
           const ok = confirm((data.label || providerId) + " isn't installed yet. Install it now? (" + data.install_summary + ")");
           if (ok) return switchAiProvider(providerId, true);
+          // Declining used to leave the status line exactly as it was,
+          // which read as "nothing happened" rather than "you said no" --
+          // same reported symptom class as JarvisCode's identical dialog.
+          setStatus(statusEl, "Skipped -- staying on the current brain.", "");
           await refreshAi();
           return;
         }
         if (!data.ok) {
           setStatus(statusEl, data.error || "Switch failed.", "err");
+          alert((data.label || providerId) + " couldn't be switched to:\n\n" + (data.error || "Switch failed."));
           await refreshAi();
           return;
         }
