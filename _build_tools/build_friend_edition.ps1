@@ -50,6 +50,14 @@ Write-Host "Copying $Source -> $Destination (this takes a few minutes)..." -Fore
 $excludeDirs = @(
     ".git",
     "venv", "backtalk\.venv", "backtalk\logs",
+    # vision_training's own isolated venv carries CUDA-enabled torch plus
+    # the rest of the fine-tuning stack (multiple GB) -- confirmed this
+    # was missing here the first time vision_training existed at export
+    # time: it silently ballooned a normal ~170MB installer to over 1GB
+    # and climbing before the compile was caught and killed mid-run.
+    # This is dev-only tooling for building Jarvis's own vision model,
+    # never something a friend's install needs to run Jarvis itself.
+    "vision_training\.venv", "vision_training\__pycache__",
     "__pycache__", "build", "dist",
     "JarvisMemory", "voice_cache", "temp_screenshots",
     "conversation_v4_backups", "intelligence_v3_backups",
