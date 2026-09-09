@@ -88,6 +88,7 @@ def _git(*args, timeout=20):
             capture_output=True,
             text=True,
             timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if result.returncode != 0:
             return None
@@ -350,16 +351,6 @@ def _perform_update_release(url, app_module, spoken_name):
         return
 
     try:
-        subprocess.Popen([str(dest)], close_fds=True)
-    except Exception as e:
-        try:
-            if app_module is not None and hasattr(app_module, "speak"):
-                app_module.speak(f"I downloaded the update but couldn't launch it, {spoken_name}: {e}")
-        except Exception:
-            pass
-        return
-
-    try:
         if app_module is not None and hasattr(app_module, "speak"):
             app_module.speak(f"Updating now, {spoken_name}. Back in a bit.")
             time.sleep(3.0)  # let the line actually play before everything dies
@@ -367,7 +358,55 @@ def _perform_update_release(url, app_module, spoken_name):
         pass
 
     _quit_all_jarvis_processes()
-    os._exit(0)
+
+    # Confirmed root cause of a real report ("claims to update, restarts,
+    # but nothing actually changes"): launching the Inno Setup installer
+    # with no arguments opens its interactive wizard and waits for
+    # someone to click Next/Install/Finish. Nobody's watching for that --
+    # Jarvis already said it would handle this and went quiet -- so the
+    # installer sat there unclicked and never replaced a single file.
+    # /VERYSILENT runs it genuinely unattended; using subprocess.run
+    # (waits for it to actually finish) instead of Popen-and-immediately-
+    # exit means Jarvis can tell the difference between "it worked" and
+    # "it didn't" instead of just assuming success.
+    try:
+        result = subprocess.run(
+            [str(dest), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-"],
+            timeout=300,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        install_ok = (result.returncode == 0)
+    except Exception:
+        install_ok = False
+
+    if not install_ok:
+        try:
+            if app_module is not None and hasattr(app_module, "speak"):
+                app_module.speak(f"The update installer didn't finish cleanly, {spoken_name} -- I'm still on the old version.")
+        except Exception:
+            pass
+        return
+
+    # /VERYSILENT deliberately skips the installer's own postinstall
+    # steps too (they're flagged skipifsilent so a silent install never
+    # pops a PowerShell/browser window) -- including the one that
+    # normally reinstalls Python packages and relaunches Jarvis. Doing
+    # both explicitly here means a release that added new dependencies
+    # (this project has, more than once) doesn't leave a friend's venv
+    # stale after an update that otherwise "succeeded."
+    try:
+        pip = PROJECT_ROOT / "venv" / "Scripts" / "pip.exe"
+        req = PROJECT_ROOT / "requirements.txt"
+        if pip.exists() and req.exists():
+            subprocess.run(
+                [str(pip), "install", "-r", str(req)],
+                cwd=str(PROJECT_ROOT), timeout=900,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+    except Exception:
+        pass  # best-effort -- a venv missing one brand-new package is a smaller problem than not updating at all
+
+    _restart_self()
 
 
 def _quit_all_jarvis_processes():
