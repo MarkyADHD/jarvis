@@ -18,6 +18,7 @@ called out to avoid.
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -51,12 +52,21 @@ TREE_EXCLUDE_DIRS = {
 }
 TREE_MAX_ENTRIES = 2000
 
+# Ask used to get zero tools at all (not even read access) with a single
+# turn -- confirmed live as the actual cause of a real reported bug:
+# faced with a question that genuinely needed a real look (recent git
+# history, a specific file's content), Claude reached for a tool it
+# didn't have, and the 1-turn cap cut it off before it could recover
+# into a real text answer, dumping raw tool-call-shaped text as the
+# "reply" instead. Read-only tools (never Write/Edit/Bash, so "no
+# modifications" still holds) plus a few turns to actually use them
+# fixes this at the root instead of just telling Claude not to do it.
 MODE_TOOLS = {
-    "ask": "",
+    "ask": "Read,Glob,Grep",
     "edit": "Read,Write,Edit,Glob,Grep",
     "agent": "Read,Write,Edit,Glob,Grep,Bash",
 }
-MODE_MAX_TURNS = {"ask": 1, "edit": 6, "agent": 20}
+MODE_MAX_TURNS = {"ask": 8, "edit": 6, "agent": 20}
 
 
 def _read_json(path, default):
@@ -163,6 +173,29 @@ def _run_git(root, args, timeout=15):
 _PROJECT_INSTRUCTION_FILENAMES = ("CLAUDE.md", "AGENTS.md")
 
 
+_PERSONA_SECTION_RE = re.compile(
+    r"\n##\s+When you ARE Jarvis.*?(?=\n##\s+)", re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_persona_section(text):
+    """Reported live, real bug: JarvisCode was talking like a guy at a
+    bar ("boss", cursing, roleplay-style "*checks git log*" narration)
+    instead of doing plain coding work. Root cause: this project's own
+    CLAUDE.md opens with a persona section ("When you ARE Jarvis...talk
+    like a guy at a bar...call him boss...curse heavily") meant for real
+    Jarvis voice/chat sessions -- and that file's OWN text says exactly
+    that: "This persona section applies to talking WITH the user... The
+    rest of this file (engineering instructions, safety authority)
+    applies whenever the task is inspecting, diagnosing or changing
+    Jarvis's own code." JarvisCode reading the whole file verbatim
+    (added last release, for the git-workflow-awareness fix) included
+    the persona block Claude wasn't supposed to get in the first place --
+    this strips exactly that section, keeping everything else (the
+    engineering/safety/git-workflow rules JarvisCode DOES need)."""
+    return _PERSONA_SECTION_RE.sub("\n", text, count=1)
+
+
 def _read_project_instructions(root):
     """Deliberately NEVER compressed, however long -- confirmed live
     that the generic compressor cut straight through the middle of a
@@ -179,6 +212,8 @@ def _read_project_instructions(root):
                 text = path.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 continue
+            if name == "CLAUDE.md":
+                text = _strip_persona_section(text)
             return name, text
     return None, ""
 
@@ -241,7 +276,11 @@ def _build_history_text(history):
     return context_compressor.compress(text, kind="auto", label="conversation history", target_chars=3000)
 
 
-JARVISCODE_SYSTEM_PROMPT = """You are JarvisCode, a coding-focused companion built on the same brain as Jarvis. You help with repositories, software projects, debugging, building applications, and game development. Be direct and concise. When editing/creating files, actually make the changes rather than just describing them, when the current mode allows it."""
+JARVISCODE_SYSTEM_PROMPT = """You are JarvisCode, a coding-focused companion tool. You help with repositories, software projects, debugging, building applications, and game development. Be direct and concise. When editing/creating files, actually make the changes rather than just describing them, when the current mode allows it.
+
+You have NO personality or persona -- no slang, no cursing, no roleplay, no "boss"/"sir", no theatrical asides like "*checks git log*". You may refer to yourself as Jarvis when it's natural to name yourself, and that's the extent of it. Talk like a focused, professional engineering tool -- the way Claude Code itself talks in a terminal -- not a character. If the current mode doesn't give you the tool access a request needs, say so plainly and state what's missing -- never narrate or pretend to run a command you don't actually have access to.
+
+Stay inside the project root you were given (in [PROJECT CONTEXT] above) for any file reads -- you don't have permission to read outside it, and trying costs turns for nothing. Use the project context, file tree, and conversation history you're already given before reaching for a tool at all; most questions don't need one."""
 
 
 class Handler(BaseHTTPRequestHandler):
