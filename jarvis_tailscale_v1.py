@@ -27,14 +27,18 @@ can't be driven by voice beyond telling you to do it -- that's an
 intentional Tailscale security boundary, not a gap in this module.
 
 Voice examples:
+    Jarvis set up remote access      (the one to actually use -- installs/
+                                       signs-in/configures HTTPS/saves the
+                                       address+token to a Desktop notepad,
+                                       all in one go)
     Jarvis what's my tailscale address
     Jarvis what's my remote address
     Jarvis is tailscale connected
     Jarvis tailscale status
-    Jarvis set up remote https
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -42,6 +46,7 @@ from pathlib import Path
 
 REMOTE_CHAT_PORT = 8792
 TOKEN_FILE = Path(r"C:\AI-Agent\.remote_chat_token")
+REMOTE_ACCESS_NOTES_PATH = Path(os.path.expanduser("~")) / "Desktop" / "Jarvis Remote Access.txt"
 
 KNOWN_PATHS = [
     r"C:\Program Files\Tailscale\tailscale.exe",
@@ -117,7 +122,73 @@ def get_tailscale_serve_url(target_port=REMOTE_CHAT_PORT):
 
 
 def is_tailscale_request(command):
-    return "tailscale" in _norm(command) or "remote address" in _norm(command) or "remote https" in _norm(command)
+    c = _norm(command)
+    return "tailscale" in c or "remote address" in c or "remote https" in c or "remote access" in c
+
+
+def write_remote_access_notes(url, token):
+    """Writes the remote-access URL and access token to a real file on
+    the Desktop (not just an unsaved Notepad buffer someone could lose
+    by closing the window) and opens it in Notepad so it's seen right
+    away. Overwriting this exact file on a repeat setup is the intended
+    behavior -- it's a dedicated, self-managed notes file for this one
+    feature, the same way jarvis_settings_v1's own config files get
+    rewritten on every reconnect, not an arbitrary file someone else
+    owns. Returns True if the file was written and Notepad launched."""
+    content = (
+        "JARVIS REMOTE ACCESS\n"
+        "=====================\n\n"
+        f"Address (open this in your phone's browser):\n{url}\n\n"
+        f"Access token (treat this like a password):\n{token}\n\n"
+        "Anyone with both of these can talk to Jarvis and control this PC\n"
+        "remotely. Keep this file private -- don't share it or post it anywhere.\n"
+    )
+    try:
+        REMOTE_ACCESS_NOTES_PATH.write_text(content, encoding="utf-8")
+        subprocess.Popen(["notepad.exe", str(REMOTE_ACCESS_NOTES_PATH)])
+        return True
+    except Exception:
+        return False
+
+
+def setup_remote_access_flow(spoken_name="Sir"):
+    """One command that does the whole thing: confirms Tailscale is
+    installed, launches sign-in if it isn't connected yet (can't be
+    driven further than opening the browser -- that's Tailscale's own
+    security boundary), configures the real-HTTPS proxy, then opens a
+    Notepad with the address and access token saved to a real file so
+    neither gets lost or has to be asked for again."""
+    exe = _tailscale_exe()
+    if not exe:
+        return _reply(f"Tailscale isn't installed yet, {spoken_name}. Re-run Finish Setup to install it, then ask me this again.")
+
+    if not get_tailscale_ip():
+        try:
+            subprocess.Popen([exe, "up"])
+        except Exception:
+            pass
+        return _reply(f"Tailscale needs you signed in first, {spoken_name} -- I've opened it, a browser window should appear. Sign in there, then say 'set up remote access' again.")
+
+    out, code = _run(exe, "serve", "--bg", str(REMOTE_CHAT_PORT), timeout=10)
+    if code != 0:
+        return _reply(f"That didn't work, {spoken_name}: {out or 'no output from tailscale'}.")
+
+    url = get_tailscale_serve_url()
+    if not url:
+        return _reply(f"I ran the setup, {spoken_name}, but couldn't confirm the URL -- try asking for your remote address again.")
+
+    token = ""
+    try:
+        if TOKEN_FILE.exists():
+            token = TOKEN_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+
+    if token and write_remote_access_notes(url, token):
+        return _reply(f"Done, {spoken_name}. Remote access is live at {url} -- I've opened a Notepad with the address and your access token saved on your Desktop. Keep that file safe and don't share it.")
+
+    token_hint = f" Your access token is saved in {TOKEN_FILE}." if TOKEN_FILE.exists() else ""
+    return _reply(f"Remote access is live at {url}, {spoken_name}, but I couldn't open the notes for you.{token_hint}")
 
 
 def tailscale_command_fast(command, spoken_name="Sir", app_module=None):
@@ -125,21 +196,8 @@ def tailscale_command_fast(command, spoken_name="Sir", app_module=None):
     if not is_tailscale_request(c):
         return None
 
-    if any(phrase in c for phrase in ["set up remote https", "enable remote https", "set up remote access", "set up https"]):
-        exe = _tailscale_exe()
-        if not exe:
-            return _reply(f"Tailscale isn't installed, {spoken_name}. Re-run Finish Setup to install it first.")
-        if not get_tailscale_ip():
-            return _reply(f"Tailscale's installed but not signed in yet, {spoken_name}. Run 'tailscale up' once first.")
-
-        out, code = _run(exe, "serve", "--bg", str(REMOTE_CHAT_PORT), timeout=10)
-        if code != 0:
-            return _reply(f"That didn't work, {spoken_name}: {out or 'no output from tailscale'}.")
-
-        url = get_tailscale_serve_url()
-        if url:
-            return _reply(f"Done, {spoken_name}. Remote access is now on real HTTPS at {url} -- that's the one to use on your phone, mic and all.")
-        return _reply(f"I ran the setup, {spoken_name}, but couldn't confirm the URL -- try asking for your remote address again.")
+    if any(phrase in c for phrase in ["set up remote access", "setup remote access", "configure remote access", "set up remote https", "enable remote https", "set up https"]):
+        return setup_remote_access_flow(spoken_name)
 
     if any(phrase in c for phrase in ["tailscale address", "remote address", "tailscale ip"]):
         exe = _tailscale_exe()
