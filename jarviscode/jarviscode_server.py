@@ -32,6 +32,7 @@ REPO_ROOT = HERE.parent
 sys.path.insert(0, str(REPO_ROOT))
 import jarvis_provider_router_v1 as router  # noqa: E402
 import jarvis_claude_code_v1 as claude_v1  # noqa: E402
+import jarvis_context_compressor_v1 as context_compressor  # noqa: E402
 
 PORT = 8795
 
@@ -145,14 +146,57 @@ def _run_git(root, args, timeout=15):
         return 1, "", str(e)
 
 
+# Real Claude Code, run from a real terminal in this repo, automatically
+# reads CLAUDE.md and folds it into context -- that's the entire reason
+# a normal terminal session already "knows how we've been doing it"
+# (push every commit, version-bump + cut a release, compile-check before
+# shipping, live-test against real state, etc.) and JarvisCode, before
+# this, did not: _build_project_context() only ever built a file tree,
+# never read the project's own instructions file at all. Checking both
+# common filenames since projects use either convention.
+_PROJECT_INSTRUCTION_FILENAMES = ("CLAUDE.md", "AGENTS.md")
+
+
+def _read_project_instructions(root):
+    """Deliberately NEVER compressed, however long -- confirmed live
+    that the generic compressor cut straight through the middle of a
+    real CLAUDE.md's own numbered workflow steps, silently dropping
+    exactly the instructions this exists to surface. Project rules need
+    to arrive complete or not at all; a partially-compressed rulebook is
+    worse than either extreme, and even an unusually large instructions
+    file (tens of KB) is trivial next to a modern context window, so
+    there's no real token-cost argument for compressing it either."""
+    for name in _PROJECT_INSTRUCTION_FILENAMES:
+        path = Path(root) / name
+        if path.is_file():
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            return name, text
+    return None, ""
+
+
 def _build_project_context(root):
     if not root:
         return ""
+
+    parts = [f"Project root: {root}"]
+
+    instr_name, instr_text = _read_project_instructions(root)
+    if instr_text:
+        parts.append(f"\n[Project instructions from {instr_name} -- follow these]\n{instr_text}")
+
     tree = _list_tree(root)[:300]
-    lines = [f"Project root: {root}", "", "File tree (partial):"]
+    tree_lines = ["", "File tree (partial):"]
     for e in tree:
-        lines.append(("  [dir] " if e["type"] == "dir" else "  ") + e["path"])
-    return "\n".join(lines)
+        tree_lines.append(("  [dir] " if e["type"] == "dir" else "  ") + e["path"])
+    tree_text = "\n".join(tree_lines)
+    # A big project's tree can itself run long -- same compressor, same
+    # "small stuff passes through untouched" rule.
+    parts.append(context_compressor.compress(tree_text, kind="auto", label="file tree"))
+
+    return "\n".join(parts)
 
 
 def _native_folder_picker():

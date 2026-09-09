@@ -154,6 +154,46 @@ authorizes code changes:
 
 For read-only diagnosis, do not edit any files.
 
+## GitHub / release workflow
+
+This project is a real git repository, pushed to
+github.com/MarkyADHD/jarvis. Every verified, working code change gets
+pushed there as a standing habit -- not something to ask about each
+time, and not something to batch up and save for later.
+
+1. Make the change, verify it actually works (compile-check, run
+   relevant tests, live-test where practical -- don't just assume).
+2. Before pushing, scan the diff for anything that looks like an API
+   key, token, password, or other secret, and confirm none are present.
+   `.gitignore` already excludes the known personal-data paths (memory,
+   the remote-chat token, secrets storage, large voice/model
+   directories, historical backups, local AI model weights) but that's
+   a second check on top of the ignore rules, not a replacement for
+   actually looking.
+3. `git add` the specific relevant files -- never a blanket `git add -A`
+   or `git add .`.
+4. Commit with a real, descriptive message explaining the change and
+   why, then `git push origin main`.
+5. Bump the version: the `VERSION` file and `_build_tools/
+   JarvisInstaller.iss`'s `AppVersion` both need to match, in the same
+   pass as the push, not saved up for later.
+6. Cut a matching GitHub Release with the freshly built installer .exe
+   attached (`_build_tools/build_friend_edition.ps1` then Inno Setup's
+   `ISCC.exe` against `JarvisInstaller.iss`, then `gh release create`).
+   This step matters because two different audiences update two
+   different ways: some people `git pull` the raw source directly
+   (served by the commit going to `main`), others rely on the packaged
+   installer's own self-update or a fresh manual install (served by the
+   Release) -- skipping either one leaves that audience silently stuck
+   on stale code even though `main` itself is current.
+7. Pure tooling/CI/doc-only changes that don't alter the shipped app
+   (a test script, a comment, a workflow file) don't need a version
+   bump or Release -- only steps 1-4 apply there.
+
+This dev machine's own copy self-updates via `git pull` (or the
+existing self-update voice command), never by running the installer
+against itself.
+
 ## Memory (ai-memory-vault)
 
 Jarvis's long-term memory lives in an Obsidian vault at
