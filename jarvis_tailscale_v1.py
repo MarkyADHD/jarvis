@@ -76,6 +76,7 @@ def _run(exe, *args, timeout=8):
     try:
         result = subprocess.run(
             [exe, *args], capture_output=True, text=True, timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return result.stdout.strip(), result.returncode
     except Exception:

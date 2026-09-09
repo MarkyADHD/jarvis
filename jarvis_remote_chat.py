@@ -52,6 +52,7 @@ import jarvis_hue_v1 as hue
 import jarvis_govee_v1 as govee
 import jarvis_twitch_v1 as twitch
 import jarvis_provider_router_v1 as provider_router
+import jarvis_tailscale_v1 as tailscale
 
 
 def process_message(text: str) -> str:
@@ -208,6 +209,23 @@ def settings_ai_switch(provider_id: str, confirm_install: bool) -> dict:
 
     provider_router.set_active_provider(provider_id)
     return {"ok": True}
+
+
+def settings_tailscale_status() -> dict:
+    installed = tailscale._tailscale_exe() is not None
+    ip = tailscale.get_tailscale_ip() if installed else None
+    url = tailscale.get_tailscale_serve_url() if ip else None
+    return {
+        "installed": installed,
+        "connected": bool(ip),
+        "ip": ip or "",
+        "https_url": url or "",
+    }
+
+
+def settings_tailscale_setup() -> dict:
+    result = tailscale.setup_remote_access_flow(spoken_name="Sir")
+    return {"ok": True, "message": result.get("reply", "")}
 
 
 def settings_save_spotify(client_id: str) -> dict:
@@ -615,13 +633,14 @@ if (window.PointerEvent) {
 # the /chat page above, as a small floating button, WITHOUT touching
 # ai-visualizer's own (third-party, AGPL) core.js.
 HUD_VOICE_INJECTION = """
-<button id="jvMic" title="Hold to talk to Jarvis" style="position:fixed;left:56px;
-  top:100px;width:84px;height:84px;border-radius:50%;border:3px solid rgba(255,255,255,.3);
-  background:rgba(20,26,32,.85);color:#e8eef2;font-size:34px;cursor:pointer;z-index:9999;
+<button id="jvMic" title="Hold to talk to Jarvis" style="position:fixed;left:50%;
+  top:130px;transform:translateX(-50%);width:108px;height:108px;border-radius:50%;
+  border:3px solid rgba(255,255,255,.3);background:rgba(20,26,32,.85);color:#e8eef2;
+  font-size:44px;cursor:pointer;z-index:9999;
   display:flex;align-items:center;justify-content:center;">&#127908;</button>
-<div id="jvMicStatus" style="position:fixed;left:56px;top:192px;max-width:260px;
-  padding:8px 12px;border-radius:10px;background:rgba(10,14,18,.85);color:#cfd8dc;
-  font:12px 'SF Mono',Menlo,Consolas,monospace;text-align:left;opacity:0;
+<div id="jvMicStatus" style="position:fixed;left:50%;top:250px;transform:translateX(-50%);
+  max-width:260px;padding:8px 12px;border-radius:10px;background:rgba(10,14,18,.85);
+  color:#cfd8dc;font:12px 'SF Mono',Menlo,Consolas,monospace;text-align:center;opacity:0;
   transition:opacity .3s;pointer-events:none;z-index:9998;"></div>
 <audio id="jvReplyAudio" playsinline></audio>
 <script>
@@ -893,6 +912,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(settings_ai_status())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/tailscale/status":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_tailscale_status())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
         elif path == "/settings/twitch/status":
             if not self._authorized():
                 self.send_response(403)
@@ -939,6 +968,7 @@ class Handler(BaseHTTPRequestHandler):
     _SETTINGS_ROUTES = {
         "/settings/ai/switch": lambda d: settings_ai_switch(
             str(d.get("provider", "")).strip(), bool(d.get("confirm_install"))),
+        "/settings/tailscale/setup": lambda d: settings_tailscale_setup(),
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),
         "/settings/elevenlabs": lambda d: settings_save_elevenlabs(str(d.get("api_key", "")).strip()),
         "/settings/govee": lambda d: settings_save_govee(str(d.get("api_key", "")).strip()),

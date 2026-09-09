@@ -274,14 +274,31 @@ def _announce(tag, url, mode, app_module, spoken_name):
         pass
 
 
+UPDATE_BAT = PROJECT_ROOT / "update.bat"
+
+
 def _perform_update_git(app_module, spoken_name):
-    """--ff-only on purpose: refuses to auto-merge or resolve conflicts.
-    If the local tree isn't a clean fast-forward (uncommitted changes,
-    diverged history), this fails loudly and leaves everything exactly
-    as it was rather than doing something surprising to a live
-    checkout that might be mid-edit."""
-    result = _git("pull", "--ff-only", "origin", "main", timeout=30)
-    if result is None:
+    """Runs update.bat rather than a git pull inlined here -- same
+    detection as always (check_latest_git() still does the comparing and
+    announcing), but the actual pull is now a real, standalone script a
+    user can also double-click by hand if they ever want to update
+    outside of asking Jarvis. --ff-only inside it is still the safety
+    net: refuses to auto-merge or resolve conflicts, so a non-clean
+    fast-forward (uncommitted changes, diverged history) fails loudly and
+    leaves everything exactly as it was rather than doing something
+    surprising to a live checkout that might be mid-edit. Also picks up
+    any new pip dependencies the update needs, the same gap a silent
+    installer-based update already had to be fixed for."""
+    try:
+        proc = subprocess.run(
+            [str(UPDATE_BAT)], cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+            timeout=600, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        ok = proc.returncode == 0
+    except Exception:
+        ok = False
+
+    if not ok:
         try:
             if app_module is not None and hasattr(app_module, "speak"):
                 app_module.speak(f"The pull failed, {spoken_name}. I left everything as it was -- might need a manual look at the repo.")

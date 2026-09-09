@@ -324,6 +324,16 @@ const AV = (() => {
           before installing anything.</div>
       </section>
       <section>
+        <h4>Remote Access (Tailscale)</h4>
+        <div id="tailscaleStatus" class="status">checking...</div>
+        <button id="tailscaleSetup" style="width:100%">Set Up / Refresh</button>
+        <div class="hint">Lets you talk to Jarvis from your phone,
+          anywhere, over a private Tailscale connection -- never exposed
+          to the open internet. One click installs/signs in/configures
+          real HTTPS (needed for your phone's mic to work) and saves the
+          address + access token to a Desktop notepad.</div>
+      </section>
+      <section>
         <h4>Spotify</h4>
         <div id="spotifyStatus" class="status">checking...</div>
         <div class="row">
@@ -623,8 +633,41 @@ const AV = (() => {
       switchAiProvider(providerId, false);
     });
 
+    async function refreshTailscale() {
+      const statusEl = panel.querySelector("#tailscaleStatus");
+      try {
+        const r = await fetch(api("/settings/tailscale/status"), authed({ method: "GET" }));
+        const data = await r.json();
+        if (!data.installed) {
+          setStatus(statusEl, "not installed -- re-run Finish Setup", "");
+        } else if (!data.connected) {
+          setStatus(statusEl, "installed, not signed in -- click Set Up", "");
+        } else if (data.https_url) {
+          setStatus(statusEl, "✓ live at " + data.https_url, "ok");
+        } else {
+          setStatus(statusEl, "signed in (" + data.ip + "), HTTPS not set up yet -- click Set Up", "");
+        }
+      } catch (e) {
+        setStatus(statusEl, "server unreachable", "err");
+      }
+    }
+
+    panel.querySelector("#tailscaleSetup").addEventListener("click", async () => {
+      const statusEl = panel.querySelector("#tailscaleStatus");
+      setStatus(statusEl, "working...", "");
+      try {
+        const r = await fetch(api("/settings/tailscale/setup"), authed({ method: "POST", body: "{}" }));
+        const data = await r.json();
+        setStatus(statusEl, data.message || "Done.", "ok");
+      } catch (e) {
+        setStatus(statusEl, "server unreachable", "err");
+      }
+      await refreshTailscale();
+    });
+
     async function refresh() {
       refreshAi();
+      refreshTailscale();
       try {
         const r = await fetch(api("/settings/status"), authed({ method: "GET" }));
         const data = await r.json();
