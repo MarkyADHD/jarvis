@@ -464,7 +464,16 @@ def background_check_loop(app_module, spoken_name_fn):
     time.sleep(FIRST_CHECK_DELAY_S)
     while True:
         with _lock:
-            already_pending = bool(_state["pending_tag"])
+            # Gated on the confirm window still being LIVE, not just on
+            # pending_tag being set. pending_tag is only ever cleared by
+            # a restart after a confirmed update -- if the user simply
+            # doesn't answer within CONFIRM_WINDOW_S (60 seconds, easy to
+            # miss especially for the "on the go" remote use case this
+            # module exists for), pending_tag stayed truthy forever and
+            # this loop stopped re-checking permanently for the rest of
+            # the process's life. A missed prompt should get re-announced
+            # next cycle, not silence every future one.
+            already_pending = bool(_state["pending_tag"]) and _state["confirm_until"] > time.time()
         if not already_pending:
             tag, url, mode = check_latest()
             if tag:

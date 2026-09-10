@@ -1879,12 +1879,13 @@ def _ptt_capture_and_run():
     try/finally throughout so a crash mid-capture can never leave Jarvis
     permanently deaf -- his own listener always comes back.
     """
-    import keyboard
-    from backtalk import ears as backtalk_ears
-
-    was_listening = app.listening_enabled.is_set()
-
+    was_listening = False
     try:
+        import keyboard
+        from backtalk import ears as backtalk_ears
+
+        was_listening = app.listening_enabled.is_set()
+
         if was_listening:
             app.listening_enabled.clear()
             # voice_listener_loop polls its queue with a 0.2s timeout
