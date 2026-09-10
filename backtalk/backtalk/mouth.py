@@ -491,7 +491,13 @@ class Mouth:
             rate = rate_
             head.append(pcm)
             banked += len(pcm)
-            if banked >= int(rate * prebuffer_s):
+            # ElevenLabs already arrives over the network faster than
+            # realtime (turbo model), so the full local-underrun buffer
+            # (law #2, sized for a slow CPU doing local synthesis) is
+            # unnecessary dead air here -- a shorter bank still holds
+            # against normal network jitter without adding it.
+            target_s = 0.35 if rate_ == EL_RATE else prebuffer_s
+            if banked >= int(rate * target_s):
                 break
         if rate is None:
             return
