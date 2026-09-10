@@ -1036,6 +1036,18 @@ def format_memory_context(query):
 
 
 def answer_memory(query, limit=8):
+    # Hygiene pass added after a live, reproduced bug: this used to join
+    # raw matched entries with zero filtering, including entries that
+    # were THEMSELVES a previous "I remember: ..." dump (auto-saved back
+    # when AUTO_CONVERSATION_MEMORY_ENABLED still auto-recorded Jarvis's
+    # own spoken replies) -- a real recursive-nesting hazard, confirmed
+    # live: a genuinely enormous, multiply-nested "I remember: I
+    # remember: I remember: ..." reply, including old hallucination-loop
+    # text from a since-fixed Whisper bug. Auto-memory is disabled now
+    # (so this can't keep compounding going forward), but the already-
+    # stored data still has old entries shaped like this, so the read
+    # side needs to filter them out rather than trust every stored
+    # entry is clean.
     memories = recall(query, limit=limit)
 
     if not memories:
@@ -1044,13 +1056,22 @@ def answer_memory(query, limit=8):
     lines = []
     for item in memories:
         text = item.get("text", "").strip()
-        if text:
-            lines.append(text)
+        if not text:
+            continue
+        if text.lower().startswith("i remember:"):
+            continue
+        if text.lower().startswith("current conversation topic:"):
+            continue
+        if len(text) > 300:
+            continue
+        lines.append(text)
+        if len(lines) >= 3:
+            break
 
     if not lines:
         return None
 
-    return f"I remember: {'; '.join(lines[:limit])}. {spoken_name()}."
+    return f"I remember: {'; '.join(lines)}. {spoken_name()}."
 
 
 def name_fast(command):
