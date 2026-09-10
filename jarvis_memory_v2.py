@@ -28,6 +28,76 @@ RECENT_CONTEXT_FILE = MEMORY_ROOT / "jarvis_recent_context_v2.json"
 
 MAX_RECENT_TURNS = 18
 
+# ai-memory-vault (jaredrhod/fullstack-agent) -- the real, curated,
+# long-term memory now, replacing the old JSONL keyword-scored search
+# below for prompt-context purposes. VAULT-INDEX.md's own "Who I Am"/
+# "My Preferences" sections already ARE what profile_context_for_prompt()
+# used to approximate from jarvis_profile_v2.json (that file's own
+# content was migrated INTO the vault when it was built -- see
+# VAULT-INDEX.md's own "Migrated from Jarvis's own existing profile"
+# note), and Active Priorities.md already IS the curated "what actually
+# matters right now" list the old JSONL scoring was trying to
+# approximate from raw, uncurated auto-saved conversation noise.
+VAULT_ROOT = Path(r"C:\Users\babym\Jarvis Memory")
+VAULT_INDEX_PATH = VAULT_ROOT / "VAULT-INDEX.md"
+ACTIVE_PRIORITIES_PATH = VAULT_ROOT / "Active Priorities.md"
+
+
+def _vault_section(markdown_text, start_heading, end_headings):
+    """Pulls out one section of a markdown file by heading text, up to
+    (not including) whichever of end_headings comes first. Simple,
+    line-based -- this vault's own notes are plain, predictable
+    markdown, no need for a real parser."""
+    lines = markdown_text.splitlines()
+    start_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().lstrip("#").strip().lower() == start_heading.lower():
+            start_idx = i
+            break
+    if start_idx is None:
+        return ""
+
+    end_idx = len(lines)
+    for i in range(start_idx + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith("#"):
+            heading_text = stripped.lstrip("#").strip().lower()
+            if heading_text in (h.lower() for h in end_headings):
+                end_idx = i
+                break
+
+    return "\n".join(lines[start_idx:end_idx]).strip()
+
+
+def vault_context_for_prompt():
+    """Real vault content, not the old JSONL system. Never raises -- a
+    missing/unreadable vault just means no vault context this call,
+    same fail-open behavior the old memory system already had."""
+    parts = []
+
+    try:
+        if VAULT_INDEX_PATH.exists():
+            text = VAULT_INDEX_PATH.read_text(encoding="utf-8")
+            who = _vault_section(text, "Who I Am", ["Vault Structure"])
+            prefs = _vault_section(
+                text, "My Preferences for Working with AI", ["How My Memory Works (for the AI)"],
+            )
+            profile_bits = "\n\n".join(p for p in (who, prefs) if p)
+            if profile_bits:
+                parts.append("From Jarvis's memory vault (VAULT-INDEX.md):\n" + profile_bits)
+    except Exception:
+        pass
+
+    try:
+        if ACTIVE_PRIORITIES_PATH.exists():
+            text = ACTIVE_PRIORITIES_PATH.read_text(encoding="utf-8").strip()
+            if text:
+                parts.append("Current active priorities (Active Priorities.md):\n" + text)
+    except Exception:
+        pass
+
+    return "\n\n".join(parts)
+
 WAKE_WORDS = {
     "jarvis", "jervis", "javis", "javas", "jarvus", "travis", "charvis", "service"
 }
@@ -846,19 +916,15 @@ def profile_context_for_prompt():
 
 
 def memory_context_for_prompt(query="", limit=8):
-    lines = [profile_context_for_prompt()]
+    """query/limit kept for backward compatibility with every existing
+    call site -- unused now that the source is the real, already-curated
+    vault rather than a keyword-scored search over raw auto-saved
+    conversation noise (see vault_context_for_prompt())."""
+    lines = [vault_context_for_prompt()]
 
     recent = recent_context_for_prompt(limit=6)
     if recent:
         lines.append(recent)
-
-    memories = search_memory(query, limit=limit)
-    if memories:
-        lines.append("Relevant long-term memories:")
-        for item in memories:
-            text = item.get("text", "")
-            if text and not is_junk_transcript(text) and not is_command_like(text):
-                lines.append(f"- [{item.get('kind', 'memory')}] {text}")
 
     return "\n\n".join([line for line in lines if line])
 

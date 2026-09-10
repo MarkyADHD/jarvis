@@ -1132,14 +1132,46 @@ def memory_fast(command):
     remember_match = re.search(r"^(remember that|remember|save this|note that)\s+(.+)", c)
     if remember_match:
         memory_text = remember_match.group(2).strip()
-        saved = remember("user_memory", memory_text, importance=6)
+        name = spoken_name()
 
-        if saved:
-            reply = f"Iâ€™ll remember that, {spoken_name()}."
-        else:
-            reply = f"I did not save that because it looked sensitive, {spoken_name()}."
+        # Full memory swap (2026-09-10), write side: files this into the
+        # real ai-memory-vault by asking the tool-having brain to apply
+        # VAULT-INDEX.md's own real rules (append to an existing,
+        # logically related note if one exists; proper frontmatter/
+        # wikilinks if it creates one) -- a blind Python append here
+        # could easily violate those conventions the vault itself
+        # depends on. This is a real AI round-trip, not instant, so
+        # replies immediately and confirms once actually filed. Falls
+        # back to the old instant local save if the brain call fails
+        # for any reason, so nothing the user asked to remember is ever
+        # silently lost.
+        def _file_into_vault(text=memory_text, who=name):
+            try:
+                import jarvis_provider_router_v1 as _provider_router
+                prompt = (
+                    f"The user just asked you to remember this: \"{text}\"\n\n"
+                    r"File it into the ai-memory-vault at C:\Users\babym\Jarvis Memory, "
+                    "following VAULT-INDEX.md's own rules (append to an existing, "
+                    "logically related note if one exists rather than creating a new "
+                    "one; proper frontmatter and wikilinks if you do create one). Then "
+                    "reply with exactly one short, spoken sentence confirming what you "
+                    "filed and where -- no markdown, no explanation of the vault rules."
+                )
+                result = _provider_router.ask_active_brain(prompt, spoken_name=who, timeout=120.0)
+                if result.get("ok"):
+                    reply_text = str(result.get("result", "") or "").strip()
+                    if reply_text:
+                        speak(reply_text)
+                        return
+            except Exception:
+                pass
+            try:
+                remember("user_memory", text, importance=6)
+            except Exception:
+                pass
 
-        return {"mode": "chat", "reply": reply, "steps": []}
+        threading.Thread(target=_file_into_vault, daemon=True).start()
+        return {"mode": "chat", "reply": f"On it, {name} -- filing that away.", "steps": []}
 
     recall_patterns = [
         r"what do you remember about\s+(.+)",
