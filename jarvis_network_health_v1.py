@@ -68,9 +68,9 @@ def check_and_announce(app_module, spoken_name_fn):
 
     name = spoken_name_fn() if callable(spoken_name_fn) else "Sir"
     if latency is None:
-        text = f"Heads up, {name} -- I can't reach the internet right now. Anything that needs it will be slow or fail."
+        text = f"{name}, your internet's just flat out dead right now. Not slow -- gone. Might want to get that looked at."
     else:
-        text = f"Heads up, {name} -- your internet connection seems slow right now. Responses that need to search or reach a server may take longer than usual."
+        text = f"{name}, your internet is running like a bag of shit. You should get that checked out. Anything I search or fetch is gonna crawl until it sorts itself out."
 
     try:
         if app_module is not None and hasattr(app_module, "speak"):

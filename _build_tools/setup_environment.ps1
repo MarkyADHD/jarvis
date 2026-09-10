@@ -486,6 +486,38 @@ if ($ffmpegExe) {
 
 Say ""
 Say "===================================================="
+Say "  Local AI Thumbnails -- optional, needs an NVIDIA GPU"
+Say "===================================================="
+Say ""
+
+# TEMPORARILY DISABLED -- live-confirmed on a real machine (2026-09-10)
+# that this step breaks Jarvis's CORE voice recognition, not just an
+# optional feature. The pinned baseline torch (torch==2.14.0 from
+# requirements.txt) is CPU-only by default -- there is no CUDA build of
+# it -- so this step upgraded torch in-place to a CUDA 12.4 build inside
+# the SAME venv Whisper's ctranslate2 backend lives in. That CUDA torch
+# build carries its own bundled cudnn64_9.dll alongside ctranslate2's own
+# bundled cudnn64_9.dll and the separate nvidia-cudnn-cu12 package's copy
+# -- three different cuDNN 9.x builds in one DLL search path. The result,
+# confirmed via Windows Event Viewer: pythonw.exe hard-crashing (access
+# violation, 0xc0000409) inside cudnn64_9.dll every single time Whisper
+# tried to actually run, silently killing the whole Jarvis process
+# within seconds of every launch -- "Jarvis won't listen at all" with no
+# error the user could see, since pythonw.exe has no console.
+#
+# Fixing this properly needs the CUDA torch build isolated in its own
+# venv (same pattern backtalk\.venv and vision_training\.venv already
+# use to avoid exactly this kind of cross-dependency conflict), not
+# installed in-place here. Until that's built and tested, this step is
+# disabled -- JarvisThumbnails still works for everyone via the free
+# Pollinations.ai backend regardless.
+Say "Local AI thumbnails (optional GPU acceleration) are temporarily" "Gray"
+Say "disabled pending a dependency-isolation fix -- Jarvis will use the" "Gray"
+Say "free Pollinations.ai backend for thumbnails, which needs nothing" "Gray"
+Say "extra and works for everyone." "Gray"
+
+Say ""
+Say "===================================================="
 Say "  Claude Code -- optional, Jarvis's preferred brain"
 Say "===================================================="
 Say ""
