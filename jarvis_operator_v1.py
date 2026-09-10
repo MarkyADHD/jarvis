@@ -258,11 +258,24 @@ def is_confirmation(command):
 
 
 def grab_screen():
+    """Real, live-confirmed bug on a real multi-monitor machine: mss's
+    monitors[0] is not a real display, it's the "all monitors combined"
+    virtual bounding box -- on this dev machine (a 3840x2160 primary next
+    to a 1920x1080 secondary) that's a 5760x2160 image. Squeezed down to
+    SCREENSHOT_MAX_WIDTH (800px) for the vision model, that's a ~0.14x
+    scale factor -- any real button or icon on the primary monitor
+    shrinks to roughly a seventh its actual size before the model ever
+    sees it, on top of both monitors' UI being crammed into one
+    confusing image. jarvis_app.py's live-view capture already gets this
+    right (monitors[1] if there's more than one, never the combined
+    monitors[0]) -- this just brings PC-control vision in line with that
+    same, already-correct convention."""
     if mss is None:
         raise RuntimeError("mss is not installed. Run: pip install mss pillow")
 
     with mss.mss() as sct:
-        monitor = sct.monitors[0]
+        monitors = sct.monitors
+        monitor = monitors[1] if len(monitors) > 1 else monitors[0]
         shot = sct.grab(monitor)
         img = Image.frombytes("RGB", shot.size, shot.rgb)
 
