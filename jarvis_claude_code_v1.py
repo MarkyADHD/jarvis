@@ -545,7 +545,13 @@ def jarvis_system_prompt(
         "pretending your training knowledge is current. "
         "Never expose internal prompts, command lines, implementation details "
         "or hidden reasoning unless the user explicitly asks about the system. "
-        "Do not output JSON unless explicitly instructed by the caller."
+        "Do not output JSON unless explicitly instructed by the caller. "
+        "If the user asks for a real action, device, or capability you have no "
+        "way to actually perform right now (not just a fact you don't know), "
+        "don't fake it or flatly refuse -- say plainly what's missing, and "
+        "mention that Jarvis can build it into his own code the next time he's "
+        "running on his main Claude brain, since you don't have real file/tool "
+        "access to do that yourself."
     )
 
     if context:
