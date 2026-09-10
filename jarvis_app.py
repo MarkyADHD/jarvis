@@ -300,7 +300,20 @@ LIVE_PREVIEW_WIDTH = 420
 FULL_SKILL_MODE_ENABLED = True
 CONFIRM_RISKY_ACTIONS = True
 
-AUTO_CONVERSATION_MEMORY_ENABLED = True
+# Disabled (2026-09-10), at the user's explicit direction, moving toward
+# ai-memory-vault's curated-notes model (a real, persistent vault the
+# main Claude brain already reads per CLAUDE.md's own "Memory" section)
+# instead of this: every single conversational turn, both what the user
+# said AND Jarvis's own generated reply, got auto-saved to
+# jarvis_memory.jsonl completely uncurated, then resurfaced in FUTURE
+# prompts via memory_context_for_prompt() -- a real feedback-loop risk,
+# confirmed live: one confused/off-topic Jarvis reply got auto-saved
+# verbatim and then kept getting referenced in later, unrelated
+# conversation turns until the bad entries were manually removed.
+# Explicit "remember that X" voice commands are a completely separate,
+# deliberate, user-triggered code path (jarvis_memory_v2.remember()) --
+# unaffected by this and still fully working.
+AUTO_CONVERSATION_MEMORY_ENABLED = False
 AUTO_MEMORY_SAVE_USER_SPEECH = True
 AUTO_MEMORY_SAVE_JARVIS_REPLIES = True
 AUTO_MEMORY_MIN_CHARS = 8

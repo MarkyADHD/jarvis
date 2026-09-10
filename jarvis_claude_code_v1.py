@@ -480,6 +480,24 @@ def _run(
     if not result and proc.returncode == 0:
         result = clean(proc.stdout)
 
+    # Defensive unwrap: reported live (raw JSON spoken verbatim to the
+    # user) -- despite jarvis_system_prompt()'s explicit "do not output
+    # JSON" instruction, the model itself occasionally still generates a
+    # reply shaped like Jarvis's own internal plan envelope
+    # ({"mode": "chat", "reply": "...", "steps": []}), almost certainly
+    # picked up from seeing that exact shape elsewhere in the codebase
+    # it's reasoning about. This is the ONE call's own "result" field
+    # already unwrapped from the CLI's own JSON envelope -- if THAT text
+    # is itself JSON carrying a "reply" key, unwrap it too rather than
+    # ever speaking the raw envelope.
+    if result.startswith("{") and '"reply"' in result:
+        try:
+            inner = json.loads(result)
+            if isinstance(inner, dict) and clean(inner.get("reply", "")):
+                result = clean(inner.get("reply", ""))
+        except (ValueError, TypeError):
+            pass
+
     ok = bool(
         proc.returncode == 0
         and result

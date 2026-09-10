@@ -14,6 +14,7 @@ Run:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -1547,12 +1548,59 @@ _PROJECT_BUILD_VERBS = (
 CODING_TASK_TIMEOUT_SECONDS = 1800.0
 
 
+# Reported live and reproduced: Jarvis offers to dig into his own code
+# ("want me to trace the listening-indicator logic and fix it?"), the
+# user replies with a short "yeah, please" -- and _looks_like_coding_task
+# below only ever inspected the CURRENT utterance text, which contains
+# none of its own trigger words. That short reply got the ordinary 150s
+# timeout instead of the 1800s coding-task one, genuinely ran out of
+# time mid-investigation, and fell through to the tool-less fallback
+# brain -- which correctly (from its own narrow view) said it has no
+# file access, but confusingly, since the user had just said yes to a
+# real offer from what should have been the main brain. Same pattern
+# jarvis_update_check_v1 and jarvis_claude_brain_v2's own destructive-
+# action gate already use: a short affirmative shortly after an offer
+# counts as accepting THAT offer, not a fresh, context-free utterance.
+_CODING_OFFER_WINDOW_S = 60.0
+_last_coding_offer_at = 0.0
+
+_AFFIRMATIVE_RE = re.compile(
+    r"^(yes|yeah|yep|yup|sure|do it|go ahead|go for it|please|"
+    r"if you don.t mind|sounds good|okay|ok|proceed)\b", re.IGNORECASE,
+)
+
+# Loose on purpose -- this only needs to catch "I'm about to offer to do
+# real engineering work", not classify precisely. False positives just
+# mean a short "yes" shortly after gets the longer timeout it would
+# have needed anyway if it WAS accepting a coding offer; false negatives
+# are the actual reported bug.
+_CODING_OFFER_PHRASE_RE = re.compile(
+    r"\b(want me to|should i|shall i|i can|let me)\b.{0,60}\b"
+    r"(code|fix|trace|dig into|debug|rewrite|edit|build|patch)\b",
+    re.IGNORECASE,
+)
+
+
+def _note_possible_coding_offer(reply_text):
+    global _last_coding_offer_at
+    try:
+        if _CODING_OFFER_PHRASE_RE.search(str(reply_text or "")):
+            _last_coding_offer_at = time.time()
+    except Exception:
+        pass
+
+
 def _looks_like_coding_task(text):
     t = str(text or "").lower()
     if any(phrase in t for phrase in _CODING_TASK_PATTERNS):
         return True
     if any(target in t for target in _PROJECT_BUILD_TARGETS):
         return any(verb in t for verb in _PROJECT_BUILD_VERBS)
+    if (
+        _AFFIRMATIVE_RE.match(str(text or "").strip())
+        and (time.time() - _last_coding_offer_at) <= _CODING_OFFER_WINDOW_S
+    ):
+        return True
     return False
 
 
@@ -1657,6 +1705,7 @@ def ask_ai_common_v2(goal, original_func=None):
                     goal,
                     name,
                 )
+                _note_possible_coding_offer(plan.get("reply", ""))
 
                 if plan.get("mode") == "chat" and (
                     intelligence_v3.is_low_value_reply(plan.get("reply", ""))
@@ -1711,6 +1760,7 @@ def ask_ai_common_v2(goal, original_func=None):
                         goal,
                         name,
                     )
+                    _note_possible_coding_offer(plan.get("reply", ""))
 
                     if plan.get("mode") == "chat" and (
                         intelligence_v3.is_low_value_reply(plan.get("reply", ""))
