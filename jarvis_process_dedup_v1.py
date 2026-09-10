@@ -37,7 +37,27 @@ import os
 import time
 
 WATCHDOG_INTERVAL_S = 120
-FIRST_CHECK_DELAY_S = 45  # let normal startup (which legitimately spawns each satellite once) finish first
+# Reported live: lag/freezing timed almost exactly to when the user
+# finishes speaking and when Jarvis starts speaking -- meaning the
+# duplicate isn't just an idle memory hog, it's running its OWN full
+# voice loop, doing its OWN Whisper transcription and Kokoro synthesis
+# on the SAME GPU at the SAME moments, every single turn, for as long as
+# both copies stay alive. This delay used to be 45s (long enough for
+# heavy models to finish loading on BOTH copies before dedup ever ran),
+# which is exactly backwards for GPU safety -- catching a duplicate
+# early, before it has fully loaded Whisper/Kokoro/vision and allocated
+# real CUDA memory, means there is much less for a kill to disrupt.
+FIRST_CHECK_DELAY_S = 8
+
+# Grace period for a normal, clean process exit before escalating to a
+# hard kill. terminate() (Windows: WM_CLOSE-equivalent via psutil, a
+# real request to exit) gives Python -- and, critically, the NVIDIA
+# driver -- a chance to release any CUDA context in an orderly way.
+# Live-observed real crashes/hangs the one time this used a bare
+# .kill() (SIGKILL-equivalent, no cleanup chance) immediately after a
+# dedup pass -- a hard kill mid-GPU-operation is a known real hazard on
+# Windows, not a theoretical one.
+TERMINATE_GRACE_S = 2.0
 
 SATELLITE_SCRIPT_NAMES = (
     "jarvis_face_window.py",
@@ -103,23 +123,39 @@ def dedupe_jarvis_processes():
 
             groups.setdefault(key, []).append(proc)
 
+        all_duplicates = []
+
         for key, procs in groups.items():
             if key == MAIN_SCRIPT_NAME:
-                survivors = [p for p in procs if p.pid == my_pid]
                 duplicates = [p for p in procs if p.pid != my_pid]
             else:
                 if len(procs) <= 1:
                     continue
                 procs.sort(key=lambda p: p.info.get("create_time") or 0)
-                survivors = procs[:1]
                 duplicates = procs[1:]
 
-            for proc in duplicates:
-                try:
+            all_duplicates.extend(duplicates)
+
+        if not all_duplicates:
+            return 0
+
+        # terminate() first, gathered as one batch so the grace wait
+        # below only happens once per pass, not once per duplicate.
+        for proc in all_duplicates:
+            try:
+                proc.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        time.sleep(TERMINATE_GRACE_S)
+
+        for proc in all_duplicates:
+            try:
+                if proc.is_running():
                     proc.kill()
-                    killed += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                killed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
 
     except Exception:
         pass

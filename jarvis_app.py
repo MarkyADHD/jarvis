@@ -592,6 +592,17 @@ def log_user_text(prefix, text):
 def ensure_single_instance():
     global _single_instance_socket
 
+    # Idempotent: jarvis_app_v2.py's entry point now checks this FIRST,
+    # before doing any real startup work, and jarvis_app.main() (called
+    # much later in that same process, at the very end) checks it again
+    # on its own. Without this, the second call would try to bind a
+    # brand new socket to a port THIS SAME PROCESS already holds via the
+    # first call's socket -- which still fails with "address already in
+    # use" even within one process (no SO_REUSEADDR) -- incorrectly
+    # telling the legitimate, already-running instance it's a duplicate.
+    if _single_instance_socket is not None:
+        return True
+
     try:
         _single_instance_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _single_instance_socket.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))

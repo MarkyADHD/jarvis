@@ -2124,14 +2124,31 @@ def install_v2(headless=False):
     except Exception:
         pass
 
-    try:
-        threading.Thread(
-            target=process_dedup_v1.background_dedup_loop,
-            args=(app,),
-            daemon=True,
-        ).start()
-    except Exception:
-        pass
+    # DISABLED AGAIN (2026-09-10), for real this time. Tried a real fix
+    # (8s detection instead of 45s, graceful terminate() before any hard
+    # kill) and re-enabled it -- still reproducibly took the whole
+    # process down within seconds, multiple times, even with those
+    # improvements. Also added a genuine root-cause attempt (the
+    # single-instance lock now runs FIRST, before install_v2() does any
+    # real work) which did NOT stop the duplicate from fully spawning
+    # either -- strong evidence the duplication happens via something
+    # that bypasses this process's own TCP-port lock entirely (most
+    # likely a sandboxing/AV mechanism giving the shadow copy its own
+    # virtualized network stack, so the "port already in use" check
+    # never actually collides). Given kill-based cleanup keeps crashing
+    # the machine and even a same-process, checked-early lock doesn't
+    # stop the duplication, this needs Process Monitor / real-time-
+    # protection-disabled diagnosis in a dedicated session, not more
+    # live guessing under time pressure. Stability wins for now --
+    # the GPU-contention/lag problem stays open, unsolved, tracked here.
+    # try:
+    #     threading.Thread(
+    #         target=process_dedup_v1.background_dedup_loop,
+    #         args=(app,),
+    #         daemon=True,
+    #     ).start()
+    # except Exception:
+    #     pass
 
 
 def _launch_visualizer_face_v2():
@@ -2237,6 +2254,24 @@ def _launch_remote_chat_v2():
 
 
 if __name__ == "__main__":
+    # THE actual root cause of the whole "10 processes running, GPU
+    # contention, lag/freezing" saga: this check existed in jarvis_app.py
+    # all along (app.main()'s own first line), but app.main() only runs
+    # at the very END of this block -- AFTER install_v2() had already
+    # unconditionally spawned every satellite (face window, mini bar,
+    # remote chat, the visualizer server) and started every background
+    # thread, real duplicate or not. A genuine second launch of this
+    # script was never actually stopped from doing all of that expensive,
+    # duplicative work; it only got turned away from the final blocking
+    # main loop, by which point two fully independent, fully-functional
+    # Jarvis sessions were already alive and fighting over the same mic,
+    # speakers, and GPU. Checking here, first, means a real duplicate
+    # exits immediately -- no models loaded, no satellites spawned, no
+    # background threads started, nothing for it to contend with the
+    # real instance over.
+    if not app.ensure_single_instance():
+        raise SystemExit(0)
+
     install_v2()
 
     try:
