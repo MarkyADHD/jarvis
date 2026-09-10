@@ -389,6 +389,22 @@ _single_instance_socket = None
 log_queue = queue.Queue()
 speak_queue = queue.Queue()
 mic_audio_queue = queue.Queue(maxsize=100)
+# Utterances captured off the mic go here for transcription+dispatch,
+# handled by ONE dedicated worker thread (see _utterance_worker_loop) --
+# not a fresh thread per utterance. A fresh-thread-per-utterance version
+# of this fixed the original "capture loop blocks on transcription, VAD
+# desyncs, a command spoken mid-transcription gets ignored" bug, but
+# broke ordering: with no serialization between utterances, whichever
+# finished transcribing first got processed first, regardless of which
+# was actually spoken first -- reported live as "Jarvis repeats/answers
+# past things," and each one independently re-arming the 15-second
+# no-wake-word conversation window meant a stray short utterance
+# finishing late could re-open that window right when it should have
+# closed, reported live as "Jarvis listens without the wake word now."
+# A single FIFO worker keeps the capture loop non-blocking (still fixes
+# the original bug) while guaranteeing utterances are transcribed and
+# dispatched strictly in the order they were spoken.
+utterance_queue = queue.Queue()
 
 listening_enabled = threading.Event()
 speaking_now = threading.Event()
@@ -2450,6 +2466,34 @@ def process_heard_text(text, heard_during_speech=False):
     threading.Thread(target=run_agent_task, args=(command,), daemon=True).start()
 
 
+_UTTERANCE_WORKER_STARTED = False
+
+
+def _utterance_worker_loop():
+    """The single FIFO consumer for utterance_queue -- see the queue's
+    own comment for why this exists instead of a thread per utterance.
+    Runs for the life of the process; started once, lazily, the first
+    time voice_listener_loop runs (also covers push-to-talk's resumed
+    listener thread, which calls voice_listener_loop again)."""
+    while True:
+        blob, heard_during_speech = utterance_queue.get()
+        try:
+            text = transcribe_with_whisper(blob)
+            process_heard_text(text, heard_during_speech=heard_during_speech)
+        except Exception as e:
+            log(f"Transcription failed: {e}")
+        finally:
+            utterance_queue.task_done()
+
+
+def _ensure_utterance_worker_started():
+    global _UTTERANCE_WORKER_STARTED
+    if _UTTERANCE_WORKER_STARTED:
+        return
+    _UTTERANCE_WORKER_STARTED = True
+    threading.Thread(target=_utterance_worker_loop, daemon=True).start()
+
+
 def voice_listener_loop(status_callback):
     if not WHISPER_AVAILABLE:
         log("faster-whisper is not installed.")
@@ -2470,6 +2514,7 @@ def voice_listener_loop(status_callback):
 
     calibrate_microphone_threshold()
     clear_mic_queue()
+    _ensure_utterance_worker_started()
 
     status_callback("Listening locally with Whisper...")
     log("Local Whisper microphone listener started.")
@@ -2624,34 +2669,23 @@ def voice_listener_loop(status_callback):
                     # leave the face stuck showing "listening" forever.
                     set_face_state("idle")
 
-                    # Transcription (and everything downstream of it) runs on
-                    # its own thread instead of blocking this capture loop.
-                    # It used to run inline here -- while Whisper (large-v3,
-                    # beam_size=3, best_of=3) chewed on one utterance for a
-                    # second or more, this loop stopped pulling from
-                    # mic_audio_queue and the VAD state (recording_active,
-                    # speech_start_time, last_voice_time) sat frozen. Mic
-                    # audio kept queuing in the background, but once this
-                    # loop resumed it measured silence/duration against
-                    # time.time() -- which had jumped forward by however
-                    # long transcription took -- against audio that was
-                    # actually captured earlier. A second utterance spoken
-                    # during that block got its start clipped or never
-                    # tripped silence-detection on its own, so it sat
-                    # unheard until the user spoke again, at which point the
-                    # two got concatenated into one blob and Jarvis answered
-                    # the stale, ignored command instead of the new one.
-                    # whisper_lock (inside transcribe_with_whisper) still
-                    # serializes actual model inference, so results come
-                    # back in roughly submission order.
-                    def _transcribe_and_process(blob=audio_blob, hds=heard_during_speech):
-                        try:
-                            text = transcribe_with_whisper(blob)
-                            process_heard_text(text, heard_during_speech=hds)
-                        except Exception as e:
-                            log(f"Transcription failed: {e}")
-
-                    threading.Thread(target=_transcribe_and_process, daemon=True).start()
+                    # Handed off to the single FIFO utterance worker
+                    # (_utterance_worker_loop) instead of transcribing
+                    # inline here or spawning a fresh thread per utterance.
+                    # Inline blocking used to freeze this capture loop for
+                    # the full length of a Whisper call, desyncing VAD
+                    # timing and causing a command spoken mid-transcription
+                    # to be silently ignored. A thread per utterance fixed
+                    # that but broke ordering: with nothing serializing
+                    # them, whichever utterance finished transcribing first
+                    # got processed first regardless of speaking order,
+                    # reported live as Jarvis answering/repeating stale
+                    # past utterances, and as conversation mode never
+                    # expiring (each one separately re-arming the 15s
+                    # no-wake-word window). Queueing to one FIFO worker
+                    # keeps this capture loop non-blocking (still fixes the
+                    # original bug) while guaranteeing strict spoken order.
+                    utterance_queue.put((audio_blob, heard_during_speech))
 
     except Exception as e:
         log(f"Microphone stream error: {e}")
