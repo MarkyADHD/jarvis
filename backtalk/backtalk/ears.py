@@ -25,13 +25,10 @@ an utterance opens after ~120ms of sustained speech, closes after
 `silence_ms` of trailing quiet. A `gate` callable can suppress
 listening (so the open mic ignores the speakers unless barge-in is on).
 """
-import os
 import platform
 import re
 import sys
 import threading
-import time
-from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
@@ -39,19 +36,12 @@ import webrtcvad
 
 from backtalk.config import CFG
 from backtalk.vlog import log
-from backtalk import signals
 
 RATE = 16000
 FRAME_MS = 30
 FRAME_LEN = RATE * FRAME_MS // 1000  # samples per frame
 OPEN_FRAMES = 4        # ~120ms speech to open an utterance
 MAX_UTTER_S = 30
-
-# Used only when a GPU-sized configured model (see warm()) can't actually
-# run on GPU and the automatic fallback needs something CPU-appropriate
-# instead -- not a general "small English" default otherwise.
-CPU_FALLBACK_MODEL = "small.en"
-CPU_FALLBACK_COMPUTE = "int8"
 
 _NONSPEECH = re.compile(r"[\[(][^\])]*[\])]")
 
@@ -288,15 +278,16 @@ def _add_nvidia_dll_dirs():
     load the DLL fine that way, CTranslate2 still couldn't). Only
     prepending their folders to the classic PATH environment variable
     actually worked. Without this, "auto"/"cuda" device selection was
-    silently failing the _probe() below on every single startup and
-    falling back to CPU, even with the right packages installed and a
-    perfectly good GPU sitting idle -- CPU-only English-tuned Whisper
-    at this size is measurably worse on non-American accents than the
-    same model gets right on GPU, where a bigger model becomes
-    affordable. Best-effort: never raises, a machine with no GPU or no
-    nvidia packages just skips this and behaves exactly as before."""
+    silently failing on every single startup and falling back to CPU,
+    even with the right packages installed and a perfectly good GPU
+    sitting idle. Jarvis-specific (not in Jared's own upstream) --
+    re-applied after every backtalk update. Best-effort: never raises, a
+    machine with no GPU or no nvidia packages just skips this."""
+    import os
+    import sysconfig
+    from pathlib import Path
+
     try:
-        import sysconfig
         site_packages = Path(sysconfig.get_paths()["purelib"])
         added = []
         for pkg in ("cublas", "cudnn"):
@@ -354,25 +345,11 @@ def warm():
                         raise
                     log(f"[ears] {want!r} does not work on this machine "
                         f"({type(e).__name__}: {e}).")
-                    fallback_model, fallback_compute = CFG["stt_model"], CFG["stt_compute"]
-                    if CFG["stt_model"] != CPU_FALLBACK_MODEL:
-                        # A model sized for GPU (e.g. large-v3, chosen for
-                        # its much better accent/dialect accuracy) run on
-                        # CPU instead would be painfully slow -- tens of
-                        # seconds per utterance on a modest machine, not a
-                        # few hundred ms. Fall back to a model actually
-                        # sized for CPU rather than just swapping the
-                        # device under the same big model.
-                        fallback_model, fallback_compute = CPU_FALLBACK_MODEL, CPU_FALLBACK_COMPUTE
-                        log(f"[ears] {CFG['stt_model']!r} is sized for GPU -- "
-                            f"falling back to {fallback_model!r} on the CPU "
-                            f"instead of running the big model at CPU speed.")
-                    else:
-                        log("[ears] falling back to the CPU. Set "
-                            "\"stt_device\": \"cpu\" in backtalk.json to skip "
-                            "this check in future.")
-                    _model = WhisperModel(fallback_model, device="cpu",
-                                          compute_type=fallback_compute)
+                    log("[ears] falling back to the CPU. Set "
+                        "\"stt_device\": \"cpu\" in backtalk.json to skip "
+                        "this check in future.")
+                    _model = WhisperModel(CFG["stt_model"], device="cpu",
+                                          compute_type=CFG["stt_compute"])
                     _probe(_model)
                 _backend = "faster-whisper"
             log(f"[ears] model ready ({_backend})")
@@ -393,7 +370,7 @@ def transcribe(pcm: np.ndarray) -> str:
                                       verbose=None)["text"].strip()
     else:
         segments, _ = model.transcribe(audio, temperature=0.0, language=lang)
-        text = " ".join(s.text.strip() for s in segments).strip()
+        text = "".join(s.text for s in segments).strip()
     return _NONSPEECH.sub("", text).strip()
 
 
@@ -459,126 +436,19 @@ class Ears:
                         return transcribe(np.concatenate(frames))
 
 
-def _record_held_direct(is_held, max_s: float, min_s: float) -> str | None:
-    """The original record_held(): opens a fresh mic stream on every
-    call. Kept as the fallback for when the persistent pump (below)
-    isn't running -- correct, just pays PortAudio's stream-open latency
-    (commonly 50-300ms) on every single press, which happens AFTER the
-    press already fired, so it can clip the very start of whatever the
-    user says first. Confirmed live as the cause of "the command gets
-    garbled without a lead-in word" -- there's nothing about the WORDS
-    "Jarvis" specifically; any throwaway sound first was absorbing that
-    open-latency window instead of the real command."""
+def record_held(is_held, max_s: float = 60.0, min_s: float = 0.25) -> str | None:
+    """Hold-to-talk capture: record raw audio while is_held() is True,
+    then transcribe. The button is the VAD — no endpointing. Returns
+    None for taps shorter than min_s (accidental presses)."""
     frames: list[np.ndarray] = []
     with _open_mic() as stream:
         while is_held() and len(frames) * FRAME_MS / 1000 < max_s:
             block, _ = stream.read(FRAME_LEN)
-            mono = block[:, 0].copy()
-            frames.append(mono)
-            signals.feed_mic_waveform(mono)
+            frames.append(block[:, 0].copy())
         # a small tail so the last word isn't clipped at release
         for _ in range(6):
             block, _ = stream.read(FRAME_LEN)
             frames.append(block[:, 0].copy())
-    if len(frames) * FRAME_MS / 1000 < min_s:
-        return None
-    return transcribe(np.concatenate(frames))
-
-
-# --- Persistent PTT mic pump -------------------------------------------
-# A background thread that owns ONE mic stream for the whole session and
-# never stops reading it, instead of record_held() opening (and paying
-# the open-latency of) a brand new stream on every single press. It also
-# keeps a small rolling PRE-ROLL buffer (the last ~240ms, same length
-# Ears.listen_once's own pre-roll ring uses) so record_held() can hand
-# back audio from BEFORE the press was even noticed -- the actual fix
-# for a clipped first word, not just a faster stream open.
-#
-# This thread is the ONLY reader of the raw stream at any time (whether
-# idle or actively recording); record_held() never touches the stream
-# directly, so there's no risk of two readers racing over the same
-# device.
-_PTT_PREROLL_FRAMES = 8  # ~240ms at FRAME_MS=30, matches listen_once's ring
-
-_ptt_preroll: list[np.ndarray] = []
-_ptt_active_frames: list[np.ndarray] = []
-_ptt_recording = False
-_ptt_lock = threading.Lock()
-_ptt_pump_thread: threading.Thread | None = None
-_ptt_pump_stop = threading.Event()
-
-
-def _ptt_pump_loop():
-    global _ptt_recording
-    try:
-        with _open_mic() as stream:
-            while not _ptt_pump_stop.is_set():
-                block, _ = stream.read(FRAME_LEN)
-                mono = block[:, 0].copy()
-                with _ptt_lock:
-                    _ptt_preroll.append(mono)
-                    if len(_ptt_preroll) > _PTT_PREROLL_FRAMES:
-                        _ptt_preroll.pop(0)
-                    if _ptt_recording:
-                        _ptt_active_frames.append(mono)
-                        signals.feed_mic_waveform(mono)
-    except Exception as e:
-        log(f"[ears] PTT mic pump stopped ({e}) -- push-to-talk will fall "
-            f"back to opening a fresh stream per press")
-
-
-def warm_ptt_stream():
-    """Starts the persistent PTT mic pump. Call once ahead of the first
-    press (Jarvis's own prewarm_ptt_async does this alongside loading
-    the whisper model) -- safe to call again, a no-op if already
-    running."""
-    global _ptt_pump_thread
-    if _ptt_pump_thread is not None and _ptt_pump_thread.is_alive():
-        return
-    _ptt_pump_stop.clear()
-    _ptt_pump_thread = threading.Thread(
-        target=_ptt_pump_loop, name="ptt-mic-pump", daemon=True,
-    )
-    _ptt_pump_thread.start()
-
-
-def record_held(is_held, max_s: float = 60.0, min_s: float = 0.25) -> str | None:
-    """Hold-to-talk capture: record raw audio while is_held() is True,
-    then transcribe. The button is the VAD — no endpointing. Returns
-    None for taps shorter than min_s (accidental presses).
-
-    Uses the persistent pump + pre-roll buffer when warm_ptt_stream()
-    has been called (the normal case in Jarvis), falling back to the
-    original open-a-fresh-stream behaviour otherwise -- so this is a
-    pure improvement, never a new failure mode."""
-    global _ptt_recording, _ptt_active_frames
-
-    if _ptt_pump_thread is None or not _ptt_pump_thread.is_alive():
-        return _record_held_direct(is_held, max_s, min_s)
-
-    with _ptt_lock:
-        # Seed with whatever's already in the pre-roll ring -- audio
-        # from just before this press was even detected, which is
-        # exactly the window a fresh stream-open used to clip.
-        _ptt_active_frames = list(_ptt_preroll)
-        _ptt_recording = True
-
-    try:
-        max_frames = int(max_s * 1000 / FRAME_MS)
-        while is_held():
-            with _ptt_lock:
-                current_len = len(_ptt_active_frames)
-            if current_len >= max_frames:
-                break
-            time.sleep(FRAME_MS / 1000)
-        # a small tail so the last word isn't clipped at release
-        time.sleep(6 * FRAME_MS / 1000)
-    finally:
-        with _ptt_lock:
-            _ptt_recording = False
-            frames = list(_ptt_active_frames)
-            _ptt_active_frames = []
-
     if len(frames) * FRAME_MS / 1000 < min_s:
         return None
     return transcribe(np.concatenate(frames))

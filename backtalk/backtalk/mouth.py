@@ -53,18 +53,6 @@ import sounddevice as sd
 from backtalk.config import CFG
 from backtalk.vlog import log
 
-# Kokoro logs through loguru, whose default sink is sys.stderr. Under
-# pythonw.exe (no console) sys.stderr is None, so loguru's own write
-# raises "Cannot log to objects of type 'NoneType'" on the first debug
-# line kokoro emits per sentence — which aborts _play_stream before any
-# audio is written, i.e. total silence with no sound-device error at all.
-if sys.stderr is None:
-    try:
-        import loguru
-        loguru.logger.remove()
-    except ImportError:
-        pass
-
 KOKORO_RATE = 24000
 EL_RATE = 44100
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
@@ -178,8 +166,11 @@ def warm():
             _sweep_orphan_espeak_tempdirs()
             from kokoro import KPipeline
             # kokoro's own __init__ unconditionally re-adds a sys.stderr
-            # sink on import, clobbering the guard above -- redo it here
-            # or every synth call crashes silently under pythonw.exe.
+            # sink on import -- fatal under pythonw.exe (no console, so
+            # sys.stderr is literally None, not just redirected): every
+            # synth call crashes silently unless this is redone here.
+            # Jarvis-specific (Jared's own reference setup runs under a
+            # real console) -- re-applied after every backtalk update.
             if sys.stderr is None:
                 try:
                     import loguru
@@ -456,14 +447,7 @@ class Mouth:
             except Exception:
                 log("[mouth] the output stream went away, reopening")
         self._drop_out()
-        # Stereo, not mono: some virtual-audio endpoints (GoXLR, other
-        # streaming mixers/interfaces) accept a mono-channel stream without
-        # erroring but produce no audible output on it -- confirmed on a
-        # real GoXLR "System" device, where Piper's own sd.RawOutputStream
-        # call happened to request whatever channel count its own audio
-        # already was rather than forcing mono, and worked. _write() below
-        # duplicates each mono sample to L+R to match.
-        self._out = sd.OutputStream(samplerate=rate, channels=2, dtype="int16")
+        self._out = sd.OutputStream(samplerate=rate, channels=1, dtype="int16")
         self._out_rate = rate
         self._out.start()
         return self._out
@@ -475,9 +459,7 @@ class Mouth:
         the device buffer (~0.1s) plays out after the kill order — half a
         syllable of tail."""
         try:
-            # Stream is stereo (see _get_out) -- shape (frames, channels),
-            # same requirement as the main write path in _play_stream.
-            zeros = np.zeros((2205, 2), dtype=np.int16)
+            zeros = np.zeros(2205, dtype=np.int16)
             for _ in range(3):
                 self._out.write(zeros)
         except Exception:
@@ -526,21 +508,13 @@ class Mouth:
                 for i in range(0, len(pcm), block):
                     if self._stop.is_set():
                         return False
-                    mono_chunk = pcm[i:i + block]
-                    # The stream is opened stereo (see _get_out); duplicate
-                    # each mono sample to L+R. sounddevice requires a 2D
-                    # array shaped (frames, channels), not a flat
-                    # interleaved 1D buffer -- a 1D array raised "number of
-                    # channels must match" even though the element count
-                    # was right.
-                    stereo_chunk = np.repeat(mono_chunk, 2).reshape(-1, 2)
-                    out.write(stereo_chunk)
+                    out.write(pcm[i:i + block])
                     # Re-check after the blocking write: a barge-in
                     # landing mid-block must not let feed_waveform
                     # re-assert "speaking" over a fresh "listening".
                     if self._stop.is_set():
                         return False
-                    signals.feed_waveform(mono_chunk)
+                    signals.feed_waveform(pcm[i:i + block])
                 return True
             for pcm in head:
                 if not _write(pcm):

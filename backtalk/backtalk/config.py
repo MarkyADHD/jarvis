@@ -132,21 +132,12 @@ DEFAULTS = {
     # languages), so keep voice and accent matched.
     "voice": "bm_lewis",
     # Speech recognition (faster-whisper, local, free).
-    # Models: tiny.en / base.en / small.en / medium.en / large-v3 --
-    # large-v3 confirmed live as a real accuracy jump on non-American
-    # accents over small.en (the user's own report: struggled noticeably
-    # with a British accent), and confirmed fast enough for real-time use
-    # on GPU (under half a second for a 5s clip on an RTX 4070). Safe to
-    # default even on weaker/GPU-less machines because ears.warm()'s own
-    # probe-and-fallback (see CPU_FALLBACK_MODEL there) automatically
-    # drops to a small CPU-appropriate model instead of ever trying to
-    # run this one at CPU speed.
-    "stt_model": "large-v3",
-    # "auto" uses CUDA when present, otherwise CPU (and a smaller model,
-    # see stt_model's own comment). float16 is the right precision for
-    # GPU; the CPU fallback path uses int8 on its own, not this setting.
+    # Models: tiny.en / base.en / small.en / medium.en — small.en is the
+    # accuracy/speed sweet spot on a normal machine.
+    "stt_model": "small.en",
+    # "auto" uses CUDA when present, otherwise CPU. int8 keeps CPU fast.
     "stt_device": "auto",
-    "stt_compute": "float16",
+    "stt_compute": "int8",
     # The microphone to record from, matched by NAME. "" means whatever
     # the OS calls the default input, which is right on most machines.
     #

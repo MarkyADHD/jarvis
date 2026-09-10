@@ -98,7 +98,7 @@ def feed_waveform(pcm: np.ndarray):
         idx = np.linspace(0, pcm.size - 1, 64).astype(int)
         raw = pcm[idx].astype(float)
         with open(_WAVEFORM_FILE, "w") as f:
-            f.write(json.dumps({"ts": now, "kind": "speaking", "samples": raw.tolist()}))
+            f.write(json.dumps({"ts": now, "samples": raw.tolist()}))
         if _BH_WAVE:
             norm = np.clip(np.abs(raw) / 32768.0, 0.0, 1.0)
             with open(_BH_WAVE, "w") as f:
@@ -106,31 +106,6 @@ def feed_waveform(pcm: np.ndarray):
     except (OSError, ValueError):
         pass
     set_state("speaking")
-
-
-_last_mic_waveform_write = 0.0
-
-
-def feed_mic_waveform(pcm: np.ndarray):
-    """Same idea as feed_waveform, but for the microphone while an
-    utterance is being recorded (hold-to-talk or open-mic). Written to
-    the SAME file, tagged kind="listening" so a watcher can tell mic
-    input from Jarvis's own voice and, say, colour them differently.
-    Does not touch state — the caller already owns that.  Never raises."""
-    global _last_mic_waveform_write
-    if pcm.size == 0:
-        return
-    now = time.time()
-    if now - _last_mic_waveform_write < _WAVEFORM_MIN_INTERVAL:
-        return
-    _last_mic_waveform_write = now
-    try:
-        idx = np.linspace(0, pcm.size - 1, 64).astype(int)
-        raw = pcm[idx].astype(float)
-        with open(_WAVEFORM_FILE, "w") as f:
-            f.write(json.dumps({"ts": now, "kind": "listening", "samples": raw.tolist()}))
-    except (OSError, ValueError):
-        pass
 
 
 def direction(items):
