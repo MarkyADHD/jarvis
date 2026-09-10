@@ -40,6 +40,7 @@ import jarvis_keylight_v1 as keylight_v1
 import jarvis_nanoleaf_v1 as nanoleaf_v1
 import jarvis_hue_v1 as hue_v1
 import jarvis_govee_v1 as govee_v1
+import jarvis_process_dedup_v1 as process_dedup_v1
 import jarvis_update_check_v1 as update_check_v1
 import jarvis_twitch_v1 as twitch_v1
 import jarvis_clipper_v1 as clipper_v1
@@ -2118,6 +2119,15 @@ def install_v2(headless=False):
         threading.Thread(
             target=govee_v1.background_new_device_check_loop,
             args=(app, refresh_spoken_name),
+            daemon=True,
+        ).start()
+    except Exception:
+        pass
+
+    try:
+        threading.Thread(
+            target=process_dedup_v1.background_dedup_loop,
+            args=(app,),
             daemon=True,
         ).start()
     except Exception:

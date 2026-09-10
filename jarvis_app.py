@@ -2485,6 +2485,7 @@ def process_heard_text(text, heard_during_speech=False):
 
 
 _UTTERANCE_WORKER_STARTED = False
+_UTTERANCE_WORKER_START_LOCK = threading.Lock()
 
 
 def _utterance_worker_loop():
@@ -2505,11 +2506,19 @@ def _utterance_worker_loop():
 
 
 def _ensure_utterance_worker_started():
+    """The check-then-set here MUST be atomic, not just a bare flag --
+    voice_listener_loop can genuinely be entered from more than one
+    thread close together (push-to-talk resumes it via a fresh thread
+    each time it releases the mic back to the wake-word listener), and
+    two workers both consuming utterance_queue would silently
+    reintroduce the exact out-of-order-processing bug a single FIFO
+    worker exists to prevent."""
     global _UTTERANCE_WORKER_STARTED
-    if _UTTERANCE_WORKER_STARTED:
-        return
-    _UTTERANCE_WORKER_STARTED = True
-    threading.Thread(target=_utterance_worker_loop, daemon=True).start()
+    with _UTTERANCE_WORKER_START_LOCK:
+        if _UTTERANCE_WORKER_STARTED:
+            return
+        _UTTERANCE_WORKER_STARTED = True
+        threading.Thread(target=_utterance_worker_loop, daemon=True).start()
 
 
 def voice_listener_loop(status_callback):
@@ -2553,6 +2562,17 @@ def voice_listener_loop(status_callback):
     LIVE_INTERRUPT_WINDOW_SECONDS = 2.4
     LIVE_INTERRUPT_MIN_SECONDS = 0.9
     LIVE_INTERRUPT_CHECK_INTERVAL = 0.65
+    # Same class of bug as the main utterance path (fixed separately):
+    # transcribing inline here blocked this same capture loop for the
+    # length of a Whisper call, on the SAME loop the normal utterance
+    # detector depends on -- while Jarvis is mid-reply, that's a smaller
+    # window than the main bug, but it's the exact same desync
+    # mechanism. Checked off the loop's own thread instead; the local
+    # buffer resets on a real interrupt still happen back on this loop's
+    # own thread (via live_interrupt_reset_event), since only this loop
+    # may safely touch its own local variables.
+    live_interrupt_check_busy = threading.Event()
+    live_interrupt_reset_event = threading.Event()
 
     try:
         with sd.RawInputStream(
@@ -2575,6 +2595,18 @@ def voice_listener_loop(status_callback):
                 # based utterance detector. Keep a short rolling mic window and
                 # periodically ask Whisper whether the user said Jarvis stop/cancel.
                 if speaking_now.is_set():
+                    if live_interrupt_reset_event.is_set():
+                        live_interrupt_reset_event.clear()
+                        live_interrupt_chunks = []
+                        live_interrupt_bytes = 0
+                        clear_mic_queue()
+                        recording_active = False
+                        ok_to_speak_event.set()
+                        chunks = []
+                        pre_roll.clear()
+                        started_while_jarvis_was_speaking = False
+                        continue
+
                     live_interrupt_chunks.append(data)
                     live_interrupt_bytes += len(data)
 
@@ -2590,33 +2622,28 @@ def voice_listener_loop(status_callback):
                     if (
                         buffered_seconds >= LIVE_INTERRUPT_MIN_SECONDS
                         and (now - last_live_interrupt_check) >= LIVE_INTERRUPT_CHECK_INTERVAL
+                        and not live_interrupt_check_busy.is_set()
                     ):
                         last_live_interrupt_check = now
+                        live_interrupt_check_busy.set()
+                        interrupt_audio = b"".join(live_interrupt_chunks)
 
-                        try:
-                            interrupt_audio = b"".join(live_interrupt_chunks)
-                            interrupt_text = transcribe_with_whisper(interrupt_audio)
+                        def _check_live_interrupt(audio_blob=interrupt_audio):
+                            try:
+                                interrupt_text = transcribe_with_whisper(audio_blob)
+                                if is_live_voice_interrupt_text(interrupt_text):
+                                    log_user_text("Heard live interrupt", interrupt_text)
+                                    try:
+                                        stop_all_current_work()
+                                    except Exception:
+                                        stop_current_speech()
+                                    live_interrupt_reset_event.set()
+                            except Exception as e:
+                                log(f"Live interrupt check failed: {e}")
+                            finally:
+                                live_interrupt_check_busy.clear()
 
-                            if is_live_voice_interrupt_text(interrupt_text):
-                                log_user_text("Heard live interrupt", interrupt_text)
-
-                                try:
-                                    stop_all_current_work()
-                                except Exception:
-                                    stop_current_speech()
-
-                                live_interrupt_chunks = []
-                                live_interrupt_bytes = 0
-                                clear_mic_queue()
-                                recording_active = False
-                                ok_to_speak_event.set()
-                                chunks = []
-                                pre_roll.clear()
-                                started_while_jarvis_was_speaking = False
-                                continue
-
-                        except Exception as e:
-                            log(f"Live interrupt check failed: {e}")
+                        threading.Thread(target=_check_live_interrupt, daemon=True).start()
 
                     # Do not feed Jarvis's own TTS into the normal utterance VAD.
                     continue
