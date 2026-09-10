@@ -57,6 +57,17 @@ import jarvis_thumbnail_v1 as thumbnail
 
 
 def process_message(text: str) -> str:
+    # Typing a new message while Jarvis is mid-reply never interrupted
+    # him -- he kept talking over/underneath whatever the new message
+    # was actually asking, unlike saying his name or holding push-to-
+    # talk, both of which already barge in the same way. Same call, same
+    # gate (only when actually speaking) as those two existing paths.
+    try:
+        if jav2.app.speaking_now.is_set():
+            jav2.app.stop_current_speech()
+    except Exception:
+        pass
+
     try:
         plan = jav2.quick_handle_command_v2(text)
     except Exception as e:
@@ -270,6 +281,104 @@ def settings_save_elevenlabs(api_key: str) -> dict:
             VOICE_REFRESH_FLAG.touch()
         except Exception:
             pass
+    return {"ok": ok, "error": error}
+
+
+BACKTALK_JSON_PATH = Path(r"C:\AI-Agent\backtalk\backtalk.json")
+
+
+def _read_backtalk_json() -> dict:
+    try:
+        data = json.loads(BACKTALK_JSON_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_elevenlabs_fields(**fields) -> tuple:
+    """Merges into the existing elevenlabs sub-dict in backtalk.json --
+    never overwrites the whole file, since backtalk.json also carries
+    the model, ptt_key, extra_dirs and everything else backtalk needs.
+    Touches VOICE_REFRESH_FLAG so the live warm-brain process (a
+    separate OS process this server can't reach into directly) picks up
+    the change on its next reply without needing a restart."""
+    try:
+        data = _read_backtalk_json()
+        el = data.get("elevenlabs")
+        if not isinstance(el, dict):
+            el = {}
+        el.update(fields)
+        data["elevenlabs"] = el
+        BACKTALK_JSON_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        try:
+            VOICE_REFRESH_FLAG.touch()
+        except Exception:
+            pass
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+def settings_elevenlabs_voice_status() -> dict:
+    el = _read_backtalk_json().get("elevenlabs")
+    if not isinstance(el, dict):
+        el = {}
+    original = settings.load_settings().get("elevenlabs_original_voice") or {}
+    return {
+        "enabled": bool(el.get("enabled")),
+        "voice_id": str(el.get("voice_id") or ""),
+        "voice_note": str(el.get("voice_note") or ""),
+        "has_original": bool(original.get("voice_id")),
+    }
+
+
+def settings_set_elevenlabs_voice_id(voice_id: str, voice_note: str = "") -> dict:
+    """Setting a custom voice ID implies wanting ElevenLabs active --
+    turns it on if it was switched to standard/Kokoro. The very first
+    time this is ever called, the CURRENT voice (whatever's already in
+    backtalk.json -- the one the user originally set up) is captured and
+    saved as "original" if nothing was saved yet, so "return to my
+    original voice" always has something real to return to, not just
+    whatever the last custom ID happened to be."""
+    voice_id = str(voice_id or "").strip()
+    if not voice_id:
+        return {"ok": False, "error": "No voice ID entered."}
+
+    try:
+        s = settings.load_settings()
+        if not (s.get("elevenlabs_original_voice") or {}).get("voice_id"):
+            current = _read_backtalk_json().get("elevenlabs") or {}
+            if current.get("voice_id"):
+                s["elevenlabs_original_voice"] = {
+                    "voice_id": current.get("voice_id"),
+                    "voice_note": current.get("voice_note", ""),
+                }
+                settings.save_settings(s)
+    except Exception:
+        pass
+
+    ok, error = _write_elevenlabs_fields(
+        voice_id=voice_id, voice_note=str(voice_note or ""), enabled=True,
+    )
+    return {"ok": ok, "error": error}
+
+
+def settings_elevenlabs_restore_original() -> dict:
+    original = settings.load_settings().get("elevenlabs_original_voice") or {}
+    voice_id = str(original.get("voice_id") or "")
+    if not voice_id:
+        return {"ok": False, "error": "No original voice saved yet -- nothing to restore to."}
+    ok, error = _write_elevenlabs_fields(
+        voice_id=voice_id, voice_note=str(original.get("voice_note") or ""), enabled=True,
+    )
+    return {"ok": ok, "error": error}
+
+
+def settings_elevenlabs_use_standard() -> dict:
+    """Switches to the standard, always-free Kokoro voice -- just flips
+    enabled off, the voice_id itself is left untouched so switching
+    ElevenLabs back on later doesn't lose it."""
+    ok, error = _write_elevenlabs_fields(enabled=False)
     return {"ok": ok, "error": error}
 
 
@@ -939,6 +1048,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(settings_thumbnail_status())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/elevenlabs/voice/status":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_elevenlabs_voice_status())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
         elif path == "/settings/tailscale/status":
             if not self._authorized():
                 self.send_response(403)
@@ -999,6 +1118,10 @@ class Handler(BaseHTTPRequestHandler):
         "/settings/thumbnail/backend": lambda d: settings_thumbnail_set_backend(str(d.get("backend", "")).strip()),
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),
         "/settings/elevenlabs": lambda d: settings_save_elevenlabs(str(d.get("api_key", "")).strip()),
+        "/settings/elevenlabs/voice/set": lambda d: settings_set_elevenlabs_voice_id(
+            str(d.get("voice_id", "")).strip(), str(d.get("voice_note", "")).strip()),
+        "/settings/elevenlabs/voice/restore": lambda d: settings_elevenlabs_restore_original(),
+        "/settings/elevenlabs/voice/standard": lambda d: settings_elevenlabs_use_standard(),
         "/settings/govee": lambda d: settings_save_govee(str(d.get("api_key", "")).strip()),
         "/settings/nanoleaf/pair": lambda d: settings_nanoleaf_pair(str(d.get("host", "")).strip()),
         "/settings/nanoleaf/connect": lambda d: settings_nanoleaf_connect(

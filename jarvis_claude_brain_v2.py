@@ -55,6 +55,22 @@ def _refresh_voice_if_needed():
     except Exception:
         pass
     try:
+        # CFG is loaded once at import time and kept in memory for the
+        # life of this process -- the settings server changing voice_id
+        # or enabled in backtalk.json on disk (voice-ID switch, restore
+        # original, standard-voice toggle) never reached this already-
+        # running process's own copy of that dict without this. Same
+        # bridge-file pattern as the API key refresh above, just
+        # covering fields that refresh never touched before.
+        import json
+        from backtalk.config import CFG, CONFIG_PATH
+        disk = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        disk_el = disk.get("elevenlabs")
+        if isinstance(disk_el, dict):
+            CFG["elevenlabs"].update(disk_el)
+    except Exception:
+        pass
+    try:
         VOICE_REFRESH_FLAG.unlink()
     except Exception:
         pass

@@ -153,6 +153,7 @@ _JARVIS_SCRIPT_NAMES = (
     "jarvis_remote_chat.py",
     "jarvis_face_window.py",
     "jarvis_mini_bar.py",
+    "jarviscode_app.py",
 )
 
 
@@ -165,23 +166,53 @@ def _quit_jarvis_completely():
     pythonw.exe/python.exe whose command line names one of Jarvis's own
     scripts (including this one) and force-kills it, plus the
     ai-visualizer server (matched by its working directory, since
-    server.py is a generic name shared with other projects)."""
+    server.py is a generic name shared with other projects).
+
+    Reported live as still leaving pythonw.exe processes running after
+    Quit -- two real gaps: JarvisCode (jarviscode_app.py, a separate
+    tool launched from the tray/Start Menu) wasn't in the kill list at
+    all, and this used to be a single fire-and-forget pass with no
+    verification -- a process that ignores its first kill signal (rare,
+    but real on Windows) just silently survived. Now also catches ANY
+    pythonw.exe/python.exe running out of this install (cwd or cmdline
+    naming C:\\AI-Agent) as a fallback net for anything not in the named
+    list, and verifies afterward, retrying once against real stragglers."""
     import psutil
 
     my_pid = psutil.Process().pid
-    for proc in psutil.process_iter(["pid", "name", "cmdline", "cwd"]):
+    install_dir = str(Path(r"C:\AI-Agent")).lower()
+
+    def _find_targets():
+        targets = []
+        for proc in psutil.process_iter(["pid", "name", "cmdline", "cwd"]):
+            try:
+                if proc.pid == my_pid:
+                    continue
+                name = (proc.info.get("name") or "").lower()
+                if name not in ("pythonw.exe", "python.exe"):
+                    continue
+                cmdline = " ".join(proc.info.get("cmdline") or [])
+                cwd = (proc.info.get("cwd") or "")
+                is_jarvis_script = any(s in cmdline for s in _JARVIS_SCRIPT_NAMES)
+                is_visualizer_server = "server.py" in cmdline and "ai-visualizer" in cwd.lower()
+                is_from_install_dir = install_dir in cmdline.lower() or install_dir in cwd.lower()
+                if is_jarvis_script or is_visualizer_server or is_from_install_dir:
+                    targets.append(proc)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        return targets
+
+    for proc in _find_targets():
         try:
-            if proc.pid == my_pid:
-                continue
-            name = (proc.info.get("name") or "").lower()
-            if name not in ("pythonw.exe", "python.exe"):
-                continue
-            cmdline = " ".join(proc.info.get("cmdline") or [])
-            cwd = proc.info.get("cwd") or ""
-            is_jarvis_script = any(s in cmdline for s in _JARVIS_SCRIPT_NAMES)
-            is_visualizer_server = "server.py" in cmdline and "ai-visualizer" in cwd.lower()
-            if is_jarvis_script or is_visualizer_server:
-                proc.kill()
+            proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    time.sleep(0.5)
+
+    for proc in _find_targets():
+        try:
+            proc.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 

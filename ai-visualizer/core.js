@@ -374,6 +374,22 @@ const AV = (() => {
           how-to: sign up at elevenlabs.io, open your profile (top
           right) &gt; API Keys, create/copy a key, paste it above and
           Save. Takes effect automatically, no restart needed.</div>
+        <div id="elevenlabsVoiceStatus" class="status" style="margin-top:10px"></div>
+        <div class="row">
+          <input id="elevenlabsVoiceIdInput" placeholder="ElevenLabs Voice ID">
+          <button id="elevenlabsVoiceIdSave">Set Voice</button>
+        </div>
+        <div class="row">
+          <button id="elevenlabsRestoreOriginal" style="flex:1">Restore My Original Voice</button>
+          <button id="elevenlabsUseStandard" style="flex:1">Use Standard Voice</button>
+        </div>
+        <div class="hint">Voice ID comes from elevenlabs.io -- pick a
+          voice in their Voice Library and copy its ID. "Restore My
+          Original Voice" always goes back to the ElevenLabs voice
+          Jarvis started with, no matter how many times you've changed
+          it since. "Use Standard Voice" switches to the free built-in
+          voice without losing your ElevenLabs voice ID -- switching
+          back to ElevenLabs later remembers it.</div>
       </section>
       <section>
         <h4>Nanoleaf</h4>
@@ -726,6 +742,7 @@ const AV = (() => {
       refreshAi();
       refreshThumbnail();
       refreshTailscale();
+      refreshElevenlabsVoice();
       try {
         const r = await fetch(api("/settings/status"), authed({ method: "GET" }));
         const data = await r.json();
@@ -782,6 +799,61 @@ const AV = (() => {
         if (data.ok) { input.value = ""; setStatus(statusEl, "✓ saved -- premium voice active", "ok"); }
         else setStatus(statusEl, data.error || "save failed", "err");
       } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+    });
+
+    async function refreshElevenlabsVoice() {
+      const statusEl = panel.querySelector("#elevenlabsVoiceStatus");
+      try {
+        const r = await fetch(api("/settings/elevenlabs/voice/status"), authed({ method: "GET" }));
+        const data = await r.json();
+        const label = data.voice_note ? `${data.voice_note} (${data.voice_id})` : (data.voice_id || "none set");
+        if (data.enabled) {
+          setStatus(statusEl, `✓ active: ${label}`, "ok");
+        } else {
+          setStatus(statusEl, `Standard voice active -- saved ElevenLabs voice: ${label}`, "");
+        }
+      } catch (e) {
+        setStatus(statusEl, "server unreachable", "err");
+      }
+    }
+
+    panel.querySelector("#elevenlabsVoiceIdSave").addEventListener("click", async () => {
+      const input = panel.querySelector("#elevenlabsVoiceIdInput");
+      const value = input.value.trim();
+      const statusEl = panel.querySelector("#elevenlabsVoiceStatus");
+      if (!value) return;
+      setStatus(statusEl, "saving...");
+      try {
+        const r = await fetch(api("/settings/elevenlabs/voice/set"), authed({
+          method: "POST", body: JSON.stringify({ voice_id: value }),
+        }));
+        const data = await r.json();
+        if (data.ok) input.value = "";
+        else setStatus(statusEl, data.error || "save failed", "err");
+      } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+      await refreshElevenlabsVoice();
+    });
+
+    panel.querySelector("#elevenlabsRestoreOriginal").addEventListener("click", async () => {
+      const statusEl = panel.querySelector("#elevenlabsVoiceStatus");
+      setStatus(statusEl, "restoring...");
+      try {
+        const r = await fetch(api("/settings/elevenlabs/voice/restore"), authed({ method: "POST", body: "{}" }));
+        const data = await r.json();
+        if (!data.ok) setStatus(statusEl, data.error || "restore failed", "err");
+      } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+      await refreshElevenlabsVoice();
+    });
+
+    panel.querySelector("#elevenlabsUseStandard").addEventListener("click", async () => {
+      const statusEl = panel.querySelector("#elevenlabsVoiceStatus");
+      setStatus(statusEl, "switching...");
+      try {
+        const r = await fetch(api("/settings/elevenlabs/voice/standard"), authed({ method: "POST", body: "{}" }));
+        const data = await r.json();
+        if (!data.ok) setStatus(statusEl, data.error || "switch failed", "err");
+      } catch (e) { setStatus(statusEl, "connection failed", "err"); }
+      await refreshElevenlabsVoice();
     });
 
     panel.querySelector("#goveeSave").addEventListener("click", async () => {
