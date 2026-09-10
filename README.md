@@ -292,11 +292,14 @@ New versions get tagged and published as installer Releases, and every
 push to `main` is a real, working update — this is not a "check in
 occasionally" project.
 
-- **Just ask him:** "Jarvis, update yourself" pulls the latest code
-  straight from this repo and restarts — the normal way, no installer
-  needed.
+- **Just ask him:** "Jarvis, update yourself" — on a git checkout (this
+  dev repo), pulls straight from `main` and restarts; on a normal
+  install (`JarvisSetup.exe`), downloads and silently runs the latest
+  installer for you. Either way, no manual steps.
 - **Manually, from a Release:** re-run the latest `JarvisSetup.exe`.
-- **Manually, from git:** `git pull` inside the installed folder.
+- **Manually, from git:** `git pull` (or `update.bat`) inside the
+  installed folder — only works on an actual git checkout, since a
+  normal install has no `.git` folder or git dependency at all.
 
 Either way, your own memory, API keys, and settings live outside the
 tracked files and are never touched by an update.

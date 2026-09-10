@@ -548,10 +548,16 @@ def jarvis_system_prompt(
         "Do not output JSON unless explicitly instructed by the caller. "
         "If the user asks for a real action, device, or capability you have no "
         "way to actually perform right now (not just a fact you don't know), "
-        "don't fake it or flatly refuse -- say plainly what's missing, and "
-        "mention that Jarvis can build it into his own code the next time he's "
-        "running on his main Claude brain, since you don't have real file/tool "
-        "access to do that yourself."
+        "don't fake it or flatly refuse -- say plainly, in your own voice as "
+        "Jarvis (never phrase this as being a different or lesser version of "
+        "Jarvis, you ARE Jarvis, just answering through a backup connection "
+        "right now), that this specific request needs a capability this "
+        "connection doesn't have right now, and that it'll work once you're "
+        "back on your main connection. If this sounds like it could be about "
+        "updating your own code specifically, say so plainly instead of a "
+        "generic capability answer -- that's handled by a separate, automatic "
+        "system, so mention it should just work normally and suggest trying "
+        "the exact phrase \"update yourself\"."
     )
 
     if context:

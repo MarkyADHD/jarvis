@@ -101,6 +101,22 @@ def _norm(text):
     return str(text or "").strip().lower()
 
 
+# Same wake-word variants jarvis_app.py's own WAKE_WORDS covers (Whisper
+# mishears "Jarvis" a lot) -- stripped defensively here rather than
+# assumed already gone by the time this module sees the command. Live-
+# confirmed gap: "jarvis update" didn't match is_update_request() even
+# after broadening it to catch a bare "update" alone, because the wake
+# word was still attached to the string being checked.
+_WAKE_WORDS = ("jarvis", "jervis", "javis", "javas", "jarvus", "travis", "charvis", "service")
+
+
+def _strip_wake(text):
+    words = text.split()
+    if words and words[0].strip(",.!?") in _WAKE_WORDS:
+        return " ".join(words[1:]).strip()
+    return text
+
+
 def _local_version():
     if not VERSION_FILE.exists():
         return ""
@@ -188,11 +204,17 @@ def _reply(text):
 
 
 def is_update_request(command):
-    c = _norm(command)
+    c = _strip_wake(_norm(command))
 
     exact_phrases = {
         "check for updates", "check for an update", "jarvis check for updates",
         "any updates", "do you have any updates",
+        # Reported still slipping through even after the broader net
+        # below: a bare "update" on its own (the shortest, most natural
+        # phrasing there is) never matched anything, since every rule
+        # so far required "update" to appear WITH something else.
+        "update", "updates", "update please", "please update",
+        "are you up to date", "are you updated",
     }
     if c in exact_phrases:
         return True
@@ -213,6 +235,10 @@ def is_update_request(command):
         "run your update", "do the update", "start the update",
         "run the bat file", "run the update bat", "run update.bat",
         "update.bat", "update bat file", "the update bat",
+        "grab the update", "grab the latest update", "get the update",
+        "get the latest update", "install the update", "download the update",
+        "get the latest version", "you need an update", "you're out of date",
+        "you need updating", "need to update",
     ]
     if any(phrase in c for phrase in substring_phrases):
         return True
