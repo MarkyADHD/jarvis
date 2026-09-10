@@ -99,13 +99,73 @@ def enabled() -> bool:
     return bool(load_settings().get("enabled", True))
 
 
+_PATH_REFRESHED = False
+
+
+def _refresh_path_from_registry() -> None:
+    """Same fix jarvis_provider_router_v1 got for every other provider --
+    this process's PATH is snapshotted once at startup and never updates
+    again no matter what gets installed afterward. Claude Code itself
+    (the default provider) never got this fix, so a Claude Code install/
+    reinstall/update that lands in a non-default location while Jarvis is
+    already running would silently keep reporting "not found" forever,
+    same bug class as the Codex one, just left unpatched on the provider
+    most likely to matter. Runs once per process."""
+    global _PATH_REFRESHED
+    if _PATH_REFRESHED:
+        return
+    _PATH_REFRESHED = True
+
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as k:
+            machine_path, _ = winreg.QueryValueEx(k, "Path")
+    except Exception:
+        machine_path = ""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            user_path, _ = winreg.QueryValueEx(k, "Path")
+    except Exception:
+        user_path = ""
+
+    fresh = ";".join(p for p in (machine_path, user_path) if p)
+    if not fresh:
+        return
+
+    current = os.environ.get("PATH", "")
+    os.environ["PATH"] = fresh + (";" + current if current else "")
+
+
+def _where(name: str) -> Optional[str]:
+    """Windows' own `where` -- resolves PATH AND the "App Paths" registry
+    key, which shutil.which() never checks."""
+    try:
+        proc = subprocess.run(
+            ["where", name], capture_output=True, text=True, timeout=5,
+            shell=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if proc.returncode != 0:
+            return None
+        first_line = proc.stdout.strip().splitlines()[0].strip() if proc.stdout.strip() else ""
+        return first_line if first_line and Path(first_line).exists() else None
+    except Exception:
+        return None
+
+
 def _candidate_cli_paths() -> Iterable[Path]:
+    _refresh_path_from_registry()
+
     values = []
 
     for name in ("claude.cmd", "claude.exe", "claude"):
         found = shutil.which(name)
         if found:
             values.append(Path(found))
+
+    where_found = _where("claude")
+    if where_found:
+        values.append(Path(where_found))
 
     appdata = os.environ.get("APPDATA")
     if appdata:
