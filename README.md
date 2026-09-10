@@ -16,11 +16,13 @@ it when you ask him to. Fix a bug, add a feature, tune his
 personality: just tell him, the same way you'd ask a developer.
 
 His "brain" is genuine reasoning and real tool access, not a scripted
-chatbot with a fixed set of canned replies — and you get to pick what
-powers it: your own [Claude](https://claude.com) account, Gemini,
-Codex, and others, or a completely free local AI that needs no account
-at all. See [Run on a different brain](#run-on-a-different-brain)
-below.
+chatbot with a fixed set of canned replies. He only runs on two brains,
+by design: **Claude Code** (your own Claude account — the $20/mo Pro
+subscription is plenty, and it's light enough to run in the background
+without stressing your PC), or a **completely free local model that
+runs directly on your own PC** with no account and no internet needed.
+See [Run on Claude, or run entirely local](#run-on-claude-or-run-entirely-local)
+below, including recommended specs for the local model.
 
 ## What can he actually do?
 
@@ -159,8 +161,7 @@ below.
   Edit can create and modify files; Agent can also run real commands
   (install dependencies, run tests, fix what breaks) and keep working
   multi-step until the task's done
-- Uses the exact same provider system as the rest of Jarvis — pick
-  Claude, Gemini, the free local brain, or any other connected provider
+- Same Claude-or-local-Qwen choice as the rest of Jarvis — pick either
   right from JarvisCode's own toolbar, independent of whatever normal
   Jarvis is currently set to
 - Remembers the actual conversation — switch providers mid-chat and the

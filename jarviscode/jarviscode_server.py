@@ -68,6 +68,15 @@ MODE_TOOLS = {
 }
 MODE_MAX_TURNS = {"ask": 8, "edit": 6, "agent": 20}
 
+# JarvisCode's own user-facing choice, deliberately narrowed to match
+# Jarvis's voice/HUD brain picker (see CLAUDE.md's "Known quirks" entry
+# on this) -- the full jarvis_provider_router_v1.PROVIDERS dict still has
+# Gemini/Codex/Kiro/Minimax/OpenCode adapters other tooling can use, but
+# offering all of them here was the "still a bit weird" clutter reported:
+# most were never installed/configured, so the dropdown was mostly dead
+# options leading to "not ready" errors.
+JARVISCODE_PROVIDERS = ("claude", "ollama")
+
 
 def _read_json(path, default):
     if not path.exists():
@@ -90,6 +99,12 @@ def _session():
     if not isinstance(data, dict):
         data = {}
     data.setdefault("provider", router.get_active_provider())
+    if data.get("provider") not in JARVISCODE_PROVIDERS:
+        # A session saved before the provider list was trimmed (or one
+        # holding a provider only the voice assistant's own router still
+        # knows about) shouldn't get stuck offering a dropdown option
+        # that no longer exists here.
+        data["provider"] = "claude"
     data.setdefault("model", None)
     data.setdefault("effort", "medium")
     data.setdefault("project_root", "")
@@ -318,8 +333,9 @@ class Handler(BaseHTTPRequestHandler):
                 sess = _session()
                 self._send_json({
                     "providers": [
-                        {"id": pid, "label": m["label"], "free": m["free"], "kind": m["kind"]}
-                        for pid, m in router.PROVIDERS.items()
+                        {"id": pid, "label": router.PROVIDERS[pid]["label"],
+                         "free": router.PROVIDERS[pid]["free"], "kind": router.PROVIDERS[pid]["kind"]}
+                        for pid in JARVISCODE_PROVIDERS
                     ],
                     "active_provider": sess["provider"],
                     "active_model": sess["model"],
@@ -333,6 +349,9 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/models":
                 provider_id = (qs.get("provider") or [""])[0]
+                if provider_id not in JARVISCODE_PROVIDERS:
+                    self._send_json({"error": "unknown provider"}, 400)
+                    return
                 self._send_json({
                     "models": router.list_models(provider_id),
                     "effort_levels": router.list_effort_levels(provider_id),
@@ -341,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/provider_ready":
                 provider_id = (qs.get("provider") or [""])[0]
-                meta = router.PROVIDERS.get(provider_id)
+                meta = router.PROVIDERS.get(provider_id) if provider_id in JARVISCODE_PROVIDERS else None
                 if not meta:
                     self._send_json({"error": "unknown provider"}, 400)
                     return
@@ -435,7 +454,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/set_provider":
                 sess = _session()
                 provider_id = str(body.get("provider", "")).strip()
-                meta = router.PROVIDERS.get(provider_id)
+                meta = router.PROVIDERS.get(provider_id) if provider_id in JARVISCODE_PROVIDERS else None
                 if not meta:
                     self._send_json({"ok": False, "error": "unknown provider"}, 400)
                     return
