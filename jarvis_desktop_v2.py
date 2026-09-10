@@ -642,13 +642,85 @@ def open_or_focus_app(app_name, wait_seconds=2.0):
     }
 
 
+BROWSER_GENERIC_NAMES = {
+    "browser", "web browser", "internet browser", "default browser",
+    "my browser", "the browser", "a browser",
+}
+
+
+def _default_browser_exe():
+    """Resolves the user's ACTUAL default browser's exe path from the
+    registry -- the same mechanism Windows itself uses to decide what
+    opens a http:// link -- rather than guessing or hardcoding one
+    specific browser. Works for Chrome, Edge, Firefox, Brave, or
+    anything else set as default, not just the browsers already known
+    by name in KNOWN_APP_EXES/APP_ALIASES above."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
+        ) as k:
+            prog_id, _ = winreg.QueryValueEx(k, "ProgId")
+    except Exception:
+        return None
+
+    if not prog_id:
+        return None
+
+    for hive, base in (
+        (winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{prog_id}\\shell\\open\\command"),
+        (winreg.HKEY_CLASSES_ROOT, f"{prog_id}\\shell\\open\\command"),
+    ):
+        try:
+            with winreg.OpenKey(hive, base) as k:
+                command_line, _ = winreg.QueryValueEx(k, "")
+        except Exception:
+            continue
+
+        match = re.match(r'\s*"([^"]+)"', command_line) or re.match(r"\s*(\S+)", command_line)
+        if not match:
+            continue
+
+        exe_path = match.group(1)
+        if Path(exe_path).exists():
+            return exe_path
+
+    return None
+
+
+def open_default_browser():
+    exe_path = _default_browser_exe()
+
+    if not exe_path:
+        return {
+            "ok": False,
+            "already_open": False,
+            "message": "I couldn't figure out which browser is set as your default.",
+        }
+
+    browser_label = Path(exe_path).stem
+
+    if focus_existing_app(browser_label):
+        return {"ok": True, "already_open": True, "message": "Your browser is already open. Bringing it forward."}
+
+    if start_process_silent([exe_path]):
+        return {"ok": True, "already_open": False, "message": "Opening your browser."}
+
+    return {"ok": False, "already_open": False, "message": "I found your default browser but couldn't start it."}
+
+
 def open_app_plan(command, spoken_name="Sir"):
     app_name = parse_open_app(command)
 
     if not app_name:
         return None
 
-    result = open_or_focus_app(app_name)
+    if normalise(app_name) in BROWSER_GENERIC_NAMES:
+        result = open_default_browser()
+    else:
+        result = open_or_focus_app(app_name)
     message = result.get("message", "")
 
     return {
