@@ -590,7 +590,27 @@ def _run_ollama(prompt, system_prompt, timeout):
         r = requests.post(
             f"{OLLAMA_BASE}/api/chat",
             json={"model": model, "messages": messages, "stream": False,
-                  "keep_alive": OLLAMA_KEEP_ALIVE},
+                  "keep_alive": OLLAMA_KEEP_ALIVE,
+                  # qwen3:8b is a "thinking" model -- confirmed live, without
+                  # this it sometimes spends its entire reply writing out a
+                  # long internal reasoning block and leaves "content" (the
+                  # actual answer) completely empty, which read as "the
+                  # backup brain is broken" and silently fell back to Claude
+                  # every time it happened. think:false skips that reasoning
+                  # step entirely: confirmed live, a real reply came back in
+                  # ~0.27s instead of several seconds of hidden "thinking"
+                  # text, and content is never empty anymore. This is also
+                  # most of the actual "make qwen feel fast" fix -- the
+                  # reasoning step, not raw model speed, was the slow part.
+                  "think": False,
+                  # num_gpu=-1 forces every layer onto the GPU instead of Ollama's
+                  # own heuristic sometimes leaving some on CPU; num_predict caps
+                  # generation length so a voice reply can't ramble past what
+                  # actually needs speaking, which is most of the latency on a
+                  # local model. num_ctx is left at Ollama's default since Jarvis's
+                  # prompts here are short and a bigger context window only slows
+                  # things down without adding anything.
+                  "options": {"num_gpu": -1, "num_predict": 400}},
             timeout=timeout,
         )
         r.raise_for_status()
@@ -598,7 +618,14 @@ def _run_ollama(prompt, system_prompt, timeout):
     except Exception as e:
         return {"ok": False, "error": f"Ollama call failed ({model}): {e}", "result": ""}
 
-    result = str((data.get("message") or {}).get("content", "") or "").strip()
+    message = data.get("message") or {}
+    result = str(message.get("content", "") or "").strip()
+    if not result:
+        # Last-ditch salvage: some models still put real text in "thinking"
+        # even with think:false if the request omits it (older Ollama
+        # servers ignore unknown fields silently) -- better to speak that
+        # than to bounce to Claude over what's actually a working local reply.
+        result = str(message.get("thinking", "") or "").strip()
     return {
         "ok": bool(result),
         "result": result,
@@ -960,6 +987,18 @@ BRAIN_INFO_QUERIES = {
     "show available brains",
 }
 
+# Real reported bug: "what model are you running on" (a completely
+# natural phrasing) never matched the exact-string set above, so it fell
+# through to the normal chat brain, which just answered as whatever
+# model was actually live -- confusing when the active provider had
+# switched but the user asked in slightly different words than the exact
+# set covers. Loose, substring-based on purpose (unlike the switch
+# commands above, "what model/brain ... running on/using" has no
+# realistic collision with any other fast-path handler).
+_BRAIN_INFO_RE = re.compile(
+    r"\bwhat (model|brain) (are you|is jarvis|do you) (using|running on)\b"
+)
+
 BRAIN_SWITCH_BACKUP_QUERIES = {
     "switch to backup brain",
     "use backup brain",
@@ -994,8 +1033,8 @@ def is_brain_request(command):
     Jarvis persona either way. Extra words don't match (exact phrases
     only), same as every other fast-path handler."""
     c = _strip_wake(command)
-    return (c in BRAIN_INFO_QUERIES or c in BRAIN_SWITCH_BACKUP_QUERIES
-            or c in BRAIN_RESTORE_CLAUDE_QUERIES)
+    return (c in BRAIN_INFO_QUERIES or bool(_BRAIN_INFO_RE.search(c))
+            or c in BRAIN_SWITCH_BACKUP_QUERIES or c in BRAIN_RESTORE_CLAUDE_QUERIES)
 
 
 def brain_command_fast(command, spoken_name="Sir", app_module=None):
@@ -1029,7 +1068,7 @@ def brain_command_fast(command, spoken_name="Sir", app_module=None):
             )
         return _reply(f"I'm already on Claude, {spoken_name} -- that's my primary brain.")
 
-    if c in BRAIN_INFO_QUERIES:
+    if c in BRAIN_INFO_QUERIES or _BRAIN_INFO_RE.search(c):
         provider_id = get_active_provider()
         if provider_id == "ollama":
             return _reply(

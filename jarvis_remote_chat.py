@@ -192,7 +192,19 @@ def settings_ai_status() -> dict:
     return {"active_provider": provider_router.get_active_provider()}
 
 
+BRAIN_SWITCH_ANNOUNCE_FLAG = Path(r"C:\AI-Agent\.brain_switch_announce")
+
+
 def settings_ai_switch(provider_id: str) -> dict:
+    """Confirms out loud when the switch actually lands, not just a
+    silent HUD status change -- real reported gap: the dropdown wrote the
+    setting fine, but nothing told the user Jarvis actually heard it,
+    and a failed switch (Ollama not ready) used to look identical to a
+    successful one from the HUD's point of view. Same cross-process
+    bridge pattern as COMMUNICATION_MODE_FLAG: this process (remote_chat)
+    can't call app.speak() directly, so it drops the target provider id
+    in a flag file that jarvis_app_v2.py's own watcher picks up and
+    speaks from."""
     provider_id = str(provider_id or "").strip().lower()
     if provider_id not in ("claude", "ollama"):
         return {"ok": False, "error": "Only claude or ollama can be picked here.",
@@ -200,6 +212,10 @@ def settings_ai_switch(provider_id: str) -> dict:
 
     if provider_id == "claude":
         provider_router.set_active_provider_override("")
+        try:
+            BRAIN_SWITCH_ANNOUNCE_FLAG.write_text("claude", encoding="utf-8")
+        except Exception:
+            pass
         return {"ok": True}
 
     ready, reason = provider_router.is_ready("ollama")
@@ -207,6 +223,10 @@ def settings_ai_switch(provider_id: str) -> dict:
         return {"ok": False, "error": reason, "active_provider": provider_router.get_active_provider()}
 
     provider_router.set_active_provider_override("ollama")
+    try:
+        BRAIN_SWITCH_ANNOUNCE_FLAG.write_text("ollama", encoding="utf-8")
+    except Exception:
+        pass
     return {"ok": True}
 
 

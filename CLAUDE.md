@@ -245,3 +245,73 @@ held when the vault was created lives in the vault's
 `05 - Archive\Old Memory`, but jarvis_memory_v2.py keeps writing to the
 original E:\JarvisMemory files during normal operation — nothing in the
 current setup makes the vault a live mirror of that.
+
+## Known quirks & hard-won lessons
+
+Real findings from live debugging, kept here so JarvisCode and every
+future session inherit them instead of re-discovering them the hard way:
+
+- **The ~10 pythonw.exe processes are normal, not a bug.** Every
+  windowless script Jarvis launches via the venv's `pythonw.exe`
+  produces two OS processes: a near-idle launcher stub (~7MB, 0% CPU)
+  plus the real worker underneath it. Jarvis runs 5 such scripts
+  (`jarvis_app_v2.py`, `jarvis_face_window.py`, `jarvis_remote_chat.py`,
+  `jarvis_mini_bar.py`, ai-visualizer's `server.py`), so 5×2=10.
+  Confirmed via `Get-CimInstance Win32_Process` parent/child chains and
+  command lines. Don't build another dedup/watchdog mechanism for this
+  — one was tried twice (`jarvis_process_dedup_v1.py`, now disabled)
+  and reproducibly crashed the live process by killing the wrong half
+  of a legitimate stub/child pair mid-GPU-operation.
+- **qwen3:8b (the local backup brain, via Ollama) needs `"think": false`
+  in the `/api/chat` request.** Without it, this reasoning model
+  sometimes spends its entire generation on an internal `thinking`
+  block and returns a genuinely empty `content` field — silently read
+  as "the backup brain is broken" and fell back to Claude every time.
+  With `think: false`: real replies in ~0.2-2s instead of several
+  seconds of hidden reasoning text, and content is never empty. See
+  `jarvis_provider_router_v1.py`'s `_run_ollama()`.
+- **Search-grounded answers must go through the tool-having warm brain,
+  not a tool-less CLI call.** `jarvis_app_v2.py`'s `grounded_web_answer_v3`
+  used to hand pre-fetched web research straight to a tool-less Claude
+  CLI call (`claude_v1.answer_grounded`), which had no way to verify or
+  reject bad research and would repeat it verbatim — the confirmed
+  cause of a live "unprompted Bitcoin price" and "unprompted 'who is
+  MarkyADHD'" repetition bug. Fixed by trying the warm, tool-having
+  brain (real WebSearch access) first, handing the pre-fetched research
+  over as a starting point rather than a mandate.
+- **The AI-brain "choice" is deliberately just Claude and local Qwen3:8b
+  now**, not the full multi-provider list (Gemini/Codex/Kiro/Minimax/
+  OpenCode) that used to be user-facing. Those adapters still exist in
+  `jarvis_provider_router_v1.py` (JarvisCode still uses the full list),
+  but Jarvis's own voice/HUD surface was deliberately narrowed after the
+  wider choice caused real confusion — a lesser fallback brain
+  occasionally answering as though it were a different, worse Jarvis.
+  Claude is the default; Qwen3:8b is the one designated backup, reached
+  manually ("switch to Qwen"/"switch to Claude", or the HUD's chat-bar
+  dropdown) or automatically when Claude comes back rate-limited/out of
+  quota (`jarvis_provider_router_v1.ask_active_brain`'s `QUOTA_ERROR_RE`
+  match). If asked to add another provider back to Jarvis's own
+  user-facing choice, treat that as a real, deliberate ask, not an
+  oversight to "fix" on your own judgment.
+- **Cross-process settings changes need a flag-file bridge, not a
+  shared in-memory variable.** `jarvis_app_v2.py` (the main app) and
+  `jarvis_remote_chat.py` (the HUD's backend) are separate OS processes
+  — a setting saved by one (a `jarvis_settings_v1`/provider-override
+  write) is invisible to the other's already-running memory until it
+  re-reads the file. The established pattern (`VOICE_REFRESH_FLAG`,
+  `COMMUNICATION_MODE_FLAG`, `BRAIN_SWITCH_ANNOUNCE_FLAG`) is: the
+  writer touches a small flag file, a background watcher thread in the
+  process that actually needs to react polls for it every couple
+  seconds. When claiming a flag to act on it, rename-then-read rather
+  than read-then-delete — a plain exists/read/unlink sequence let a
+  spoken confirmation fire twice in a row on a live test.
+- **Never call `jarvis_claude_brain_v2.ask_sync()` (or anything that
+  reaches the shared warm-brain session) from a standalone test/debug
+  script while the live Jarvis process might be running.** A prior
+  session traced a real cross-contamination incident (the live
+  conversation started referencing "the bitcoin price" unprompted)
+  back to exactly this. Test provider logic that doesn't touch the
+  shared session (`jarvis_provider_router_v1.run_provider("ollama", ...)`
+  directly, plain HTTP calls to local Ollama, `get_active_provider()`,
+  etc.) freely — it's specifically the shared Claude warm session that's
+  off-limits for casual scripted testing.

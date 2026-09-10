@@ -175,32 +175,40 @@ below.
   rollback reverts uncommitted changes if something goes wrong — only
   available for projects that are already a git repo
 
-### Run on a different brain
-- **Claude isn't required anymore.** Jarvis ships with a genuinely free
-  local AI brain installed automatically during setup (no account, no
-  card, runs entirely on your own PC) — if you skip Claude sign-in, or
-  don't have a subscription, Jarvis just works on that instead, with
-  zero extra steps.
-- Claude is still the preferred default whenever it's actually
-  installed and signed in — existing users see no change at all.
-- Say "switch to gemini" (or Qwen, Codex, Kiro, Minimax, OpenCode, or
-  "switch to ollama"/"free local ai") and Jarvis installs whatever's
-  needed automatically and starts answering through it instead — no
-  reinstalling Jarvis itself.
-- Say "download qwen locally" for a second, general-purpose local model
-  pulled straight into that same free local brain (~5GB, no GPU
-  required — runs fine on CPU, just slower than with one).
-- "What model are you using" / "list available models" any time.
-- **First launch:** a one-time welcome window lets you pick Claude,
-  Gemini, or the free local brain up front, with real hardware detection
-  (GPU/VRAM/RAM) so the local option's speed is set right the first
-  time, not guessed at. Skippable, and never shown again once you've
-  picked (or on any machine that already had Claude installed before
-  this existed — nothing changes for you).
-- Only affects general questions and self-editing — Spotify, lights,
-  Twitch, thumbnails, and every other control feature stay exactly as
-  they are no matter which brain is active, since none of them are
-  actually implemented as AI tool calls in the first place
+### Run on Claude, or run entirely local
+Jarvis works two ways — pick whichever fits you, or set up both and
+switch any time:
+
+- **Claude Code** — the sharpest, most capable brain, and the one
+  Jarvis is built around. Needs a Claude subscription; the $20/mo Pro
+  tier is genuinely enough, no need for anything higher.
+- **Qwen3:8b, running locally via [Ollama](https://ollama.com)** — no
+  subscription, no account, nothing leaves your PC. Set up
+  automatically during install. Noticeably less capable than Claude on
+  hard reasoning/coding tasks, but a real, usable brain for
+  conversation, questions, and everyday commands — and a genuinely free
+  way to run Jarvis end to end.
+
+Both installed side by side, switch whenever:
+- Say **"switch to backup brain"** / **"switch to Qwen"** to move to
+  the local model on purpose (handy if you want Claude off your GPU
+  while gaming, say), and **"switch back to Claude"** to return.
+- A dropdown on the right of the HUD's chat bar does the same thing
+  with a click, and Jarvis confirms out loud which brain actually
+  answered.
+- If Claude ever comes back rate-limited or out of quota mid-
+  conversation, Jarvis switches to the local Qwen model **automatically**
+  and tells you it happened — a real conversation never just dies
+  because of a quota wall.
+- "What model are you running on" any time to check.
+
+**Recommended specs for the local Qwen3:8b brain:**
+- An NVIDIA GPU with **6GB+ VRAM** for good, responsive speed (the
+  model itself is a ~5.2GB download at the quantization Jarvis pulls).
+- No GPU, or less VRAM than that? It still runs on CPU — you'll want
+  **16GB+ of system RAM** free, and replies will be noticeably slower.
+- Either way, nothing beyond what `ollama pull qwen3:8b` needs — Jarvis's
+  own setup handles the pull for you.
 
 ### Get you a ride
 - "Get me an Uber to the airport" opens a real Uber ride request with
@@ -244,17 +252,16 @@ than telling you he can't.
 
 ## What you'll need
 
-- **Nothing paid, actually.** Jarvis runs on a genuinely free local AI
-  brain out of the box (installed automatically, no account needed) if
-  you skip Claude sign-in during setup or don't have a subscription.
-- Optional: a **[Claude](https://claude.com) Pro subscription or
-  higher** (Pro, Max, Team, or Enterprise — $17-20/mo on Pro, billed to
-  your own account, never shared) if you want Claude specifically as
-  the brain — it's the most capable option and Jarvis's own preferred
-  default when it's available, but it's no longer required. Switch
-  between Claude, Gemini, and other providers any time by saying
-  "switch to gemini" (or whichever), or just stick with the free local
-  option.
+- **A brain — pick one (or both):**
+  - A **[Claude](https://claude.com) Pro subscription or higher**
+    ($20/mo on Pro is genuinely enough, billed to your own account,
+    never shared), for the sharpest, most capable version of Jarvis, or
+  - **Nothing paid at all** — Qwen3:8b via Ollama runs entirely on your
+    own PC, installed automatically during setup, no account needed.
+    See the recommended specs above for how well it'll run on your
+    hardware.
+  - Set up both and switch between them any time — say "switch to
+    Qwen"/"switch to Claude", or use the dropdown on the HUD.
 - Windows 10/11
 - A microphone and speakers (or headphones)
 - Optional: Spotify, Nanoleaf, Philips Hue, Elgato Key Light, or

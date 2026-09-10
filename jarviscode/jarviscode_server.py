@@ -556,6 +556,31 @@ class Handler(BaseHTTPRequestHandler):
                 cwd=Path(root) if root else None,
                 timeout=600,
             )
+
+            # Same quota-fallback jarvis_app_v2.py's voice path already
+            # has (router.ask_active_brain) -- JarvisCode called
+            # router.run_provider directly instead, which skipped it
+            # entirely, so a rate-limited Claude just errored out here
+            # instead of falling back like the voice assistant does. Ask
+            # mode only: Edit/Agent need real tool access (file edits,
+            # multi-turn), which the local Qwen fallback doesn't have
+            # here (see the "only supports Ask mode" branch below) -- a
+            # tool-less retry pretending to be Agent mode would be worse
+            # than a clear error telling the user to wait or switch modes.
+            if (not result.get("ok") and mode == "ask"
+                    and router.QUOTA_ERROR_RE.search(str(result.get("error", "")))):
+                backup = router.run_provider(
+                    "ollama", prompt, system_prompt=JARVISCODE_SYSTEM_PROMPT, timeout=120,
+                )
+                if backup.get("ok") and backup.get("result"):
+                    result = {
+                        "ok": True,
+                        "error": "",
+                        "result": (
+                            "[Claude is out of quota right now -- answered on the "
+                            "local Qwen model instead]\n\n" + str(backup["result"]).strip()
+                        ),
+                    }
         else:
             # Non-Claude providers don't have a confirmed tool-scoping
             # mechanism wired through this router yet -- honest about

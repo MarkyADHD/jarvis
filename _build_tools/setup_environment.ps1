@@ -417,6 +417,31 @@ if ($tailscaleExe) {
 
 Say ""
 Say "===================================================="
+Say "  Which brain(s) do you want Jarvis to run on?"
+Say "===================================================="
+Say ""
+Say "  1) Claude Code only  -- the sharpest brain, needs a Claude"
+Say "     subscription (the `$20/mo Pro tier is genuinely enough)."
+Say "  2) Qwen3:8b only     -- runs entirely on your own PC via"
+Say "     Ollama, free, no account needed. Less capable than Claude"
+Say "     but a real, usable brain. See the README for recommended"
+Say "     specs (a 6GB+ VRAM GPU for good speed, or 16GB+ RAM on CPU)."
+Say "  3) Both              -- set up both and switch between them"
+Say "     any time by saying 'switch to Claude'/'switch to Qwen', or"
+Say "     from the dropdown on the HUD. Jarvis also auto-switches to"
+Say "     Qwen if Claude ever comes back rate-limited or out of quota."
+Say ""
+$brainChoiceRaw = Read-Host "Enter 1, 2, or 3 (press Enter for Both)"
+$brainChoice = switch ($brainChoiceRaw.Trim()) {
+    "1" { "claude" }
+    "2" { "qwen" }
+    "3" { "both" }
+    default { "both" }
+}
+Say "Setting up: $brainChoice"
+
+Say ""
+Say "===================================================="
 Say "  JarvisVision + backup brain -- lets Jarvis see your"
 Say "  screen and keeps him talking if Claude runs out of quota"
 Say "===================================================="
@@ -458,13 +483,21 @@ if ($ollamaExe) {
         Write-Host "Install it yourself later by running 'ollama pull qwen2.5vl:7b'." -ForegroundColor Yellow
     }
 
-    Say "Pulling the backup brain model (qwen3:8b) -- another real download, please be patient..."
-    try {
-        & $ollamaExe.Source pull qwen3:8b
-        Say "Backup brain is ready. If Claude ever runs out of quota, Jarvis switches to this automatically."
-    } catch {
-        Write-Host "Could not pull the backup brain model automatically -- skipping, this is optional." -ForegroundColor Yellow
-        Write-Host "Install it yourself later by running 'ollama pull qwen3:8b'." -ForegroundColor Yellow
+    if ($brainChoice -eq "qwen" -or $brainChoice -eq "both") {
+        Say "Pulling the Qwen brain model (qwen3:8b) -- another real download, please be patient..."
+        try {
+            & $ollamaExe.Source pull qwen3:8b
+            if ($brainChoice -eq "qwen") {
+                Say "Qwen is ready -- Jarvis will run on it."
+            } else {
+                Say "Qwen is ready as the backup brain. If Claude ever runs out of quota, Jarvis switches to this automatically."
+            }
+        } catch {
+            Write-Host "Could not pull the Qwen model automatically -- skipping, this is optional." -ForegroundColor Yellow
+            Write-Host "Install it yourself later by running 'ollama pull qwen3:8b'." -ForegroundColor Yellow
+        }
+    } else {
+        Say "Skipping the Qwen brain model -- you chose Claude only. Say 'switch to Qwen' any time later and Jarvis will ask to pull it then."
     }
 } else {
     Write-Host "Ollama could not be installed automatically -- skipping, this is optional." -ForegroundColor Yellow
@@ -552,6 +585,7 @@ Say ""
 # succeeding. Existing users who already have Claude Code installed and
 # logged in see no change at all: the router still defaults to Claude
 # whenever it's actually present.
+if ($brainChoice -eq "claude" -or $brainChoice -eq "both") {
 $npm = Get-Command npm -ErrorAction SilentlyContinue
 if (-not $npm) {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
@@ -610,6 +644,9 @@ if (-not $npm) {
             }
         }
     }
+}
+} else {
+    Say "Skipping Claude Code -- you chose Qwen only. Say 'switch to Claude' any time later if you set it up." "Gray"
 }
 
 Say ""

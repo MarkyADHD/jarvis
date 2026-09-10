@@ -2149,6 +2149,7 @@ def apply_communication_mode(mode):
 
 
 COMMUNICATION_MODE_FLAG = Path(r"C:\AI-Agent\.communication_mode_changed")
+BRAIN_SWITCH_ANNOUNCE_FLAG = Path(r"C:\AI-Agent\.brain_switch_announce")
 _comm_mode_watch_started = False
 
 
@@ -2159,7 +2160,11 @@ def _communication_mode_watch_loop():
     settings. Polls for that settings save, cheap enough (a
     Path.exists() every couple seconds) to just run for the process's
     whole life rather than needing to be threaded through every call
-    site the way a per-utterance check would."""
+    site the way a per-utterance check would. Also covers the HUD's
+    brain-picker dropdown (same cross-process gap, same fix) -- real
+    reported bug: switching brains changed the setting fine but never
+    told the user out loud, so a failed switch (Ollama not ready) looked
+    identical to a successful one from the HUD alone."""
     while True:
         try:
             if COMMUNICATION_MODE_FLAG.exists():
@@ -2170,6 +2175,31 @@ def _communication_mode_watch_loop():
                 apply_communication_mode(settings_v1.get_communication_mode())
         except Exception:
             pass
+
+        try:
+            # Rename-then-read rather than read-then-delete: a plain
+            # exists()/read/unlink sequence let the confirmation get
+            # spoken twice in a row on a live test (exact cause not
+            # pinned down -- possibly this machine's still-unsolved
+            # duplicate-process quirk, possibly a plain poll-timing
+            # race). Renaming is atomic regardless of which it is: only
+            # one caller ever wins it, so only one ever speaks.
+            claimed_path = BRAIN_SWITCH_ANNOUNCE_FLAG.with_suffix(".claimed")
+            BRAIN_SWITCH_ANNOUNCE_FLAG.rename(claimed_path)
+            provider_id = claimed_path.read_text(encoding="utf-8").strip()
+            try:
+                claimed_path.unlink()
+            except Exception:
+                pass
+            if provider_id == "ollama":
+                app.speak(f"Switched to my local Qwen model, {refresh_spoken_name()} -- running right here on your PC.")
+            elif provider_id == "claude":
+                app.speak(f"Switched back to Claude, {refresh_spoken_name()} -- that's my primary brain.")
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
         time.sleep(2)
 
 
