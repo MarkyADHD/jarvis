@@ -319,6 +319,11 @@ If Jarvis has been useful to you and you'd like to support the project,
 **[buymeacoffee.com/markyadhd](https://buymeacoffee.com/markyadhd)** —
 entirely optional, always appreciated, never required.
 
+Jarvis's HUD and memory system were built drawing on ideas from Jared
+Rhodenizer's own open-source AI-assistant stack
+([github.com/jaredrhod](https://github.com/jaredrhod)) — credit where
+it's due.
+
 ## License
 
 MIT — see **LICENSE.txt**. Free to use, modify, and share. Third-party

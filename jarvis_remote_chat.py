@@ -610,8 +610,15 @@ function playReply(audio_b64) {
   });
 }
 const params = new URLSearchParams(location.search);
-const key = params.get("key") || localStorage.getItem("jarvis_key") || "";
+let key = params.get("key") || localStorage.getItem("jarvis_key") || "";
 if (key) localStorage.setItem("jarvis_key", key);
+if (!key) {
+  const entered = (prompt("Enter your Jarvis access token (see Jarvis Remote Access.txt on Mark's desktop):") || "").trim();
+  if (entered) {
+    key = entered;
+    localStorage.setItem("jarvis_key", key);
+  }
+}
 
 const log = document.getElementById("log");
 const form = document.getElementById("f");
@@ -820,8 +827,15 @@ HUD_VOICE_INJECTION = """
   document.body.addEventListener("touchstart", unlockAudio, { once: true });
 
   const params = new URLSearchParams(location.search);
-  const key = params.get("key") || localStorage.getItem("jarvis_key") || "";
+  let key = params.get("key") || localStorage.getItem("jarvis_key") || "";
   if (key) localStorage.setItem("jarvis_key", key);
+  if (!key) {
+    const entered = (prompt("Enter your Jarvis access token (see Jarvis Remote Access.txt on Mark's desktop):") || "").trim();
+    if (entered) {
+      key = entered;
+      localStorage.setItem("jarvis_key", key);
+    }
+  }
 
   const mic = document.getElementById("jvMic");
   const status = document.getElementById("jvMicStatus");

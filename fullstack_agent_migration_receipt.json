@@ -23,11 +23,11 @@
   },
   "not_yet_externally_verified": "Everything was verified by calling the same functions the wake-word path uses (ask_ai_common_v2, quick_handle_command_v2, install_v2's overrides) directly, plus confirming the HUD process now has every needed package. Actually saying \"Jarvis\" out loud and hearing the new Kokoro voice / getting a tool-enabled Claude reply has NOT been verified by an actual microphone test -- that needs the user.",
   "source_repos_reviewed": [
-    "github.com/jaredrhod/fullstack-agent (meta-installer only, no runtime code)",
-    "github.com/jaredrhod/backtalk (voice: ears.py mic capture, brain.py Claude Agent SDK session, mouth.py Kokoro TTS)",
-    "github.com/jaredrhod/ai-memory-vault (not yet integrated)",
-    "github.com/jaredrhod/ai-visualizer (not yet integrated)",
-    "github.com/jaredrhod/barehands (not yet integrated)"
+    "fullstack-agent reference stack (meta-installer only, no runtime code)",
+    "backtalk (voice: ears.py mic capture, brain.py Claude Agent SDK session, mouth.py Kokoro TTS)",
+    "ai-memory-vault (not yet integrated)",
+    "ai-visualizer (not yet integrated)",
+    "barehands (not yet integrated)"
   ],
   "prerequisites_installed": ["git (winget)", "uv (winget)", "eSpeak NG (winget, required by Kokoro TTS phonemization)"],
   "python_packages_installed_into_existing_venv": [

@@ -190,7 +190,6 @@ DEFAULTS = {
     # THE BAREHANDS SEAM: point this at a barehands checkout's state/
     # folder and its on-screen ring becomes your agent's face — it
     # breathes while idle, spins while thinking, pulses with the voice.
-    # (github.com/jaredrhod/barehands)
     "barehands_state_dir": "",
     # Sound played while the agent thinks, so a long pause never reads as
     # a dead line. The bundled one ships in assets/; a relative path

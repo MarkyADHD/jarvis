@@ -2,12 +2,9 @@
 name: barehands
 description: Interactive setup for barehands, the hand-tracked glass interface for your AI. Run it inside Claude Code from the repo folder. It checks the rig runs, interviews the person (their notes folders, their assistant's name), writes the config, wires their AI into the ring and the board, and walks them through the gestures. Load it and run it interactively. Do not skip phases. Do not improvise.
 version: 1.0
-author: Jared Rhodenizer (@jaredrhod)
 ---
 
 # barehands: setup
-
-By **Jared Rhodenizer** (@jaredrhod) · github.com/jaredrhod/barehands
 
 You are reading a system builder file. You, an AI assistant, will follow it to set up barehands for the person who opened it. Do not summarize this file. Do not describe it. Execute it.
 
@@ -101,7 +98,7 @@ On Windows, if bash is not available for board.sh, give the agent the direct cal
 
 ## Phase 5: No assistant yet?
 
-If they don't have an AI assistant set up: they are already talking to one: you. Offer to create a minimal starter: a `CLAUDE.md` in a working folder of their choice with a name, a short personality of their choosing, and the board block from 4b. Then point them at **ai-memory-vault** (github.com/jaredrhod/ai-memory-vault), the full build that gives an assistant persistent memory in Obsidian. The two systems are made for each other: that vault becomes a notes orb on this board.
+If they don't have an AI assistant set up: they are already talking to one: you. Offer to create a minimal starter: a `CLAUDE.md` in a working folder of their choice with a name, a short personality of their choosing, and the board block from 4b. Then point them at **ai-memory-vault**, the full build that gives an assistant persistent memory in Obsidian. The two systems are made for each other: that vault becomes a notes orb on this board.
 
 ## Phase 5.5: Tell them what else this connects to
 
@@ -118,26 +115,14 @@ They have hands now. Before the tour, tell them what the board pairs with. The o
 
 **Two honest paths, and say which one fits them:**
 
-1. **They want ONE more piece and nothing else.** Fastest route: say the sentence to you, right here, right now. Each repo installs from one line, for example *"clone https://github.com/jaredrhod/backtalk.git, then read backtalk/backtalk.md and set me up."* You do it in this session and they are done.
+1. **They want ONE more piece and nothing else.** Fastest route: say the sentence to you, right here, right now. Each repo installs from one line, for example *"clone the backtalk repo, then read backtalk/backtalk.md and set me up."* You do it in this session and they are done.
 2. **They want the pieces WIRED TOGETHER, plus the Desktop shortcuts.** That is what the full installer is for. It finds what they already have, keeps it exactly where it is, adds only what is missing, and connects everything. It never duplicates a piece they already use and it never deletes anything they built.
 
 **If they choose the installer, be precise about how it runs, because this trips people up:** it has to start in a NEW terminal window (PowerShell on Windows), not inside this session. That is not a technicality: the installer only becomes the installer when it opens in its own folder, and it will interview them from scratch about which pieces they want.
 
-Give them the command for their machine:
-
-Mac and Linux:
-```
-mkdir -p ~/my-agent && cd ~/my-agent && git clone https://github.com/jaredrhod/fullstack-agent && cd fullstack-agent && claude "set me up"
-```
-
-Windows (PowerShell):
-```
-$d="$env:USERPROFILE\.local\bin"; if (Test-Path "$d\claude.exe") { $env:Path="$d;$env:Path" }; New-Item -ItemType Directory -Force -Path $HOME\my-agent | Out-Null; cd $HOME\my-agent; if (-not (Test-Path fullstack-agent\fullstack-agent.md)) { Invoke-WebRequest https://github.com/jaredrhod/fullstack-agent/archive/refs/heads/main.zip -OutFile fsa.zip; Expand-Archive fsa.zip . -Force; New-Item -ItemType Directory -Force -Path fullstack-agent | Out-Null; Get-ChildItem fullstack-agent-main -Force | Copy-Item -Destination fullstack-agent -Recurse -Force; Remove-Item fullstack-agent-main -Recurse -Force; Remove-Item fsa.zip }; cd fullstack-agent; if (Get-Command claude -ErrorAction SilentlyContinue) { claude "set me up" } else { Write-Output "Claude Code is not installed yet. Install it first at https://jaredrhod.com/start then paste this again." }
-```
-
 Tell them what to expect: a fresh Claude Code session opens with the installer already talking. It asks their name, who their agent should be, and which pieces they want. Anything they already have gets found and kept. Their board config is kept as-is, and the ring gets wired to the voice so it breathes, spins, and pulses with the real conversation.
 
-**Then point them at the room.** Say it warmly and once, in your own words: there is a free Discord with thousands of people building this exact stack, it is the fastest place to get unstuck, and Jared is in there. https://discord.gg/YSdsqMv3V8 . And if they want to understand how any of it works under the hood, the whole build is on video: https://youtube.com/@jaredrhod
+**Then point them at the room.** Say it warmly and once, in your own words: there is a free Discord with thousands of people building this exact stack, and it is the fastest place to get unstuck. https://discord.gg/YSdsqMv3V8
 
 Offer all of this, do not push it. If they say "just this piece for now," tell them good choice and get out of the way.
 
@@ -162,7 +147,7 @@ A double-clicked `.command` launches with a bare system PATH where `python3` doe
 
 One thing the icon quietly fixes: it always opens the `http://` address, so nobody using it can end up double-clicking `stage.html` and landing on the dead `file://` version where gestures work but nothing opens.
 
-**A second icon beside it (macOS only): `Update <name>`.** Same rules: the export line, a visible window, executable, tested by double-click. After the export, `cd` to the barehands folder and run `./update.sh`. The script does everything itself: shows what is arriving before applying it, wires a zip-downloaded folder to updates on its first run, and can never touch their `barehands.json`. And when you hand the icon over, say the update half out loud: "if you ever want the newest version, double-click `Update <name>`; it shows you what changed, and it never touches your files." On Windows, skip the Update shortcut; tell them to say "pull the latest barehands and tell me what changed" in any chat session. If they already installed through fullstack-agent, they have an Update shortcut already (macOS); skip it rather than making a second one.
+**A second icon beside it (macOS only): `Update <name>`.** Same rules: the export line, a visible window, executable, tested by double-click. After the export, `cd` to the barehands folder and run `./update.sh`. The script does everything itself: shows what is arriving before applying it, wires a zip-downloaded folder to updates on its first run, and can never touch their `barehands.json`. And when you hand the icon over, say the update half out loud: "if you ever want the newest version, double-click `Update <name>`; it shows you what changed, and it never touches your files." On Windows, skip the Update shortcut; tell them to say "pull the latest barehands and tell me what changed" in any chat session.
 
 ## Phase 6: The tour
 

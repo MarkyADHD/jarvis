@@ -28,7 +28,7 @@ RECENT_CONTEXT_FILE = MEMORY_ROOT / "jarvis_recent_context_v2.json"
 
 MAX_RECENT_TURNS = 18
 
-# ai-memory-vault (jaredrhod/fullstack-agent) -- the real, curated,
+# ai-memory-vault -- the real, curated,
 # long-term memory now, replacing the old JSONL keyword-scored search
 # below for prompt-context purposes. VAULT-INDEX.md's own "Who I Am"/
 # "My Preferences" sections already ARE what profile_context_for_prompt()
@@ -97,6 +97,69 @@ def vault_context_for_prompt():
         pass
 
     return "\n\n".join(parts)
+
+
+def vault_search(query, limit=5):
+    """Lightweight local keyword search across the vault's own markdown
+    notes, for the instant fast-path recall commands ("what do you
+    remember about X", "recall X") -- no AI call, so it stays fast.
+    Complements jarvis_memory.py's old recall() rather than replacing
+    it: anything filed away via memory_fast()'s "remember that X"
+    handler now lands in the vault, not the old JSONL store, so recall
+    queries need to search both to actually find it."""
+    query = str(query or "").lower().strip()
+    if not query or not VAULT_ROOT.exists():
+        return []
+
+    query_words = set(re.findall(r"\w+", query))
+    if not query_words:
+        return []
+
+    try:
+        md_files = list(VAULT_ROOT.rglob("*.md"))
+    except Exception:
+        return []
+
+    scored = []
+    for path in md_files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        for block in re.split(r"\n\s*\n", text):
+            block = block.strip()
+            if not block or block.startswith("---") or block.startswith("#"):
+                continue
+            haystack = block.lower()
+            score = 0
+            if query in haystack:
+                score += 20
+            haystack_words = set(re.findall(r"\w+", haystack))
+            score += len(query_words.intersection(haystack_words)) * 4
+            if score > 1:
+                snippet = " ".join(block.split())
+                # strip markdown so this reads cleanly out loud instead
+                # of Jarvis speaking literal asterisks and brackets
+                snippet = re.sub(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]", r"\1", snippet)
+                snippet = re.sub(r"[*_`#]+", "", snippet)
+                snippet = re.sub(r"\s+", " ", snippet).strip(" -")
+                if len(snippet) > 300:
+                    snippet = snippet[:300].rsplit(" ", 1)[0] + "..."
+                if snippet:
+                    scored.append((score, snippet, path.stem))
+
+    scored.sort(key=lambda triple: triple[0], reverse=True)
+    seen = set()
+    results = []
+    for score, snippet, source in scored:
+        if snippet in seen:
+            continue
+        seen.add(snippet)
+        results.append({"text": snippet, "source": source})
+        if len(results) >= limit:
+            break
+    return results
+
 
 WAKE_WORDS = {
     "jarvis", "jervis", "javis", "javas", "jarvus", "travis", "charvis", "service"

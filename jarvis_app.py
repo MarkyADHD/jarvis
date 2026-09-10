@@ -1050,9 +1050,6 @@ def answer_memory(query, limit=8):
     # entry is clean.
     memories = recall(query, limit=limit)
 
-    if not memories:
-        return None
-
     lines = []
     for item in memories:
         text = item.get("text", "").strip()
@@ -1067,6 +1064,22 @@ def answer_memory(query, limit=8):
         lines.append(text)
         if len(lines) >= 3:
             break
+
+    # Anything filed away via memory_fast()'s "remember that X" handler
+    # lands in the ai-memory-vault now, not this old JSONL store -- so
+    # recall has to check the vault too, or everything saved since the
+    # memory-system swap would be invisible to "what do you remember
+    # about X". Kept as a fast, local keyword search (no AI call) so
+    # this stays instant like the rest of the fast path.
+    if query:
+        try:
+            import jarvis_memory_v2 as _memory_v2
+            for item in _memory_v2.vault_search(query, limit=2):
+                text = item.get("text", "").strip()
+                if text and text not in lines:
+                    lines.append(text)
+        except Exception:
+            pass
 
     if not lines:
         return None

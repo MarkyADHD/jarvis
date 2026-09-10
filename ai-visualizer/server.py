@@ -33,7 +33,7 @@ Serves the face gallery at http://127.0.0.1:8790/ and exposes:
            gallery. That is the whole plugin system.
 
 READ-ONLY on the signal bus. The bus is three tiny files written by a
-voice line (backtalk writes them natively, github.com/jaredrhod/backtalk):
+voice line (backtalk writes them natively):
 
   .voice_state        idle | listening | thinking | speaking
   .voice_waveform     JSON {ts, samples: [64 floats]} while audio plays

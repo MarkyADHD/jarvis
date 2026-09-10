@@ -139,10 +139,12 @@ def write_remote_access_notes(url, token):
     content = (
         "JARVIS REMOTE ACCESS\n"
         "=====================\n\n"
-        f"Address (open this in your phone's browser):\n{url}\n\n"
-        f"Access token (treat this like a password):\n{token}\n\n"
-        "Anyone with both of these can talk to Jarvis and control this PC\n"
-        "remotely. Keep this file private -- don't share it or post it anywhere.\n"
+        f"Link (open this exact link on your phone -- the key is baked in):\n{url}?key={token}\n\n"
+        f"Address on its own, if you ever need it separately:\n{url}\n\n"
+        f"Access token on its own (treat this like a password):\n{token}\n\n"
+        "Anyone with either the link above or the token can talk to Jarvis and\n"
+        "control this PC remotely. Keep this file private -- don't share it or\n"
+        "post it anywhere.\n"
     )
     try:
         REMOTE_ACCESS_NOTES_PATH.write_text(content, encoding="utf-8")
@@ -186,7 +188,7 @@ def setup_remote_access_flow(spoken_name="Sir"):
         pass
 
     if token and write_remote_access_notes(url, token):
-        return _reply(f"Done, {spoken_name}. Remote access is live at {url} -- I've opened a Notepad with the address and your access token saved on your Desktop. Keep that file safe and don't share it.")
+        return _reply(f"Done, {spoken_name}. Remote access is live -- I've opened a Notepad with the exact link, key baked in, saved on your Desktop. Keep that file safe and don't share it.")
 
     token_hint = f" Your access token is saved in {TOKEN_FILE}." if TOKEN_FILE.exists() else ""
     return _reply(f"Remote access is live at {url}, {spoken_name}, but I couldn't open the notes for you.{token_hint}")
@@ -209,15 +211,23 @@ def tailscale_command_fast(command, spoken_name="Sir", app_module=None):
         if not ip:
             return _reply(f"Tailscale's installed but not signed in yet, {spoken_name}. Open a terminal and run 'tailscale up' once -- it'll open a browser to log in.")
 
+        token = ""
+        try:
+            if TOKEN_FILE.exists():
+                token = TOKEN_FILE.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
         token_hint = " Your access token is saved in the .remote_chat_token file in C:\\AI-Agent." if TOKEN_FILE.exists() else ""
 
         https_url = get_tailscale_serve_url()
         if https_url:
-            return _reply(f"Your remote address is {https_url}, {spoken_name}.{token_hint}")
+            link = f"{https_url}?key={token}" if token else https_url
+            return _reply(f"Your remote link is {link}, {spoken_name} -- that key is baked right in, so just open it as-is.")
 
         http_url = f"http://{ip}:{REMOTE_CHAT_PORT}"
+        http_link = f"{http_url}?key={token}" if token else http_url
         return _reply(
-            f"Your remote address is {http_url}, {spoken_name}, but that's plain HTTP -- your phone's browser will "
+            f"Your remote link is {http_link}, {spoken_name}, but that's plain HTTP -- your phone's browser will "
             f"block the microphone on it. Say 'set up remote https' once to fix that.{token_hint}"
         )
 

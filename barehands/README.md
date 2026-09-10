@@ -1,7 +1,5 @@
 # barehands
 
-> **Never used Claude Code?** Start at [jaredrhod.com](https://jaredrhod.com): pick your situation and it routes you to the right path.
-
 **Runs on:** a webcam and Chrome; works with any AI. Any program that writes a file or curls localhost can be its brain.
 
 Move things on your screen with your bare hands. barehands turns your webcam into a hand-tracked interface: notes, images, and 3D models float over your camera as glass cards. You pinch them, throw them, stretch them, force-pull them across the room, and blow an engine apart into its exploded view with a drag of two fingers. No headset. No controllers. No gloves. Bare hands.
@@ -15,14 +13,14 @@ And it's a body waiting for a brain: wire in your AI and the on-screen ring beco
 ## Run it (nothing needed)
 
 ```
-git clone https://github.com/jaredrhod/barehands
+git clone <this repo>
 cd barehands
 python3 server.py
 ```
 
 On Windows run `run.bat` instead: a clean Windows 11 has no Python but leaves a Microsoft Store stub on the PATH that looks like one, and `run.bat` finds an interpreter that actually works. Open **http://127.0.0.1:8794/stage.html** in Chrome, allow the camera, and wave. That's the whole install: the server is stdlib Python, and the page loads its hand tracking (Google MediaPipe) and 3D (three.js) from CDNs on first run.
 
-**Already in a Claude Code session with your agent?** One sentence does it all: *"clone https://github.com/jaredrhod/barehands.git, then read barehands/barehands.md and set me up."* Your agent installs it, configures it, and wires itself in.
+**Already in a Claude Code session with your agent?** One sentence does it all: *"clone the barehands repo, then read barehands/barehands.md and set me up."* Your agent installs it, configures it, and wires itself in.
 
 Tap the ring → orbs bloom → tap an orb → your files unfold on glass. The sample notes teach the gestures from inside the board itself.
 
@@ -53,7 +51,7 @@ One line per orb. Add more folders, rename them, point them anywhere. The `media
 
 Anything that can write a file or curl localhost can be the brain: Claude, a local LLM, a cron job, a Stream Deck button.
 
-If your assistant doesn't have a memory yet, pair this with [ai-memory-vault](https://github.com/jaredrhod/ai-memory-vault); the vault it builds becomes a notes orb on this board.
+If your assistant doesn't have a memory yet, pair this with ai-memory-vault; the vault it builds becomes a notes orb on this board.
 
 ## The gestures
 
@@ -71,25 +69,14 @@ Hand tracking by [Google MediaPipe](https://developers.google.com/mediapipe) (Ap
 
 ## Updating
 
-barehands improves continuously, and gesture fixes ship often. To update on macOS, double-click the `Update` icon setup left on your Desktop, or run `./update.sh` in this folder. On Windows, or any time, say **"pull the latest barehands and tell me what changed"** to your agent — it does the same job. Your config, your notes, and your media stay untouched: they live outside the tracked files. Installed through fullstack-agent? `./fullstack-agent/update.sh` (macOS) updates every piece at once and prints what changed.
+barehands improves continuously, and gesture fixes ship often. To update on macOS, double-click the `Update` icon setup left on your Desktop, or run `./update.sh` in this folder. On Windows, or any time, say **"pull the latest barehands and tell me what changed"** to your agent — it does the same job. Your config, your notes, and your media stay untouched: they live outside the tracked files.
 
 ## The rest of it
 
 A board is better with an agent behind it. Give it a voice and you can talk while you move things around, and a memory vault turns the notes orb into your agent's actual brain instead of a folder of files.
 
-- **The whole stack, one command.** [fullstack-agent](https://github.com/jaredrhod/fullstack-agent) installs the memory, the voice, the face, and the hands, and wires them together for you. Pick only the pieces you want: https://jaredrhod.com
-- **The videos.** Free series on all of it: https://youtube.com/@jaredrhod
 - **The Discord.** Thousands of builders, and the fastest place to get unstuck: https://discord.gg/YSdsqMv3V8
-- **Everything else,** free and open: https://jaredrhod.com
-
-## Support
-
-Free to use, and always will be. If this helped you out, you can buy me a coffee:
-
-[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jaredrhod)
 
 ## License
 
-Copyright (c) 2026 Jared Rhodenizer.
-
-Licensed under the GNU Affero General Public License, version 3 or later (AGPL-3.0-or-later). **Use it in your business, commercially, for free.** Run it, change it, build your workflow on top of it, and charge for the work you do with it. The one rule is that it stays open: if you hand it to someone else, or run a modified version as a service other people use, your version ships under this same license with its source available. Credit me when you build on it. Want it inside a closed-source commercial product? Email license@jaredrhod.com. Full terms are in the LICENSE file and at https://www.gnu.org/licenses/agpl-3.0.html
+Licensed under the GNU Affero General Public License, version 3 or later (AGPL-3.0-or-later). **Use it in your business, commercially, for free.** Run it, change it, build your workflow on top of it, and charge for the work you do with it. The one rule is that it stays open: if you hand it to someone else, or run a modified version as a service other people use, your version ships under this same license with its source available. Full terms are in the LICENSE file and at https://www.gnu.org/licenses/agpl-3.0.html
