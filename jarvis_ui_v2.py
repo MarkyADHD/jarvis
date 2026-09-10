@@ -11,6 +11,8 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
+import jarvis_settings_v1 as settings_v1
+
 
 COLORS = {
     "bg": "#0b0f14",
@@ -349,6 +351,51 @@ def make_composer(root, app_instance, app_module):
         highlightcolor=COLORS["accent"],
     )
     box.pack(fill="x")
+
+    MODE_LABELS = {"ptt": "Push to Talk", "wake_word": '"Jarvis"', "both": "Both"}
+    MODE_BY_LABEL = {label: mode for mode, label in MODE_LABELS.items()}
+
+    mode_frame = tk.Frame(box, bg=COLORS["panel"])
+    mode_frame.pack(side="left", fill="y", padx=(8, 0), pady=8)
+
+    tk.Label(
+        mode_frame,
+        text="Talk via",
+        bg=COLORS["panel"],
+        fg=COLORS["muted"],
+        font=("Segoe UI", 7),
+        anchor="w",
+    ).pack(fill="x")
+
+    try:
+        current_mode = settings_v1.get_communication_mode()
+    except Exception:
+        current_mode = "both"
+
+    mode_var = tk.StringVar(value=MODE_LABELS.get(current_mode, "Both"))
+
+    def on_mode_change(*_args):
+        chosen = MODE_BY_LABEL.get(mode_var.get(), "both")
+        applier = getattr(app_module, "apply_communication_mode", None)
+        if applier:
+            threading.Thread(target=applier, args=(chosen,), daemon=True).start()
+        else:
+            try:
+                settings_v1.save_communication_mode(chosen)
+                app_module.log("Communication mode saved -- restart Jarvis for it to take effect.")
+            except Exception:
+                pass
+
+    mode_dropdown = ttk.Combobox(
+        mode_frame,
+        textvariable=mode_var,
+        values=list(MODE_LABELS.values()),
+        state="readonly",
+        width=11,
+        font=("Segoe UI", 8),
+    )
+    mode_dropdown.pack(fill="x", pady=(2, 0))
+    mode_dropdown.bind("<<ComboboxSelected>>", on_mode_change)
 
     input_box = tk.Text(
         box,

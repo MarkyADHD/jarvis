@@ -2039,6 +2039,82 @@ def _install_push_to_talk_v2():
             pass
 
 
+def _uninstall_push_to_talk_v2():
+    """Reverses _install_push_to_talk_v2() live, for the communication-
+    mode toggle -- unhooks the Home key so it stops acting as a PTT
+    trigger, and resets the guard so re-enabling PTT later works again."""
+    global _PUSH_TO_TALK_INSTALLED
+
+    if not _PUSH_TO_TALK_INSTALLED:
+        return
+
+    try:
+        import keyboard
+        keyboard.unhook_key("home")
+    except Exception:
+        pass
+
+    _PUSH_TO_TALK_INSTALLED = False
+
+
+def apply_communication_mode(mode):
+    """Live-applies a communication-mode change from the UI toggle
+    (push-to-talk only / wake word only / both) without needing a
+    restart. Persists the choice first so it also sticks on the next
+    launch, then starts or stops each of the two independent listening
+    systems using the exact same hand-off primitives push-to-talk
+    already uses internally (app.listening_enabled + a fresh
+    voice_listener_loop thread for wake word, keyboard hook install/
+    unhook for push-to-talk)."""
+    if mode not in ("ptt", "wake_word", "both"):
+        return False
+
+    try:
+        settings_v1.save_communication_mode(mode)
+    except Exception:
+        pass
+
+    wake_word_wanted = mode in ("wake_word", "both")
+    ptt_wanted = mode in ("ptt", "both")
+
+    try:
+        wake_word_running = app.listening_enabled.is_set()
+    except Exception:
+        wake_word_running = False
+
+    if wake_word_wanted and not wake_word_running:
+        try:
+            app.listening_enabled.set()
+            threading.Thread(
+                target=app.voice_listener_loop,
+                args=(lambda *a, **k: None,),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            try:
+                app.log(f"Couldn't start the wake-word listener: {e}")
+            except Exception:
+                pass
+    elif not wake_word_wanted and wake_word_running:
+        try:
+            app.listening_enabled.clear()
+        except Exception:
+            pass
+
+    if ptt_wanted:
+        _install_push_to_talk_v2()
+    else:
+        _uninstall_push_to_talk_v2()
+
+    try:
+        labels = {"ptt": "push-to-talk only", "wake_word": "wake word only", "both": "push-to-talk and wake word"}
+        app.log(f"Communication mode set to {labels[mode]}.")
+    except Exception:
+        pass
+
+    return True
+
+
 def install_v2(headless=False):
     """headless=True is for jarvis_remote_chat.py: it only needs the
     ask_ai_common_v2/quick_handle_command_v2 overrides and the
@@ -2107,7 +2183,15 @@ def install_v2(headless=False):
         app.log = _log_to_file_v2
 
     if not headless:
-        _install_push_to_talk_v2()
+        app.apply_communication_mode = apply_communication_mode
+
+        try:
+            _startup_comm_mode = settings_v1.get_communication_mode()
+        except Exception:
+            _startup_comm_mode = "both"
+
+        if _startup_comm_mode in ("ptt", "both"):
+            _install_push_to_talk_v2()
 
     if _original_ask_ai:
         app.ask_ai = ask_ai_v2

@@ -4090,7 +4090,14 @@ class JarvisApp:
         self.root.protocol("WM_DELETE_WINDOW", self.hide_window)
 
         self.start_live_view()
-        self.start_listening()
+
+        try:
+            _startup_mode = settings_v1.get_communication_mode()
+        except Exception:
+            _startup_mode = "both"
+
+        if _startup_mode in ("wake_word", "both"):
+            self.start_listening()
 
         threading.Thread(target=startup_greeting, daemon=True).start()
         threading.Thread(target=prewarm_voice, daemon=True).start()

@@ -152,6 +152,26 @@ def save_settings(data):
     _write_json(SETTINGS_PATH, data)
 
 
+VALID_COMMUNICATION_MODES = ("ptt", "wake_word", "both")
+
+
+def get_communication_mode():
+    """How the user wants to talk to Jarvis: push-to-talk only, wake
+    word ("Jarvis") only, or both at once (the long-standing default,
+    kept as the fallback for anyone who never touches this)."""
+    mode = load_settings().get("communication_mode", "both")
+    return mode if mode in VALID_COMMUNICATION_MODES else "both"
+
+
+def save_communication_mode(mode):
+    if mode not in VALID_COMMUNICATION_MODES:
+        return False
+    data = load_settings()
+    data["communication_mode"] = mode
+    save_settings(data)
+    return True
+
+
 def _protect(value):
     value = str(value or "")
     if not value:
