@@ -1,0 +1,31 @@
+Before you install JARVIS, please actually read this.
+
+WHAT JARVIS CAN DO
+JARVIS is a personal AI assistant with real, broad access to your machine:
+- It can read, create, and (with your spoken confirmation) delete, move, or
+  overwrite files across your C:/E: drives -- not just its own folder.
+- It can control your PC: open/close programs, control your mouse and
+  keyboard, browse the web, control Spotify and smart lights, and more.
+- It can modify its OWN source code when you ask it to, using an AI coding
+  model running with real file-write access on your machine.
+- It listens to your microphone continuously (or via push-to-talk) to
+  respond to voice commands.
+
+THIS IS PROVIDED AS-IS, NO WARRANTY
+JARVIS is free, open-source, hobbyist software (MIT licensed -- see
+LICENSE.txt). It is provided "AS IS," without warranty of any kind. The
+creator is not liable for any damages, data loss, unintended actions, or
+other issues arising from installing or using it. You are choosing to run
+an AI assistant with real control over your own computer, and you are
+responsible for your own machine, your own data, and your own backups.
+
+A FEW PRACTICAL POINTS
+- Back up anything important before installing, same as with any software
+  that touches your files.
+- JARVIS asks for a spoken "yes" before any delete/overwrite/move action,
+  but a misheard command is always possible with any voice assistant.
+- You're in control: JARVIS only runs when you launch it, and you can
+  uninstall it at any time.
+
+If you're not comfortable with any of the above, please don't install
+JARVIS. If you are, welcome aboard -- click Next to continue.

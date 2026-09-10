@@ -321,3 +321,18 @@ entirely optional, always appreciated, never required.
 MIT — see **LICENSE.txt**. Free to use, modify, and share. Third-party
 components (voice models, Python packages, the underlying voice/HUD
 projects) carry their own separate licenses.
+
+## Disclaimer
+
+Jarvis has real, broad access to your machine — it can read, create, and
+(with your spoken confirmation) delete, move, or overwrite files across
+your drives; control your PC (mouse, keyboard, apps, browser); and
+modify its own source code when you ask it to. It's provided **AS IS**,
+with no warranty of any kind (see LICENSE.txt) — this is free, hobbyist
+software, not a commercial product with support guarantees. The creator
+isn't liable for damages, data loss, or unintended actions arising from
+installing or using it. Back up anything important first, the same as
+you would with any software that touches your files, and only install
+it if you're comfortable running an AI assistant with real control over
+your own computer. The installer shows this same notice before setup
+begins.

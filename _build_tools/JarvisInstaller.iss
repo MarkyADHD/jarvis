@@ -18,7 +18,7 @@
 
 #define AppName "JARVIS"
 #define AppPublisher "MarkyADHD"
-#define AppVersion "1.81"
+#define AppVersion "1.82"
 #define ExportDir "C:\JarvisExport"
 #define ArtDir "installer_art"
 
@@ -37,6 +37,7 @@ WizardImageFile={#ArtDir}\wizard_banner.bmp
 WizardSmallImageFile={#ArtDir}\wizard_small.bmp
 WizardStyle=modern
 LicenseFile=LICENSE.txt
+InfoBeforeFile=DISCLAIMER.txt
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -58,6 +59,7 @@ Name: "main"; Description: "JARVIS core files"; Types: full; Flags: fixed
 [Files]
 Source: "{#ExportDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Components: main
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "DISCLAIMER.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "FRIEND_SETUP.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "setup_environment.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -67,6 +69,7 @@ Name: "{group}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: 
 Name: "{group}\JarvisCode"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarviscode_app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
 Name: "{group}\Finish Setup (run this first)"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_environment.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
 Name: "{group}\Setup Guide"; Filename: "{app}\FRIEND_SETUP.md"
+Name: "{group}\Disclaimer"; Filename: "{app}\DISCLAIMER.txt"
 Name: "{group}\About JARVIS"; Filename: "{app}\README.md"
 Name: "{group}\Uninstall JARVIS"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
