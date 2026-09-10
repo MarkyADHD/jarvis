@@ -176,6 +176,7 @@ def settings_status() -> dict:
             for d in keylight_cache
         ],
         "hue_connected": bool(hue.resolve_bridge()[0]),
+        "communication_mode": settings.get_communication_mode(),
     }
 
 
@@ -380,6 +381,28 @@ def settings_elevenlabs_use_standard() -> dict:
     ElevenLabs back on later doesn't lose it."""
     ok, error = _write_elevenlabs_fields(enabled=False)
     return {"ok": ok, "error": error}
+
+
+COMMUNICATION_MODE_FLAG = Path(r"C:\AI-Agent\.communication_mode_changed")
+
+
+def settings_set_communication_mode(mode: str) -> dict:
+    """This HUD settings panel runs in this process, but the actual
+    listening state it's changing (the wake-word loop, the Home-key
+    hook) lives in jarvis_app_v2.py's own process -- same cross-process
+    gap VOICE_REFRESH_FLAG already solves for ElevenLabs settings.
+    Persist here, touch the flag, and jarvis_app_v2's own watcher
+    thread picks it up live."""
+    mode = str(mode or "").strip()
+    if mode not in ("ptt", "wake_word", "both"):
+        return {"ok": False, "error": "Invalid communication mode."}
+    if not settings.save_communication_mode(mode):
+        return {"ok": False, "error": "Could not save communication mode."}
+    try:
+        COMMUNICATION_MODE_FLAG.touch()
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 def settings_save_govee(api_key: str) -> dict:
@@ -1137,6 +1160,7 @@ class Handler(BaseHTTPRequestHandler):
         "/settings/elevenlabs/voice/restore": lambda d: settings_elevenlabs_restore_original(),
         "/settings/elevenlabs/voice/standard": lambda d: settings_elevenlabs_use_standard(),
         "/settings/govee": lambda d: settings_save_govee(str(d.get("api_key", "")).strip()),
+        "/settings/communication_mode": lambda d: settings_set_communication_mode(str(d.get("mode", "")).strip()),
         "/settings/nanoleaf/pair": lambda d: settings_nanoleaf_pair(str(d.get("host", "")).strip()),
         "/settings/nanoleaf/connect": lambda d: settings_nanoleaf_connect(
             str(d.get("name", "")).strip(), str(d.get("host", "")).strip(), str(d.get("token", "")).strip()),

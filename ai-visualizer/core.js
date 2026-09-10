@@ -147,6 +147,11 @@ const AV = (() => {
         padding:10px 13px;outline:none;cursor:text;backdrop-filter:blur(6px)}
       #jarvisChatInput::placeholder{color:#5a6a72;letter-spacing:.04em}
       #jarvisChatInput:focus{border-color:rgba(120,255,190,.6)}
+      #jarvisModeSelect{flex:0 0 auto;background:rgba(10,14,18,.72);
+        border:1px solid rgba(120,255,190,.28);border-radius:9px;
+        color:#e8f0f2;font:12px "SF Mono",Menlo,Consolas,monospace;
+        padding:10px 8px;outline:none;cursor:pointer;backdrop-filter:blur(6px)}
+      #jarvisModeSelect:focus{border-color:rgba(120,255,190,.6)}
       #jarvisChatStatus{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);
         margin-bottom:8px;font:11px "SF Mono",Menlo,Consolas,monospace;
         letter-spacing:.08em;color:#8fe8b8;text-shadow:0 0 8px rgba(90,240,160,.4);
@@ -159,6 +164,11 @@ const AV = (() => {
     bar.id = "jarvisChatBar";
     bar.innerHTML = `
       <div id="jarvisChatStatus"></div>
+      <select id="jarvisModeSelect" title="How you talk to Jarvis">
+        <option value="ptt">Push to Talk</option>
+        <option value="wake_word">"Jarvis"</option>
+        <option value="both">Both</option>
+      </select>
       <input id="jarvisChatInput" type="text" autocomplete="off"
              placeholder="Type a command for Jarvis...">
     `;
@@ -166,7 +176,34 @@ const AV = (() => {
 
     const input = bar.querySelector("#jarvisChatInput");
     const status = bar.querySelector("#jarvisChatStatus");
+    const modeSelect = bar.querySelector("#jarvisModeSelect");
     const audio = new Audio();
+
+    // Reflects the saved communication mode on load, and pushes a change
+    // straight to jarvis_settings_v1 (same token-gated local server the
+    // rest of this bar already talks to) the moment it's changed --
+    // jarvis_app_v2.py's own background watcher picks up the new value
+    // live, no restart needed.
+    const settingsBase = isLocal ? "http://127.0.0.1:8792" : `https://${location.hostname}`;
+    fetch(settingsBase + "/settings/status", { headers: { "X-Jarvis-Token": token } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.communication_mode) modeSelect.value = data.communication_mode;
+      })
+      .catch(() => {});
+
+    modeSelect.addEventListener("change", async () => {
+      try {
+        await fetch(settingsBase + "/settings/communication_mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Jarvis-Token": token },
+          body: JSON.stringify({ mode: modeSelect.value }),
+        });
+        flash("mode saved");
+      } catch (err) {
+        flash("mode save failed");
+      }
+    });
 
     let statusTimer = null;
     function flash(text, ms = 2200) {

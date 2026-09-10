@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import requests
+from pathlib import Path
 
 import jarvis_app as app
 import jarvis_brain_v2 as brain
@@ -2115,6 +2116,39 @@ def apply_communication_mode(mode):
     return True
 
 
+COMMUNICATION_MODE_FLAG = Path(r"C:\AI-Agent\.communication_mode_changed")
+_comm_mode_watch_started = False
+
+
+def _communication_mode_watch_loop():
+    """The HUD's mode dropdown (ai-visualizer/core.js) runs inside
+    jarvis_remote_chat.py's own process, not this one -- same cross-
+    process gap VOICE_REFRESH_FLAG already bridges for ElevenLabs
+    settings. Polls for that settings save, cheap enough (a
+    Path.exists() every couple seconds) to just run for the process's
+    whole life rather than needing to be threaded through every call
+    site the way a per-utterance check would."""
+    while True:
+        try:
+            if COMMUNICATION_MODE_FLAG.exists():
+                try:
+                    COMMUNICATION_MODE_FLAG.unlink()
+                except Exception:
+                    pass
+                apply_communication_mode(settings_v1.get_communication_mode())
+        except Exception:
+            pass
+        time.sleep(2)
+
+
+def _start_communication_mode_watch():
+    global _comm_mode_watch_started
+    if _comm_mode_watch_started:
+        return
+    _comm_mode_watch_started = True
+    threading.Thread(target=_communication_mode_watch_loop, daemon=True).start()
+
+
 def install_v2(headless=False):
     """headless=True is for jarvis_remote_chat.py: it only needs the
     ask_ai_common_v2/quick_handle_command_v2 overrides and the
@@ -2184,6 +2218,7 @@ def install_v2(headless=False):
 
     if not headless:
         app.apply_communication_mode = apply_communication_mode
+        _start_communication_mode_watch()
 
         try:
             _startup_comm_mode = settings_v1.get_communication_mode()
