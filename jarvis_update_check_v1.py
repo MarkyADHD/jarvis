@@ -209,9 +209,29 @@ def is_update_request(command):
         "update yourself", "update jarvis", "self update", "self-update",
         "pull the update", "pull the latest update", "pull the latest changes",
         "update from github", "update your code", "update your own code",
-        "can you update", "update now",
+        "can you update", "update now", "run the update", "run an update",
+        "run your update", "do the update", "start the update",
+        "run the bat file", "run the update bat", "run update.bat",
+        "update.bat", "update bat file", "the update bat",
     ]
-    return any(phrase in c for phrase in substring_phrases)
+    if any(phrase in c for phrase in substring_phrases):
+        return True
+
+    # Same reported bug, again, with a still-different phrasing -- exact
+    # substrings alone keep losing this game of whack-a-mole. Broader net:
+    # the word "update" paired with any clearly self-referential word
+    # catches natural variations without needing every combination typed
+    # out by hand. Still narrow enough not to fire on an unrelated
+    # mention of "update" (e.g. "give me an update on the weather") --
+    # those don't pair with a self-referential word in the same breath.
+    self_reference_words = (
+        "yourself", "your own", "your code", "your systems", "your self",
+        "bat file", "update.bat", "update bat",
+    )
+    if "update" in c and any(word in c for word in self_reference_words):
+        return True
+
+    return False
 
 
 def _is_confirmation(command):
@@ -289,6 +309,18 @@ def _perform_update_git(app_module, spoken_name):
     surprising to a live checkout that might be mid-edit. Also picks up
     any new pip dependencies the update needs, the same gap a silent
     installer-based update already had to be fixed for."""
+    # This whole flow is a deterministic handler, never routed through
+    # the AI brain -- so nothing here ever set the face to "thinking" the
+    # way an AI-answered request does. Reported live as the face looking
+    # idle/frozen for the entire update.bat run (git pull + pip install,
+    # genuinely can take a while), with no visual sign anything was
+    # actually happening.
+    try:
+        if app_module is not None and hasattr(app_module, "set_face_state"):
+            app_module.set_face_state("thinking")
+    except Exception:
+        pass
+
     try:
         proc = subprocess.run(
             [str(UPDATE_BAT)], cwd=str(PROJECT_ROOT), capture_output=True, text=True,
@@ -299,6 +331,11 @@ def _perform_update_git(app_module, spoken_name):
         ok = False
 
     if not ok:
+        try:
+            if app_module is not None and hasattr(app_module, "set_face_state"):
+                app_module.set_face_state("idle")
+        except Exception:
+            pass
         try:
             if app_module is not None and hasattr(app_module, "speak"):
                 app_module.speak(f"The pull failed, {spoken_name}. I left everything as it was -- might need a manual look at the repo.")
@@ -352,6 +389,16 @@ def _restart_self():
 def _perform_update_release(url, app_module, spoken_name):
     import tempfile
 
+    # Same reasoning as _perform_update_git's own thinking-state fix --
+    # this deterministic flow never routed through the AI brain, so
+    # nothing set the face to "thinking" for the download+install, which
+    # can genuinely take a while.
+    try:
+        if app_module is not None and hasattr(app_module, "set_face_state"):
+            app_module.set_face_state("thinking")
+    except Exception:
+        pass
+
     try:
         dest = Path(tempfile.gettempdir()) / ASSET_NAME
         with requests.get(url, stream=True, timeout=30) as r:
@@ -360,6 +407,11 @@ def _perform_update_release(url, app_module, spoken_name):
                 for chunk in r.iter_content(chunk_size=1 << 20):
                     f.write(chunk)
     except Exception as e:
+        try:
+            if app_module is not None and hasattr(app_module, "set_face_state"):
+                app_module.set_face_state("idle")
+        except Exception:
+            pass
         try:
             if app_module is not None and hasattr(app_module, "speak"):
                 app_module.speak(f"The update download failed, {spoken_name}: {e}")

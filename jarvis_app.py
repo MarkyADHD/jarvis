@@ -2338,12 +2338,31 @@ def transcribe_with_whisper(audio_bytes):
             task="transcribe",
             beam_size=3,
             best_of=3,
-            temperature=0.0,
+            # A single fixed temperature (was 0.0) silently disabled
+            # Whisper's own built-in hallucination mitigation: its
+            # decode-with-fallback logic is SUPPOSED to retry at a
+            # higher temperature whenever a segment fails the
+            # no_speech/compression_ratio/log_prob checks below, but
+            # with only one temperature to try, a failing segment just
+            # got returned anyway with nothing to fall back to -- live-
+            # confirmed as the mechanism behind a real reported
+            # "repeating what is the weather" hallucination-loop
+            # ("what is the weather jarvis what is the weather jarvis
+            # what is the weather", one call, compression_ratio-shaped
+            # repetition exactly what these checks exist to catch). A
+            # real fallback ladder lets a failed low-temperature attempt
+            # actually get re-tried instead of just failing silently.
+            temperature=(0.0, 0.2, 0.4),
             condition_on_previous_text=False,
             initial_prompt=whisper_initial_prompt(),
             vad_filter=True,
             no_speech_threshold=0.55,
-            compression_ratio_threshold=2.4,
+            # Tightened from 2.4 (the plain openai-whisper default) --
+            # confirmed live that the default let an actual repetition-
+            # loop hallucination through uncaught. Lower means less
+            # tolerance for the kind of compressible, repeating-phrase
+            # text a loop hallucination produces.
+            compression_ratio_threshold=2.2,
             log_prob_threshold=-1.0,
         )
 
