@@ -181,50 +181,32 @@ def settings_status() -> dict:
 
 
 def settings_ai_status() -> dict:
-    active = provider_router.get_active_provider()
-    return {
-        "providers": [
-            {"id": pid, "label": m["label"], "free": m["free"], "kind": m["kind"]}
-            for pid, m in provider_router.PROVIDERS.items()
-        ],
-        "active_provider": active,
-        "active_ollama_model": provider_router.get_active_ollama_model() if active == "ollama" else "",
-    }
+    """Deliberately scoped to just the two brains that actually matter
+    now: Claude (the default) and Ollama's local qwen3:8b (the quota-
+    fallback backup, also reachable manually from here). The wider
+    multi-provider switcher (Gemini/Codex/Kiro/etc.) that used to live
+    here caused real confusion -- a tool-less fallback line answering
+    as though it were a lesser, different Jarvis -- so it isn't exposed
+    in this settings panel; jarvis_provider_router_v1.py still carries
+    those adapters for JarvisCode's own use, just not surfaced here."""
+    return {"active_provider": provider_router.get_active_provider()}
 
 
-def settings_ai_switch(provider_id: str, confirm_install: bool) -> dict:
-    """Same "ask before installing" contract as JarvisCode's own
-    /api/set_provider -- shared here rather than duplicated so Jarvis's
-    settings panel and JarvisCode can't drift into two different
-    behaviors for the identical decision."""
-    meta = provider_router.PROVIDERS.get(provider_id)
-    if not meta:
-        return {"ok": False, "error": "unknown provider"}
+def settings_ai_switch(provider_id: str) -> dict:
+    provider_id = str(provider_id or "").strip().lower()
+    if provider_id not in ("claude", "ollama"):
+        return {"ok": False, "error": "Only claude or ollama can be picked here.",
+                "active_provider": provider_router.get_active_provider()}
 
-    ready, reason = provider_router.is_ready(provider_id)
-    # Real reported bug: checking `not ready` alone treated a missing
-    # API key the same as a missing CLI, offering to "install" something
-    # already genuinely installed. cli_missing() asks the actual question.
-    cli_missing = provider_router.cli_missing(provider_id)
+    if provider_id == "claude":
+        provider_router.set_active_provider_override("")
+        return {"ok": True}
 
-    if cli_missing and meta.get("install_cmd") and not confirm_install:
-        return {
-            "ok": False,
-            "needs_install": True,
-            "install_summary": " ".join(meta["install_cmd"]),
-            "label": meta["label"],
-        }
-
-    if cli_missing and meta.get("install_cmd") and confirm_install:
-        ok, error = provider_router.install_provider(provider_id)
-        if not ok:
-            return {"ok": False, "error": f"Install failed: {error}"}
-        ready, reason = provider_router.is_ready(provider_id)
-
+    ready, reason = provider_router.is_ready("ollama")
     if not ready:
-        return {"ok": False, "error": reason or "provider not ready"}
+        return {"ok": False, "error": reason, "active_provider": provider_router.get_active_provider()}
 
-    provider_router.set_active_provider(provider_id)
+    provider_router.set_active_provider_override("ollama")
     return {"ok": True}
 
 
@@ -1149,8 +1131,7 @@ class Handler(BaseHTTPRequestHandler):
             self._proxy_to_visualizer()
 
     _SETTINGS_ROUTES = {
-        "/settings/ai/switch": lambda d: settings_ai_switch(
-            str(d.get("provider", "")).strip(), bool(d.get("confirm_install"))),
+        "/settings/ai/switch": lambda d: settings_ai_switch(str(d.get("provider", "")).strip()),
         "/settings/tailscale/setup": lambda d: settings_tailscale_setup(),
         "/settings/thumbnail/backend": lambda d: settings_thumbnail_set_backend(str(d.get("backend", "")).strip()),
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),

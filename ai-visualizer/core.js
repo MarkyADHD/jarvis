@@ -152,6 +152,11 @@ const AV = (() => {
         color:#e8f0f2;font:12px "SF Mono",Menlo,Consolas,monospace;
         padding:10px 8px;outline:none;cursor:pointer;backdrop-filter:blur(6px)}
       #jarvisModeSelect:focus{border-color:rgba(120,255,190,.6)}
+      #jarvisBrainSelect{flex:0 0 auto;background:rgba(10,14,18,.72);
+        border:1px solid rgba(120,255,190,.28);border-radius:9px;
+        color:#e8f0f2;font:12px "SF Mono",Menlo,Consolas,monospace;
+        padding:10px 8px;outline:none;cursor:pointer;backdrop-filter:blur(6px)}
+      #jarvisBrainSelect:focus{border-color:rgba(120,255,190,.6)}
       #jarvisChatStatus{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);
         margin-bottom:8px;font:11px "SF Mono",Menlo,Consolas,monospace;
         letter-spacing:.08em;color:#8fe8b8;text-shadow:0 0 8px rgba(90,240,160,.4);
@@ -171,12 +176,17 @@ const AV = (() => {
       </select>
       <input id="jarvisChatInput" type="text" autocomplete="off"
              placeholder="Type a command for Jarvis...">
+      <select id="jarvisBrainSelect" title="Which AI brain answers">
+        <option value="claude">Claude</option>
+        <option value="ollama">Qwen (local backup)</option>
+      </select>
     `;
     document.body.appendChild(bar);
 
     const input = bar.querySelector("#jarvisChatInput");
     const status = bar.querySelector("#jarvisChatStatus");
     const modeSelect = bar.querySelector("#jarvisModeSelect");
+    const brainSelect = bar.querySelector("#jarvisBrainSelect");
     const audio = new Audio();
 
     // Reflects the saved communication mode on load, and pushes a change
@@ -202,6 +212,32 @@ const AV = (() => {
         flash("mode saved");
       } catch (err) {
         flash("mode save failed");
+      }
+    });
+
+    // Same idea as the mode dropdown above, but for which AI brain
+    // actually answers: Claude normally, or the local Qwen backup (also
+    // switched to automatically if Claude ever comes back out of quota
+    // mid-conversation -- this dropdown is for picking it on purpose).
+    fetch(settingsBase + "/settings/ai/status", { headers: { "X-Jarvis-Token": token } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.active_provider) brainSelect.value = data.active_provider;
+      })
+      .catch(() => {});
+
+    brainSelect.addEventListener("change", async () => {
+      try {
+        const r = await fetch(settingsBase + "/settings/ai/switch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Jarvis-Token": token },
+          body: JSON.stringify({ provider: brainSelect.value }),
+        });
+        const data = await r.json();
+        flash(data.ok ? "brain switched" : (data.error || "switch failed"));
+        if (!data.ok && data.active_provider) brainSelect.value = data.active_provider;
+      } catch (err) {
+        flash("brain switch failed");
       }
     });
 
@@ -348,17 +384,11 @@ const AV = (() => {
       <section>
         <h4>AI Brain</h4>
         <div id="aiStatus" class="status">checking...</div>
-        <div class="row">
-          <select id="aiProviderSelect" style="flex:1;background:rgba(255,255,255,.04);
-            border:1px solid rgba(120,255,190,.2);border-radius:6px;color:#e8f0f2;
-            font:11px 'SF Mono',Menlo,Consolas,monospace;padding:6px 8px"></select>
-          <button id="aiSwitch">Switch</button>
-        </div>
-        <div class="hint">Which AI actually answers Jarvis's questions
-          and handles self-editing. Claude is the default whenever it's
-          installed; Free Local AI needs no account and runs on your own
-          PC. Switching to a provider that isn't installed yet will ask
-          before installing anything.</div>
+        <div class="hint">Claude is the default brain. If it ever comes
+          back rate-limited or out of quota mid-conversation, Jarvis
+          switches to a local Qwen model automatically and says so out
+          loud. Use the dropdown next to the chat bar to switch brains
+          on purpose any time.</div>
       </section>
       <section>
         <h4>Remote Access (Tailscale)</h4>
@@ -658,59 +688,12 @@ const AV = (() => {
       try {
         const r = await fetch(api("/settings/ai/status"), authed({ method: "GET" }));
         const data = await r.json();
-        const select = panel.querySelector("#aiProviderSelect");
-        select.innerHTML = "";
-        (data.providers || []).forEach((p) => {
-          const opt = document.createElement("option");
-          opt.value = p.id;
-          opt.textContent = p.label + (p.free ? "" : " (paid)");
-          if (p.id === data.active_provider) opt.selected = true;
-          select.appendChild(opt);
-        });
-        const label = (data.providers || []).find((p) => p.id === data.active_provider);
-        setStatus(panel.querySelector("#aiStatus"),
-          "Active: " + (label ? label.label : data.active_provider) +
-          (data.active_ollama_model ? " (" + data.active_ollama_model + ")" : ""), "ok");
+        const label = data.active_provider === "ollama" ? "local Qwen (backup)" : "Claude";
+        setStatus(panel.querySelector("#aiStatus"), "Running on " + label, "ok");
       } catch (e) {
         setStatus(panel.querySelector("#aiStatus"), "server unreachable", "err");
       }
     }
-
-    async function switchAiProvider(providerId, confirmInstall) {
-      const statusEl = panel.querySelector("#aiStatus");
-      setStatus(statusEl, "switching...", "");
-      try {
-        const r = await fetch(api("/settings/ai/switch"), authed({
-          method: "POST",
-          body: JSON.stringify({ provider: providerId, confirm_install: !!confirmInstall }),
-        }));
-        const data = await r.json();
-        if (data.needs_install) {
-          const ok = confirm((data.label || providerId) + " isn't installed yet. Install it now? (" + data.install_summary + ")");
-          if (ok) return switchAiProvider(providerId, true);
-          // Declining used to leave the status line exactly as it was,
-          // which read as "nothing happened" rather than "you said no" --
-          // same reported symptom class as JarvisCode's identical dialog.
-          setStatus(statusEl, "Skipped -- staying on the current brain.", "");
-          await refreshAi();
-          return;
-        }
-        if (!data.ok) {
-          setStatus(statusEl, data.error || "Switch failed.", "err");
-          alert((data.label || providerId) + " couldn't be switched to:\n\n" + (data.error || "Switch failed."));
-          await refreshAi();
-          return;
-        }
-        await refreshAi();
-      } catch (e) {
-        setStatus(statusEl, "server unreachable", "err");
-      }
-    }
-
-    panel.querySelector("#aiSwitch").addEventListener("click", () => {
-      const providerId = panel.querySelector("#aiProviderSelect").value;
-      switchAiProvider(providerId, false);
-    });
 
     async function refreshTailscale() {
       const statusEl = panel.querySelector("#tailscaleStatus");

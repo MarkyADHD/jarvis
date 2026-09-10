@@ -417,17 +417,25 @@ if ($tailscaleExe) {
 
 Say ""
 Say "===================================================="
-Say "  JarvisVision -- optional, lets Jarvis see your screen"
+Say "  JarvisVision + backup brain -- lets Jarvis see your"
+Say "  screen and keeps him talking if Claude runs out of quota"
 Say "===================================================="
 Say ""
 
 # Optional, same reasoning as Tailscale above -- Jarvis's Claude-backed
 # conversation works fine without this. But without Ollama and its
-# vision model installed, "what's on my screen" / JarvisVision silently
+# models installed, "what's on my screen" / JarvisVision silently
 # failed on every install except the dev machine (which already had
 # both by hand) -- confirmed nothing in this script ever installed
-# either one. qwen2.5vl:7b is a real download (a few GB); best-effort
-# and non-fatal on purpose, same as Tailscale.
+# either one. Two separate models get pulled here now, not one:
+# qwen2.5vl:7b for JarvisVision (a real vision model, needed for
+# screen understanding) and qwen3:8b for the quota-fallback text
+# brain jarvis_provider_router_v1.py switches to automatically if
+# Claude ever comes back rate-limited/out of quota -- the vision
+# model's multimodal overhead makes it the wrong tool for that job,
+# so it gets its own smaller, faster, text-only model instead. Both
+# are real downloads (a few GB combined); best-effort and non-fatal
+# on purpose, same as Tailscale.
 $ollamaExe = Get-Command ollama -ErrorAction SilentlyContinue
 if ($ollamaExe) {
     Say "Found: $($ollamaExe.Source)"
@@ -449,9 +457,18 @@ if ($ollamaExe) {
         Write-Host "Could not pull the JarvisVision model automatically -- skipping, this is optional." -ForegroundColor Yellow
         Write-Host "Install it yourself later by running 'ollama pull qwen2.5vl:7b'." -ForegroundColor Yellow
     }
+
+    Say "Pulling the backup brain model (qwen3:8b) -- another real download, please be patient..."
+    try {
+        & $ollamaExe.Source pull qwen3:8b
+        Say "Backup brain is ready. If Claude ever runs out of quota, Jarvis switches to this automatically."
+    } catch {
+        Write-Host "Could not pull the backup brain model automatically -- skipping, this is optional." -ForegroundColor Yellow
+        Write-Host "Install it yourself later by running 'ollama pull qwen3:8b'." -ForegroundColor Yellow
+    }
 } else {
     Write-Host "Ollama could not be installed automatically -- skipping, this is optional." -ForegroundColor Yellow
-    Write-Host "JarvisVision ('what's on my screen') needs it -- install yourself later: https://ollama.com/download (or 'winget install Ollama.Ollama'), then run 'ollama pull qwen2.5vl:7b'." -ForegroundColor Yellow
+    Write-Host "JarvisVision ('what's on my screen') and the quota-fallback backup brain both need it -- install yourself later: https://ollama.com/download (or 'winget install Ollama.Ollama'), then run 'ollama pull qwen2.5vl:7b' and 'ollama pull qwen3:8b'." -ForegroundColor Yellow
 }
 
 Say ""
@@ -525,9 +542,11 @@ Say ""
 # Claude Code used to be a hard requirement here (forced Node.js install,
 # forced npm install, forced blocking `claude login`). It no longer is --
 # Jarvis now has a real provider router (jarvis_provider_router_v1.py)
-# that falls back to the free local Ollama brain (already installed a
-# few steps up for JarvisVision, same qwen2.5vl:7b model) whenever Claude
-# Code isn't found, with zero action needed from anyone. So this whole
+# that falls back to the free local Ollama brain (qwen3:8b, already
+# pulled a few steps up) whenever Claude Code isn't found, AND
+# automatically switches to it mid-conversation if Claude ever comes
+# back rate-limited or out of quota, with zero action needed from
+# anyone either way. So this whole
 # section is now best-effort and non-fatal, same pattern as Tailscale/
 # Ollama/FFmpeg above -- nothing after this point depends on it
 # succeeding. Existing users who already have Claude Code installed and

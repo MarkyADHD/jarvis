@@ -927,6 +927,38 @@ def grounded_web_answer_v3(goal, web_context, memory_context="", search_diagnost
     public_ok = bool(search_diagnostics.get("public_relevance_ok"))
     memory_ok = bool(memory_context and search_v3.context_mentions_entity(memory_context, entity))
 
+    # Prefer the warm, tool-having brain first: it has real WebSearch
+    # access and, per CLAUDE.md, already prefers it over this module's
+    # own scraping pipeline -- which has produced real garbage-snippet
+    # answers before (the "$60 Bitcoin price" incident, and the
+    # unprompted bitcoin/markyadhd repetition bugs that traced back to
+    # bad pre-fetched context). The web_context below is handed over as
+    # a starting point, not the only source of truth: the warm brain can
+    # verify or replace it with a real WebSearch call if it looks thin,
+    # off-topic, or wrong, rather than answering from bad research
+    # verbatim the way the tool-less fallback below has to.
+    try:
+        warm_prompt = (
+            f"Answer this question the user actually asked: \"{goal}\"\n\n"
+            "Research already gathered by Jarvis's own search pipeline is "
+            "below, as a head start, not a mandate -- if it looks thin, "
+            "off-topic, or wrong, use your own WebSearch tool directly "
+            "instead of trusting it. Never answer about a different topic "
+            "than what was actually asked, even if the research below "
+            "drifted onto something else.\n\n"
+            f"RESEARCH GATHERED SO FAR:\n{web_context or '[none]'}\n\n"
+            "RELEVANT MEMORY (private -- never present as a publicly "
+            f"confirmed fact):\n{memory_context or '[none]'}\n\n"
+            "Reply with just the spoken answer -- no markdown, no preamble."
+        )
+        warm_answer = provider_router.ask_active_brain(warm_prompt, spoken_name=name, timeout=45.0)
+        if warm_answer.get("ok"):
+            warm_reply = str(warm_answer.get("result", "") or "").strip()
+            if warm_reply:
+                return {"mode": "chat", "reply": warm_reply, "steps": []}
+    except Exception as e:
+        _record_v3_error("provider_router.ask_active_brain (grounded)", e)
+
     if claude_v1.enabled():
         try:
             claude_answer = claude_v1.answer_grounded(
