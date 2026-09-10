@@ -2624,11 +2624,34 @@ def voice_listener_loop(status_callback):
                     # leave the face stuck showing "listening" forever.
                     set_face_state("idle")
 
-                    try:
-                        text = transcribe_with_whisper(audio_blob)
-                        process_heard_text(text, heard_during_speech=heard_during_speech)
-                    except Exception as e:
-                        log(f"Transcription failed: {e}")
+                    # Transcription (and everything downstream of it) runs on
+                    # its own thread instead of blocking this capture loop.
+                    # It used to run inline here -- while Whisper (large-v3,
+                    # beam_size=3, best_of=3) chewed on one utterance for a
+                    # second or more, this loop stopped pulling from
+                    # mic_audio_queue and the VAD state (recording_active,
+                    # speech_start_time, last_voice_time) sat frozen. Mic
+                    # audio kept queuing in the background, but once this
+                    # loop resumed it measured silence/duration against
+                    # time.time() -- which had jumped forward by however
+                    # long transcription took -- against audio that was
+                    # actually captured earlier. A second utterance spoken
+                    # during that block got its start clipped or never
+                    # tripped silence-detection on its own, so it sat
+                    # unheard until the user spoke again, at which point the
+                    # two got concatenated into one blob and Jarvis answered
+                    # the stale, ignored command instead of the new one.
+                    # whisper_lock (inside transcribe_with_whisper) still
+                    # serializes actual model inference, so results come
+                    # back in roughly submission order.
+                    def _transcribe_and_process(blob=audio_blob, hds=heard_during_speech):
+                        try:
+                            text = transcribe_with_whisper(blob)
+                            process_heard_text(text, heard_during_speech=hds)
+                        except Exception as e:
+                            log(f"Transcription failed: {e}")
+
+                    threading.Thread(target=_transcribe_and_process, daemon=True).start()
 
     except Exception as e:
         log(f"Microphone stream error: {e}")
