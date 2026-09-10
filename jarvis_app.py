@@ -2319,7 +2319,6 @@ Jarvis, open OBS Studio.
 Jarvis, open Twitch dashboard.
 Jarvis, open YouTube Studio.
 Jarvis, open Downloads.
-Jarvis, what is the weather?
 Jarvis, what time is it?
 The user likes being called {spoken_name()}.
 """
