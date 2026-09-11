@@ -674,7 +674,14 @@ form.addEventListener("submit", async (e) => {
       body: JSON.stringify({ message: text }),
     });
     if (r.status === 403) {
-      pending.textContent = "Wrong or missing key -- open the link Mark gave you again.";
+      // A bad key used to get stuck in localStorage forever -- it saves
+      // on entry (line ~639) before the server ever validates it, so a
+      // typo just silently failed every request after with no way to
+      // re-enter it short of manually clearing site data. Clearing it
+      // here and reloading brings the prompt back automatically.
+      localStorage.removeItem("jarvis_key");
+      pending.textContent = "Wrong key -- reloading so you can re-enter it...";
+      setTimeout(() => location.reload(), 1500);
     } else {
       const data = await r.json();
       pending.textContent = data.reply || "(no reply)";
@@ -740,7 +747,9 @@ async function sendVoice(blob) {
       body: blob,
     });
     if (r.status === 403) {
-      pending.textContent = "Wrong or missing key -- open the link Mark gave you again.";
+      localStorage.removeItem("jarvis_key");
+      pending.textContent = "Wrong key -- reloading so you can re-enter it...";
+      setTimeout(() => location.reload(), 1500);
       return;
     }
     const data = await r.json();
@@ -923,7 +932,9 @@ HUD_VOICE_INJECTION = """
         body: blob,
       });
       if (r.status === 403) {
-        showStatus("Wrong or missing key -- open the link Mark gave you again.");
+        localStorage.removeItem("jarvis_key");
+        showStatus("Wrong key -- reloading so you can re-enter it...");
+        setTimeout(() => location.reload(), 1500);
         return;
       }
       const data = await r.json();
