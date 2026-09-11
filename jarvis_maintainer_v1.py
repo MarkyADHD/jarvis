@@ -410,6 +410,18 @@ class Maintainer:
         if not self.cycle_lock.acquire(blocking=False):
             return {"status": "busy"}
         try:
+            # Reviewed and reverted a prior version of this method that
+            # moved check_integrity() past the pause/rate-limit gate
+            # below to save a few KB of hashing every 5s tick -- that
+            # traded away real continuous tamper detection (it would
+            # never run at all while paused, which is a common state)
+            # and moved the file-hashing work inside self.lock, adding
+            # contention with touch()/record_error()/observe(), which
+            # are called frequently. The actual I/O cost of hashing a
+            # handful of small files every 5s was negligible to begin
+            # with, so that trade wasn't worth making -- back to checking
+            # unconditionally, outside the lock, every tick.
+            self.check_integrity()
             if self.state["paused"] or not self.idle():
                 return {"status": "paused" if self.state["paused"] else "not_idle"}
             timestamp = self.clock()
@@ -419,15 +431,6 @@ class Maintainer:
                 if (len(self.state["reviews"]) >= self.config.max_reviews_daily or self.state["pending_build"]
                         or (not self.state["requested"] and timestamp-self.state["last_review"] < self.config.review_interval)):
                     return {"status": "rate_limited"}
-                # Integrity is verified here, right before a review can
-                # actually proceed, instead of unconditionally at the top
-                # of every 5s tick -- this loop is rate-limited to run a
-                # real review only occasionally, so re-hashing the trust
-                # manifest + protected files on every single tick (even
-                # while paused or rate-limited, which is nearly always)
-                # was pure wasted disk I/O running 24/7 for no benefit:
-                # nothing privileged happens until past this gate anyway.
-                self.check_integrity()
                 self.state["last_review"] = timestamp
                 self.state["requested"] = False
                 self.state["seen"] = {k: t for k, t in self.state["seen"].items()

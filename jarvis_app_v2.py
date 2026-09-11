@@ -111,17 +111,33 @@ def _log_to_file_v2(message):
     Mirror every log line to a plain file so live issues (wake word not
     heard, a false live-interrupt trigger, an exception) can be read back
     without un-hiding the window.
+
+    This same code runs inside TWO separate OS processes -- the main app
+    and jarvis_remote_chat.py both import this module and both call
+    install_v2(), which installs this as app.log -- and both write into
+    the SAME file path. Each process holds its own independent file
+    handle, so when one process rotates (renames the current file out of
+    the way), the other's handle would otherwise keep silently writing
+    into the renamed file, and a later rotation by the first process
+    could delete it while the second still has it open. Comparing the
+    handle's own file identity (st_ino) against what the path currently
+    points to on every write catches exactly that: whichever process's
+    handle got orphaned by the other one's rotation reopens against the
+    real current file instead of writing into a file that's about to
+    vanish.
     """
     global _debug_log_handle
     try:
         with _debug_log_lock:
             f = _open_debug_log()
             if f is not None:
-                # Jarvis runs for days at a time -- checking size via
-                # f.tell() (the byte offset from writes made this
-                # session) rather than a fresh stat() call each time
-                # keeps this cheap enough to check on every line.
-                if f.tell() > _DEBUG_LOG_MAX_BYTES:
+                try:
+                    on_disk = _DEBUG_LOG_PATH.stat()
+                    stale = os.fstat(f.fileno()).st_ino != on_disk.st_ino
+                    oversized = on_disk.st_size > _DEBUG_LOG_MAX_BYTES
+                except Exception:
+                    stale = oversized = False
+                if stale or oversized:
                     f.close()
                     _debug_log_handle = None
                     f = _open_debug_log()

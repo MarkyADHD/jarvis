@@ -2383,7 +2383,13 @@ def calibrate_microphone_threshold(force=False):
     except Exception as e:
         voice_threshold = MIN_VOICE_THRESHOLD
         log(f"Mic calibration failed, using default threshold: {voice_threshold}. Error: {e}")
-        _mic_calibrated_once = True
+        # Deliberately NOT setting _mic_calibrated_once here: a transient
+        # failure (mic momentarily busy at startup) would otherwise
+        # permanently stick Jarvis on the fallback threshold for the rest
+        # of the process's life, since nothing else ever retries. Leaving
+        # it False means the next voice_listener_loop restart (the next
+        # PTT hand-back) tries again for real -- only an actual success
+        # should stop future recalibration attempts.
 
 
 def mic_callback(indata, frames, time_info, status):
