@@ -2,6 +2,17 @@
 Jarvis Process Dedup V1
 =========================
 
+DISABLED, DO NOT RE-ENABLE without re-reading the long comment at its
+one call site in jarvis_app_v2.py (search "background_dedup_loop"). The
+premise below turned out to be wrong: what this module treats as a
+runaway duplicate process is actually the normal, benign Windows venv
+pythonw.exe launcher-stub pattern (a near-idle stub process plus its
+real worker underneath, one pair per script Jarvis launches) -- see
+CLAUDE.md's "Known quirks" section. This watchdog was twice observed
+reproducibly crashing the live process by killing the wrong half of a
+legitimate stub/child pair mid-operation. Left in the repo disabled,
+not deleted, only so its history/reasoning isn't lost.
+
 Cleans up the standing, still-unidentified "every plain-script Jarvis
 process sometimes ends up running twice" environment quirk on this kind
 of machine (documented in jarvis_face_window.py's own docstring, and

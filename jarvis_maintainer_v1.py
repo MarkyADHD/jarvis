@@ -410,7 +410,6 @@ class Maintainer:
         if not self.cycle_lock.acquire(blocking=False):
             return {"status": "busy"}
         try:
-            self.check_integrity()
             if self.state["paused"] or not self.idle():
                 return {"status": "paused" if self.state["paused"] else "not_idle"}
             timestamp = self.clock()
@@ -420,6 +419,15 @@ class Maintainer:
                 if (len(self.state["reviews"]) >= self.config.max_reviews_daily or self.state["pending_build"]
                         or (not self.state["requested"] and timestamp-self.state["last_review"] < self.config.review_interval)):
                     return {"status": "rate_limited"}
+                # Integrity is verified here, right before a review can
+                # actually proceed, instead of unconditionally at the top
+                # of every 5s tick -- this loop is rate-limited to run a
+                # real review only occasionally, so re-hashing the trust
+                # manifest + protected files on every single tick (even
+                # while paused or rate-limited, which is nearly always)
+                # was pure wasted disk I/O running 24/7 for no benefit:
+                # nothing privileged happens until past this gate anyway.
+                self.check_integrity()
                 self.state["last_review"] = timestamp
                 self.state["requested"] = False
                 self.state["seen"] = {k: t for k, t in self.state["seen"].items()

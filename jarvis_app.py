@@ -2343,10 +2343,25 @@ def audio_rms(audio_bytes):
     return float(np.sqrt(np.mean(samples * samples)))
 
 
-def calibrate_microphone_threshold():
-    global voice_threshold
+_mic_calibrated_once = False
+
+
+def calibrate_microphone_threshold(force=False):
+    global voice_threshold, _mic_calibrated_once
 
     if not SOUNDDEVICE_AVAILABLE:
+        return
+
+    # voice_listener_loop() calls this every time it (re)starts, which
+    # includes every single push-to-talk hand-back -- not just real
+    # process startup. That meant every PTT release paid a blocking
+    # 1-second sd.rec()/sd.wait() recording before Jarvis started
+    # listening again: a full second where he genuinely wasn't
+    # listening, on top of holding the audio device for that second.
+    # The room's noise floor doesn't change between one PTT press and
+    # the next, so only the real first calibration needs to record;
+    # every later (re)start just keeps the threshold it already found.
+    if _mic_calibrated_once and not force:
         return
 
     try:
@@ -2363,10 +2378,12 @@ def calibrate_microphone_threshold():
         rms = float(np.sqrt(np.mean(recording.astype(np.float32) ** 2)))
         voice_threshold = max(MIN_VOICE_THRESHOLD, int(rms * VOICE_THRESHOLD_MULTIPLIER))
         log(f"Microphone calibrated. Voice threshold: {voice_threshold}")
+        _mic_calibrated_once = True
 
     except Exception as e:
         voice_threshold = MIN_VOICE_THRESHOLD
         log(f"Mic calibration failed, using default threshold: {voice_threshold}. Error: {e}")
+        _mic_calibrated_once = True
 
 
 def mic_callback(indata, frames, time_info, status):

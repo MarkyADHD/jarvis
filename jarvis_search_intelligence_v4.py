@@ -411,54 +411,78 @@ def research_with_precision(
         else ""
     )
 
-    for variant in variants:
+    def _fetch_variant(variant):
         try:
-            raw = research_func(
-                variant,
-                max_results=max_results,
-            )
+            return research_func(variant, max_results=max_results), None
         except Exception as e:
+            return None, e
+
+    # Variants have no data dependency on each other, so fetching them one
+    # at a time (the original behavior) meant a "fresh fact" question could
+    # cost up to max_attempts sequential network round trips before Jarvis
+    # even started answering. Fetching in small concurrent batches instead
+    # keeps the same early-exit-once-satisfied behavior and doesn't fetch
+    # any more variants than the sequential version would in the common
+    # case (satisfied on attempt 1 or 2), it just no longer makes each
+    # variant wait on the previous one's full network round trip.
+    _BATCH = 2
+    satisfied = False
+    for batch_start in range(0, len(variants), _BATCH):
+        batch = variants[batch_start:batch_start + _BATCH]
+        if len(batch) == 1:
+            fetched = {batch[0]: _fetch_variant(batch[0])}
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(batch)) as ex:
+                futures = {ex.submit(_fetch_variant, v): v for v in batch}
+                fetched = {futures[fut]: fut.result() for fut in concurrent.futures.as_completed(futures)}
+
+        for variant in batch:  # preserve variant order, not completion order
+            raw, error = fetched[variant]
+            if error is not None:
+                attempts.append({
+                    "query": variant,
+                    "provider": "primary",
+                    "error": str(error),
+                })
+                continue
+
+            filtered, diag = v3.filter_web_data(
+                raw,
+                query=query,
+                entity=strict_entity,
+            )
+
+            _merge(
+                merged_results,
+                filtered.get("results", []) or [],
+                v3._result_key,
+            )
+            _merge(
+                merged_pages,
+                filtered.get("pages", []) or [],
+                v3._page_key,
+            )
+
+            discarded_results += int(diag.get("discarded_results", 0))
+            discarded_pages += int(diag.get("discarded_pages", 0))
+
+            snapshot = {
+                "results": merged_results,
+                "pages": merged_pages,
+            }
+
+            satisfied = precision_satisfied(snapshot, query)
             attempts.append({
                 "query": variant,
                 "provider": "primary",
-                "error": str(e),
+                "relevant_results": diag.get("relevant_results", 0),
+                "relevant_pages": diag.get("relevant_pages", 0),
+                "precision_satisfied": satisfied,
             })
-            continue
 
-        filtered, diag = v3.filter_web_data(
-            raw,
-            query=query,
-            entity=strict_entity,
-        )
-
-        _merge(
-            merged_results,
-            filtered.get("results", []) or [],
-            v3._result_key,
-        )
-        _merge(
-            merged_pages,
-            filtered.get("pages", []) or [],
-            v3._page_key,
-        )
-
-        discarded_results += int(diag.get("discarded_results", 0))
-        discarded_pages += int(diag.get("discarded_pages", 0))
-
-        snapshot = {
-            "results": merged_results,
-            "pages": merged_pages,
-        }
-
-        attempts.append({
-            "query": variant,
-            "provider": "primary",
-            "relevant_results": diag.get("relevant_results", 0),
-            "relevant_pages": diag.get("relevant_pages", 0),
-            "precision_satisfied": precision_satisfied(snapshot, query),
-        })
-
-        if precision_satisfied(snapshot, query):
+            if satisfied:
+                break
+        if satisfied:
             break
 
     current = {
@@ -469,11 +493,17 @@ def research_with_precision(
     # Optional second provider. This is deliberately a fallback rather than a
     # requirement, so Jarvis still works if DDGS is not installed.
     if use_ddgs_fallback and not precision_satisfied(current, query):
-        for variant in variants[:3]:
-            raw = ddgs_research(
-                variant,
-                max_results=max_results,
-            )
+        ddgs_variants = variants[:3]
+        # Same fix as the primary loop above -- this only runs once the
+        # primary pass already came up short, so it's already the slow
+        # path; fetching all 3 fallback variants concurrently instead of
+        # one at a time matters most exactly here.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(ddgs_variants)) as ex:
+            futures = {ex.submit(ddgs_research, v, max_results=max_results): v for v in ddgs_variants}
+            fetched = {futures[fut]: fut.result() for fut in concurrent.futures.as_completed(futures)}
+
+        for variant in ddgs_variants:  # preserve variant order, not completion order
+            raw = fetched[variant]
 
             if not raw.get("results") and not raw.get("pages"):
                 continue

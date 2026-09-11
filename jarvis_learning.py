@@ -78,9 +78,28 @@ def cleanup_old_training_rules():
             file.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
+_last_cleanup_at = 0.0
+_CLEANUP_INTERVAL_SECONDS = 86400  # once a day is plenty
+
+
+def _cleanup_if_due():
+    # Same fix as jarvis_memory.py's remember(): cleanup_old_training_rules()
+    # reads and rewrites the ENTIRE rules file, and with a 10-year TTL it
+    # almost never actually removes anything. load_training_rules() runs
+    # this on EVERY command (via find_matching_training_rule, checked
+    # before most routing), so this was a full read+rewrite on the hot
+    # path of literally everything said to Jarvis. Time-gating it keeps
+    # the TTL honored without paying that cost every single time.
+    global _last_cleanup_at
+    now_ts = datetime.now().timestamp()
+    if now_ts - _last_cleanup_at >= _CLEANUP_INTERVAL_SECONDS:
+        cleanup_old_training_rules()
+        _last_cleanup_at = now_ts
+
+
 def save_training_rule(trigger, instruction):
     ensure_learning_folder()
-    cleanup_old_training_rules()
+    _cleanup_if_due()
 
     trigger = str(trigger).strip().lower()
     instruction = str(instruction).strip()
@@ -106,7 +125,7 @@ def save_training_rule(trigger, instruction):
 
 def load_training_rules():
     ensure_learning_folder()
-    cleanup_old_training_rules()
+    _cleanup_if_due()
 
     if not LEARNING_FILE.exists():
         return []

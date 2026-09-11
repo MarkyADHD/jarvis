@@ -100,9 +100,26 @@ def cleanup_old_memories():
             file.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
+_last_cleanup_at = 0.0
+_CLEANUP_INTERVAL_SECONDS = 86400  # once a day is plenty
+
+
 def remember(kind, text, metadata=None, importance=1):
     ensure_memory_folder()
-    cleanup_old_memories()
+
+    # cleanup_old_memories() reads the ENTIRE memory file and rewrites it
+    # from scratch -- remember() used to call it on every single turn,
+    # meaning every conversational exchange paid a full read+rewrite of
+    # this ever-growing file, synchronously, before Jarvis could even
+    # speak. With a 10-year TTL, that pass almost never actually removes
+    # anything anyway (nothing is ever 10 years old), so it was pure
+    # wasted I/O on the hot path. Once a day is more than enough to still
+    # honor the TTL.
+    global _last_cleanup_at
+    now_ts = datetime.now().timestamp()
+    if now_ts - _last_cleanup_at >= _CLEANUP_INTERVAL_SECONDS:
+        cleanup_old_memories()
+        _last_cleanup_at = now_ts
 
     text = str(text).strip()
 

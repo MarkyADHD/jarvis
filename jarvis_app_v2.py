@@ -71,6 +71,39 @@ import jarvis_world_time_v1 as world_time_v1
 
 _original_log = getattr(app, "log", None)
 
+_DEBUG_LOG_PATH = Path(r"C:\AI-Agent\jarvis_live_debug.log")
+_DEBUG_LOG_MAX_BYTES = 5 * 1024 * 1024  # rotate before this becomes a
+# multi-day, ever-growing file -- it had no cap at all before, and
+# opening/writing/closing the file from scratch on every single log
+# line (this fires constantly -- every heard command, every reply,
+# every background event) was needless per-call open/close syscall
+# overhead on top of that. One handle held open for the process
+# lifetime, flushed after each write so a crash still leaves the log
+# readable, fixes both at once.
+_debug_log_lock = threading.Lock()
+_debug_log_handle = None
+
+
+def _open_debug_log():
+    global _debug_log_handle
+    if _debug_log_handle is not None:
+        return _debug_log_handle
+    try:
+        if _DEBUG_LOG_PATH.exists() and _DEBUG_LOG_PATH.stat().st_size > _DEBUG_LOG_MAX_BYTES:
+            rotated = _DEBUG_LOG_PATH.with_suffix(".log.old")
+            try:
+                rotated.unlink()
+            except FileNotFoundError:
+                pass
+            _DEBUG_LOG_PATH.rename(rotated)
+    except Exception:
+        pass
+    try:
+        _debug_log_handle = open(_DEBUG_LOG_PATH, "a", encoding="utf-8")
+    except Exception:
+        _debug_log_handle = None
+    return _debug_log_handle
+
 
 def _log_to_file_v2(message):
     """Temporary diagnostic mirror: the HUD is hidden now (by design), so
@@ -79,9 +112,22 @@ def _log_to_file_v2(message):
     heard, a false live-interrupt trigger, an exception) can be read back
     without un-hiding the window.
     """
+    global _debug_log_handle
     try:
-        with open(r"C:\AI-Agent\jarvis_live_debug.log", "a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%H:%M:%S')} {message}\n")
+        with _debug_log_lock:
+            f = _open_debug_log()
+            if f is not None:
+                # Jarvis runs for days at a time -- checking size via
+                # f.tell() (the byte offset from writes made this
+                # session) rather than a fresh stat() call each time
+                # keeps this cheap enough to check on every line.
+                if f.tell() > _DEBUG_LOG_MAX_BYTES:
+                    f.close()
+                    _debug_log_handle = None
+                    f = _open_debug_log()
+                if f is not None:
+                    f.write(f"{time.strftime('%H:%M:%S')} {message}\n")
+                    f.flush()
     except Exception:
         pass
 
@@ -257,10 +303,14 @@ def _conversation_model_resolver_v4(raw_text, context_text):
         },
     }
 
+    # A local call generating 120 tokens has no business being allowed
+    # 80s -- if Ollama ever actually stalled, Jarvis would sit silently
+    # "thinking" for a minute and a half before this even times out.
+    # 20s matches the equivalent resolver in jarvis_intelligence_core_v3.py.
     response = requests.post(
         "http://localhost:11434/api/chat",
         json=payload,
-        timeout=80,
+        timeout=20,
     )
 
     response.raise_for_status()
@@ -482,7 +532,7 @@ def quick_handle_command_v2(command):
         }
 
     claude_result = claude_v1.command_fast(clean_raw, name)
-    if not claude_result:
+    if not claude_result and c != clean_raw:
         claude_result = claude_v1.command_fast(c, name)
     if claude_result:
         return finish_plan_v3(claude_result, c, name, "claude")
@@ -2211,6 +2261,28 @@ def _start_communication_mode_watch():
     threading.Thread(target=_communication_mode_watch_loop, daemon=True).start()
 
 
+def _lower_process_priority():
+    """Windows gives every process the same NORMAL scheduling priority by
+    default, so under real CPU contention (a game maxing out every core)
+    the OS scheduler treats Jarvis's background threads as equally
+    important as the game's own -- a real, unnecessary contributor to
+    "gaming lags when Jarvis does something." BELOW_NORMAL is a pure
+    scheduling hint: it doesn't throttle Jarvis when the CPU is idle
+    (the overwhelming majority of the time), it just tells Windows to
+    prefer the foreground app first when both actually want the same
+    CPU core at once. Applies to every Jarvis process that calls
+    install_v2() (the main app and jarvis_remote_chat.py's headless
+    install both do), each setting its own priority -- best-effort, a
+    machine without pywin32 available just skips this silently."""
+    try:
+        import win32api
+        import win32process
+        handle = win32api.GetCurrentProcess()
+        win32process.SetPriorityClass(handle, win32process.BELOW_NORMAL_PRIORITY_CLASS)
+    except Exception:
+        pass
+
+
 def install_v2(headless=False):
     """headless=True is for jarvis_remote_chat.py: it only needs the
     ask_ai_common_v2/quick_handle_command_v2 overrides and the
@@ -2222,6 +2294,7 @@ def install_v2(headless=False):
     off the main thread is what hung the whole server the first time
     this shipped -- every request blocked on the same install lock
     behind it, forever."""
+    _lower_process_priority()
     refresh_spoken_name()
 
     try:

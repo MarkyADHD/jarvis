@@ -545,7 +545,7 @@ def prewarm_ptt_async():
     ).start()
 
 
-def speak_kokoro_blocking(text: str, stop_event=None, poll: float = 0.02) -> None:
+def speak_kokoro_blocking(text: str, stop_event=None, poll: float = 0.1) -> None:
     """Speak `text` through Kokoro and block until it finishes playing (or
     `stop_event` fires, in which case playback is cut immediately).
 

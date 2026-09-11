@@ -1,4 +1,5 @@
 
+import copy
 import json
 import re
 import threading
@@ -69,6 +70,23 @@ def _vault_section(markdown_text, start_heading, end_headings):
     return "\n".join(lines[start_idx:end_idx]).strip()
 
 
+_read_text_cache = {}  # str(path) -> (mtime_ns, text)
+
+
+def _read_text_cached(path):
+    """Same mtime-cache idea as read_json() above, for the plain-markdown
+    vault files -- vault_context_for_prompt() re-read and re-parsed both
+    of these from disk on every single message otherwise."""
+    key = str(path)
+    mtime_ns = path.stat().st_mtime_ns
+    cached = _read_text_cache.get(key)
+    if cached is not None and cached[0] == mtime_ns:
+        return cached[1]
+    text = path.read_text(encoding="utf-8")
+    _read_text_cache[key] = (mtime_ns, text)
+    return text
+
+
 def vault_context_for_prompt():
     """Real vault content, not the old JSONL system. Never raises -- a
     missing/unreadable vault just means no vault context this call,
@@ -77,7 +95,7 @@ def vault_context_for_prompt():
 
     try:
         if VAULT_INDEX_PATH.exists():
-            text = VAULT_INDEX_PATH.read_text(encoding="utf-8")
+            text = _read_text_cached(VAULT_INDEX_PATH)
             who = _vault_section(text, "Who I Am", ["Vault Structure"])
             prefs = _vault_section(
                 text, "My Preferences for Working with AI", ["How My Memory Works (for the AI)"],
@@ -90,7 +108,7 @@ def vault_context_for_prompt():
 
     try:
         if ACTIVE_PRIORITIES_PATH.exists():
-            text = ACTIVE_PRIORITIES_PATH.read_text(encoding="utf-8").strip()
+            text = _read_text_cached(ACTIVE_PRIORITIES_PATH).strip()
             if text:
                 parts.append("Current active priorities (Active Priorities.md):\n" + text)
     except Exception:
@@ -388,6 +406,9 @@ def clean_noisy_command(command):
     return c
 
 
+_read_json_cache = {}  # str(path) -> (mtime_ns, parsed_data)
+
+
 def read_json(path, default):
     """Encrypted at rest via DPAPI (jarvis_settings_v1.decrypt_blob) --
     protects this file if the drive is stolen/cloned/read on another
@@ -395,10 +416,25 @@ def read_json(path, default):
     existing PLAINTEXT file unchanged too (decrypt_blob returns
     non-"dpapi:" content as-is) -- an existing user's file gets
     encrypted automatically the next time it's saved, no separate
-    migration step needed."""
+    migration step needed.
+
+    Cached by mtime: profile/vault/recent-context lookups like this run
+    on every single message to build prompt context, and were paying a
+    full disk read + DPAPI decrypt + JSON parse every time even though
+    these files change rarely. The mtime check (one cheap stat() call)
+    still notices a real change immediately -- including one written by
+    a different Jarvis process sharing the same memory folder -- so this
+    only skips work when the file is genuinely unchanged. Returns a deep
+    copy so callers that mutate the result in place can't corrupt the
+    cached value."""
     try:
         if not path.exists():
             return default
+        key = str(path)
+        mtime_ns = path.stat().st_mtime_ns
+        cached = _read_json_cache.get(key)
+        if cached is not None and cached[0] == mtime_ns:
+            return copy.deepcopy(cached[1])
         raw = path.read_text(encoding="utf-8")
         text = _settings_v1.decrypt_blob(raw)
         if text is None:
@@ -406,7 +442,9 @@ def read_json(path, default):
             # corrupted) -- fail safe to the caller's default rather
             # than crash or silently treat unreadable data as empty.
             return default
-        return json.loads(text)
+        data = json.loads(text)
+        _read_json_cache[key] = (mtime_ns, data)
+        return copy.deepcopy(data)
     except Exception:
         return default
 
