@@ -637,7 +637,7 @@ def get_default_nanoleaf():
 
 def sync_default_nanoleaf_to_existing_module():
     """
-    Keeps the current jarvis_nanoleaf_v1 module compatible.
+    Keeps the current jarvis_lights_v1.nanoleaf namespace compatible.
     Selecting a device here updates its existing single-device config.
     """
     device = get_default_nanoleaf()
@@ -651,7 +651,7 @@ def sync_default_nanoleaf_to_existing_module():
         return False
 
     try:
-        import jarvis_nanoleaf_v1 as old_nanoleaf
+        from jarvis_lights_v1 import nanoleaf as old_nanoleaf
         old_nanoleaf.save_config(
             host=device["host"],
             token=token,

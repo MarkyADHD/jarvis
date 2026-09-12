@@ -28,13 +28,9 @@ import subprocess
 import time
 
 try:
-    import jarvis_keylight_v1 as keylight
+    from jarvis_lights_v1 import keylight, nanoleaf
 except Exception:
     keylight = None
-
-try:
-    import jarvis_nanoleaf_v1 as nanoleaf
-except Exception:
     nanoleaf = None
 
 

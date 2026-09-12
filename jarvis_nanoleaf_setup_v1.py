@@ -3,7 +3,7 @@ from getpass import getpass
 from pathlib import Path
 import sys
 
-import jarvis_nanoleaf_v1 as n
+from jarvis_lights_v1 import nanoleaf as n
 
 
 DEFAULT_IP = "192.168.0.113"

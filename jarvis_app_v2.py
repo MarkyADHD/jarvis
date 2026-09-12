@@ -38,10 +38,10 @@ import jarvis_attachments_v1 as attachments_v1
 import jarvis_goal_mode_v32 as goal_v32
 import jarvis_media_v1 as media_v1
 import jarvis_spotify_v2 as spotify_v2
-import jarvis_keylight_v1 as keylight_v1
-import jarvis_nanoleaf_v1 as nanoleaf_v1
-import jarvis_hue_v1 as hue_v1
-import jarvis_govee_v1 as govee_v1
+from jarvis_lights_v1 import keylight as keylight_v1
+from jarvis_lights_v1 import nanoleaf as nanoleaf_v1
+from jarvis_lights_v1 import hue as hue_v1
+from jarvis_lights_v1 import govee as govee_v1
 import jarvis_process_dedup_v1 as process_dedup_v1
 import jarvis_update_check_v1 as update_check_v1
 import jarvis_twitch_v1 as twitch_v1
@@ -53,7 +53,7 @@ import jarvis_provider_router_v1 as provider_router
 import jarvis_onboarding_v1 as onboarding_v1
 import jarvis_discord_v1 as discord_v1
 import jarvis_tailscale_v1 as tailscale_v1
-import jarvis_room_lights_v1 as room_lights_v1
+import jarvis_lights_v1 as room_lights_v1
 import jarvis_shutdown_systems_v1 as shutdown_systems_v1
 import jarvis_interrupt_v1 as interrupt_v1
 import jarvis_aliases_v1 as aliases_v1

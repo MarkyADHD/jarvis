@@ -49,11 +49,8 @@ import jarvis_app_v2 as jav2
 from backtalk import ears as backtalk_ears
 from backtalk import mouth as backtalk_mouth
 import jarvis_settings_v1 as settings
-import jarvis_keylight_v1 as keylight
-import jarvis_nanoleaf_v1 as nanoleaf
+from jarvis_lights_v1 import keylight, nanoleaf, hue, govee
 import jarvis_spotify_v2 as spotify_v2
-import jarvis_hue_v1 as hue
-import jarvis_govee_v1 as govee
 import jarvis_twitch_v1 as twitch
 import jarvis_provider_router_v1 as provider_router
 import jarvis_tailscale_v1 as tailscale
@@ -159,7 +156,7 @@ def process_voice(raw_audio: bytes) -> dict:
 
 # --------------------------------------------------------------------------
 # Settings -- backs the gear-icon panel in the HUD (ai-visualizer/core.js).
-# Thin wrappers around jarvis_settings_v1 / jarvis_keylight_v1, the same
+# Thin wrappers around jarvis_settings_v1 / jarvis_lights_v1, the same
 # modules the voice "Jarvis change my Spotify client ID" etc. commands
 # already use -- this just gives the HUD a button-and-form way into the
 # same secrets store (DPAPI-encrypted) and the same Nanoleaf registry.
