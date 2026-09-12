@@ -2040,6 +2040,24 @@ def play_wav_file(path):
     if not pygame.mixer.get_init():
         pygame.mixer.init()
 
+    # Real waveform data for this path too (the non-streaming fallback:
+    # Piper's Python bindings unavailable, or a synth failure), not just
+    # the streaming path above -- read the actual samples once, then
+    # during playback publish whatever window pygame's own elapsed
+    # position (get_pos(), ms) says is playing RIGHT NOW.
+    wav_samples = None
+    wav_rate = 0
+    if _face_signals is not None:
+        try:
+            with wave.open(str(path), "rb") as wf:
+                wav_rate = wf.getframerate()
+                raw = wf.readframes(wf.getnframes())
+                wav_samples = np.frombuffer(raw, dtype=np.int16)
+                if wf.getnchannels() > 1:
+                    wav_samples = wav_samples[::wf.getnchannels()]
+        except Exception:
+            wav_samples = None
+
     pygame.mixer.music.load(str(path))
     pygame.mixer.music.play()
 
@@ -2047,6 +2065,16 @@ def play_wav_file(path):
         if stop_talking_event.is_set():
             pygame.mixer.music.stop()
             break
+        if wav_samples is not None and wav_rate:
+            try:
+                pos_ms = pygame.mixer.music.get_pos()
+                if pos_ms >= 0:
+                    start = int(pos_ms / 1000.0 * wav_rate)
+                    window = wav_samples[start:start + int(wav_rate * 0.07)]
+                    if window.size:
+                        _face_signals.feed_waveform(window)
+            except Exception:
+                pass
         time.sleep(0.02)
 
     try:
@@ -2097,6 +2125,24 @@ def stream_piper_voice(text):
                 stream.start()
 
             stream.write(audio_bytes)
+
+            # Real audio-reactive visualizer data, not a canned animation
+            # -- this is the ACTUAL PCM being sent to the speakers this
+            # instant, downsampled and published the same way backtalk's
+            # own Mouth class does for its Kokoro path (see
+            # backtalk/signals.py's feed_waveform, including its
+            # state="speaking" self-heal). Piper's own playback here
+            # never went through that class, which is exactly why the
+            # HUD dial used to sit on "idle" through an entire spoken
+            # reply -- nothing was ever telling the bus a reply was
+            # actually playing.
+            if _face_signals is not None:
+                try:
+                    pcm = np.frombuffer(audio_bytes, dtype=np.int16)
+                    if pcm.size:
+                        _face_signals.feed_waveform(pcm)
+                except Exception:
+                    pass
 
     finally:
         if stream is not None:
@@ -2186,6 +2232,7 @@ def speak_worker():
             time.sleep(0.15)
             speaking_now.clear()
             stop_talking_event.clear()
+            set_face_state("idle")
             speak_queue.task_done()
 
 
@@ -2559,6 +2606,66 @@ def get_command_from_heard_text(text, heard_during_speech=False):
     return None, False
 
 
+_last_dispatched_command = ""
+_last_dispatched_at = 0.0
+_REPEAT_SUPPRESS_WINDOW_SECONDS = 300
+
+
+def _is_likely_echo_repeat(command):
+    """Confirmed live (real chat log, not a theory): a garbled wake-word
+    capture -- "unknownjarvis", "lainkjarvish", the same phrase appearing
+    twice in one utterance -- keeps re-triggering the exact same question
+    ("what do you know about markyadhd") minutes apart, over and over,
+    for hours. Whisper's own hallucination guards (temperature fallback,
+    compression_ratio_threshold, no_speech_threshold -- see
+    transcribe_with_whisper) already catch repetition WITHIN one decode;
+    this catches it ACROSS separate heard-wake-word events, which those
+    can't. Root cause is still open (echo of Jarvis's own TTS bleeding
+    back into the mic, or real background/stream audio in the room) --
+    this stops the visible symptom (answering the same question over and
+    over like a broken record) without needing to fix the audio path
+    first."""
+    global _last_dispatched_command, _last_dispatched_at
+    now = time.monotonic()
+    normalized = normalize_transcript(command)
+
+    # Cross-call check: the SAME command dispatched again a moment ago.
+    # Deliberately an EXACT match only, not substring containment --
+    # a real reported bug in an earlier version of this fix: "play
+    # music" dispatched, then "play music by Drake" moments later, got
+    # silently dropped because it CONTAINED the prior command, even
+    # though it's an obviously different, intentional follow-up.
+    cross_call_repeat = bool(
+        normalized
+        and _last_dispatched_command == normalized
+        and (now - _last_dispatched_at) < _REPEAT_SUPPRESS_WINDOW_SECONDS
+    )
+
+    # Within-this-utterance check: the confirmed real pattern from the
+    # actual bug report is one heard utterance containing the SAME long
+    # phrase twice ("...markyadhd lainkjarvish...markyadhd"), which a
+    # cross-call check alone can't catch since it's one single dispatch,
+    # not two. A genuine command repeating a 16+ character phrase against
+    # itself is inherently suspicious on its own -- no real follow-up
+    # legitimately duplicates that much of its own previous sentence.
+    self_repeat = False
+    if len(normalized) >= 32:
+        half = len(normalized) // 2
+        for size in (24, 20, 16):
+            if size > half:
+                continue
+            probe = normalized[:size]
+            if probe and normalized.count(probe) > 1:
+                self_repeat = True
+                break
+
+    is_repeat = cross_call_repeat or self_repeat
+    if not is_repeat:
+        _last_dispatched_command = normalized
+        _last_dispatched_at = now
+    return is_repeat
+
+
 def process_heard_text(text, heard_during_speech=False):
     text = normalize_transcript(text)
 
@@ -2592,6 +2699,10 @@ def process_heard_text(text, heard_during_speech=False):
     if is_stop_talking_command(command):
         stop_all_current_work()
         deactivate_conversation_mode()
+        return
+
+    if _is_likely_echo_repeat(command):
+        log(f"Suppressed likely echo/repeat (same as recent command): {command}")
         return
 
     threading.Thread(target=run_agent_task, args=(command,), daemon=True).start()

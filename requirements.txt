@@ -177,8 +177,14 @@ webrtcvad-wheels==2.0.14
 websockets==16.1.1
 win32_setctime==1.2.0
 winrt-runtime==3.2.1
+winrt-Windows.Foundation==3.2.1
 winrt-Windows.Media==3.2.1
 winrt-Windows.Media.Control==3.2.1
+# Needed by jarvis_system_media_helper.py to read real album art off the
+# current media session's thumbnail stream (jarvis_media_v1's own
+# winrt-Windows.Media.Control usage never needed Storage.Streams since it
+# only ever reads text properties for spoken replies).
+winrt-Windows.Storage.Streams==3.2.1
 wrapt==2.4.0
 yarl==1.24.5
 yt-dlp==2026.8.19

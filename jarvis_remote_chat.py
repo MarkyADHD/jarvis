@@ -18,12 +18,14 @@ the phone hears Jarvis, not just reads him.
 import base64
 import io
 import json
+import re
 import subprocess
 import sys
 import threading
 import urllib.error
 import urllib.request
 import wave
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -48,12 +50,24 @@ from backtalk import ears as backtalk_ears
 from backtalk import mouth as backtalk_mouth
 import jarvis_settings_v1 as settings
 import jarvis_keylight_v1 as keylight
+import jarvis_nanoleaf_v1 as nanoleaf
+import jarvis_spotify_v2 as spotify_v2
 import jarvis_hue_v1 as hue
 import jarvis_govee_v1 as govee
 import jarvis_twitch_v1 as twitch
 import jarvis_provider_router_v1 as provider_router
 import jarvis_tailscale_v1 as tailscale
 import jarvis_thumbnail_v1 as thumbnail
+import jarvis_system_stats_v1 as system_stats
+import jarviscode_app
+
+try:
+    import jarvis_system_media_v1 as system_media
+except Exception:
+    # winsdk missing on this install (e.g. not yet re-run setup after an
+    # update) -- fall back to Spotify-only now-playing rather than taking
+    # the whole remote-chat backend down over one optional dependency.
+    system_media = None
 
 
 def process_message(text: str) -> str:
@@ -257,6 +271,215 @@ def settings_thumbnail_status() -> dict:
 def settings_thumbnail_set_backend(backend: str) -> dict:
     ok, error = thumbnail.set_thumbnail_backend(backend)
     return {"ok": ok, "error": error}
+
+
+def settings_system_stats() -> dict:
+    return system_stats.get_system_stats()
+
+
+def settings_jarviscode_ensure() -> dict:
+    """JarvisCode is deliberately its own on-demand process, not part of
+    Jarvis's always-running tree (see jarviscode_app.py's own docstring)
+    -- so the dashboard's JarvisCode view can't just point an iframe at
+    its port and hope. Reuses jarviscode_app's own launch-if-not-already-
+    running check (already used by the "open jarviscode" voice command)
+    rather than duplicating that logic here."""
+    try:
+        jarviscode_app._ensure_server_running()
+        return {"ok": jarviscode_app._server_alive()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+_ACTIVITY_LINE_RE = re.compile(r"^(\d{2}):(\d{2}):(\d{2}) Jarvis: (.+)$")
+_DEBUG_LOG_PATH_FOR_ACTIVITY = Path(r"C:\AI-Agent\jarvis_live_debug.log")
+
+
+def settings_recent_activity(limit=8) -> list:
+    """Real dashboard data, not mockup filler -- pulled from the same
+    plain-text mirror jarvis_app_v2.py already writes every spoken reply
+    to (see that file's _log_to_file_v2). Deliberately only "Jarvis:"
+    lines (what he actually said), not every internal log line, since
+    that's what reads as an actual activity feed rather than a debug
+    dump. "Minutes ago" assumes the log's HH:MM:SS is today -- good
+    enough for a dashboard glance, not meant to survive a log spanning
+    midnight perfectly."""
+    try:
+        lines = _DEBUG_LOG_PATH_FOR_ACTIVITY.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return []
+
+    now = datetime.now()
+    results = []
+    for line in reversed(lines):
+        match = _ACTIVITY_LINE_RE.match(line)
+        if not match:
+            continue
+        hour, minute, second, text = match.groups()
+        try:
+            when = now.replace(hour=int(hour), minute=int(minute), second=int(second), microsecond=0)
+        except ValueError:
+            continue
+        if when > now:
+            when -= timedelta(days=1)  # crossed midnight
+        minutes_ago = max(0, int((now - when).total_seconds() // 60))
+        if minutes_ago < 60:
+            when_label = "just now" if minutes_ago < 1 else f"{minutes_ago} min ago"
+        elif minutes_ago < 1440:
+            when_label = f"{minutes_ago // 60} hour{'s' if minutes_ago // 60 != 1 else ''} ago"
+        else:
+            when_label = f"{minutes_ago // 1440} day{'s' if minutes_ago // 1440 != 1 else ''} ago"
+        results.append({"text": text.strip()[:160], "when": when_label})
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _set_power_ok(result) -> bool:
+    """keylight.set_power()/nanoleaf.set_power() have historically returned
+    either a plain bool or an (ok, detail) tuple depending on code path
+    (see jarvis_shutdown_systems_v1.py's own _keylight_off/_nanoleaf_off,
+    which defend against both) -- same defensive unwrap here."""
+    if isinstance(result, tuple):
+        return bool(result[0])
+    return bool(result)
+
+
+def _call_with_timeout(func, timeout_seconds, *args, **kwargs):
+    """keylight.status()/nanoleaf.status() talk to real LAN devices --
+    confirmed live that a device that's off/asleep/unreachable can make
+    the underlying call hang far longer than its own internal timeout
+    accounts for (discovery/caching path, not just the final HTTP
+    request). This is a HUD panel polled every few seconds while open,
+    so it needs a hard ceiling regardless of what the device library
+    itself does -- runs the call on a daemon thread and gives up (but
+    doesn't leak or crash) if it doesn't finish in time."""
+    result = {"value": None, "error": None, "done": False}
+
+    def _run():
+        try:
+            result["value"] = func(*args, **kwargs)
+        except Exception as e:
+            result["error"] = e
+        result["done"] = True
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+    if not result["done"]:
+        return None, TimeoutError(f"{getattr(func, '__name__', 'call')} exceeded {timeout_seconds}s")
+    return result["value"], result["error"]
+
+
+def _nanoleaf_status():
+    nano, _error = nanoleaf.status()
+    return nano
+
+
+def settings_lights_status() -> dict:
+    """Runs both real LAN calls concurrently -- this used to start
+    keylight's call, wait up to its own 4s timeout, THEN start
+    nanoleaf's and wait up to another 4s, so a genuinely slow/offline
+    device on either side could make a single request take up to 8s.
+    The HUD polls this every 5s (see core.js's refreshAll), so that
+    could exceed the poll interval and stack up overlapping in-flight
+    requests. Starting both threads first and joining both afterward
+    caps the real worst case at ~4s (whichever is slower), not the sum
+    of both."""
+    result = {"keylight": None, "nanoleaf": None}
+
+    def _run(func, timeout_seconds):
+        box = {"value": None, "error": None, "done": False}
+        def _target():
+            try:
+                box["value"] = func()
+            except Exception as e:
+                box["error"] = e
+            box["done"] = True
+        thread = threading.Thread(target=_target, daemon=True)
+        thread.start()
+        return thread, box, timeout_seconds
+
+    jobs = [
+        ("keylight", _run(keylight.status, 4.0)),
+        ("nanoleaf", _run(_nanoleaf_status, 4.0)),
+    ]
+    for name, (thread, box, timeout_seconds) in jobs:
+        thread.join(timeout_seconds)
+        if box["done"] and box["error"] is None:
+            result[name] = box["value"]
+
+    return result
+
+
+def settings_lights_toggle(device: str) -> dict:
+    device = str(device or "").strip().lower()
+    if device == "keylight":
+        current, _error = _call_with_timeout(keylight.status, 4.0)
+        want_on = not bool(current and current.get("on"))
+        ok_result, error = _call_with_timeout(keylight.set_power, 4.0, want_on)
+        ok = error is None and _set_power_ok(ok_result)
+        return {"ok": ok, "on": want_on if ok else bool(current and current.get("on"))}
+    if device == "nanoleaf":
+        current, _error = _call_with_timeout(_nanoleaf_status, 4.0)
+        want_on = not bool(current and current.get("on"))
+        ok_result, error = _call_with_timeout(nanoleaf.set_power, 4.0, want_on)
+        ok = error is None and _set_power_ok(ok_result)
+        return {"ok": ok, "on": want_on if ok else bool(current and current.get("on"))}
+    return {"ok": False, "error": "unknown device"}
+
+
+def settings_spotify_now_playing() -> dict:
+    # System media (winsdk) picks up whatever is actually making sound --
+    # Spotify, a YouTube Music tab, VLC, anything -- with real album art,
+    # so it's the primary source. Spotify's own API is the fallback, for
+    # machines where winsdk isn't installed or no app has a media session.
+    if system_media is not None:
+        try:
+            result = system_media.get_now_playing()
+        except Exception:
+            result = {"playing": False}
+        if result.get("playing") or result.get("track"):
+            return result
+
+    try:
+        player = spotify_v2.current_player()
+    except Exception:
+        player = None
+    if not player or not player.get("item"):
+        return {"playing": False}
+    item = player["item"]
+    artists = ", ".join(a.get("name", "") for a in item.get("artists", []) or [] if a.get("name"))
+    duration = int(item.get("duration_ms") or 0)
+    progress = int(player.get("progress_ms") or 0)
+    images = item.get("album", {}).get("images") or []
+    return {
+        "playing": bool(player.get("is_playing")),
+        "track": str(item.get("name", "") or ""),
+        "artist": artists,
+        "progress_percent": round(100 * progress / duration, 1) if duration else 0,
+        "album_art_url": images[0]["url"] if images else None,
+    }
+
+
+_SPOTIFY_TRANSPORT = {
+    "pause": spotify_v2.pause_playback,
+    "resume": spotify_v2.resume_playback,
+    "next": spotify_v2.next_track,
+    "previous": spotify_v2.previous_track,
+}
+
+
+def settings_spotify_transport(action: str) -> dict:
+    action = str(action or "").strip().lower()
+    func = _SPOTIFY_TRANSPORT.get(action)
+    if not func:
+        return {"ok": False, "error": "unknown action"}
+    try:
+        ok, detail = func()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": ok, "error": "" if ok else detail}
 
 
 def settings_save_spotify(client_id: str) -> dict:
@@ -501,6 +724,37 @@ def settings_twitch_status() -> dict:
         return {"connected": True, **info}
     except Exception as e:
         return {"connected": True, "error": str(e)}
+
+
+def settings_stream_control_status() -> dict:
+    if not twitch.is_connected():
+        return {"connected": False, "live": False}
+    live, error = _call_with_timeout(twitch.is_live, 6.0)
+    return {"connected": True, "live": bool(live) if error is None else False}
+
+
+def settings_stream_run_ad() -> dict:
+    try:
+        twitch.start_commercial()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def settings_stream_create_clip() -> dict:
+    try:
+        url = twitch.create_clip()
+        return {"ok": True, "url": url}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def settings_stream_last_vod() -> dict:
+    try:
+        url = twitch.get_last_vod_url()
+        return {"ok": True, "url": url}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def settings_twitch_save_credentials(client_id: str, client_secret: str) -> dict:
@@ -1098,6 +1352,66 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(settings_thumbnail_status())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/system_stats":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_system_stats())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/jarviscode/ensure":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_jarviscode_ensure())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/stream/status":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_stream_control_status())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/activity/recent":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_recent_activity())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/lights/status":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_lights_status())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/spotify/now_playing":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_spotify_now_playing())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
         elif path == "/settings/elevenlabs/voice/status":
             if not self._authorized():
                 self.send_response(403)
@@ -1163,6 +1477,11 @@ class Handler(BaseHTTPRequestHandler):
 
     _SETTINGS_ROUTES = {
         "/settings/ai/switch": lambda d: settings_ai_switch(str(d.get("provider", "")).strip()),
+        "/settings/lights/toggle": lambda d: settings_lights_toggle(str(d.get("device", "")).strip()),
+        "/settings/spotify/transport": lambda d: settings_spotify_transport(str(d.get("action", "")).strip()),
+        "/settings/stream/run_ad": lambda d: settings_stream_run_ad(),
+        "/settings/stream/create_clip": lambda d: settings_stream_create_clip(),
+        "/settings/stream/last_vod": lambda d: settings_stream_last_vod(),
         "/settings/tailscale/setup": lambda d: settings_tailscale_setup(),
         "/settings/thumbnail/backend": lambda d: settings_thumbnail_set_backend(str(d.get("backend", "")).strip()),
         "/settings/spotify": lambda d: settings_save_spotify(str(d.get("client_id", "")).strip()),

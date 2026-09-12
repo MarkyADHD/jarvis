@@ -233,6 +233,64 @@ def _helix_headers():
     return {"Authorization": f"Bearer {token}", "Client-Id": cfg["client_id"]}, cfg["broadcaster_id"]
 
 
+def is_live():
+    """Real stream status via Helix's own /streams endpoint (querying by
+    your own user_id) -- not a guess based on whether Jarvis is running
+    OBS or anything like that. Returns False on any error (not connected,
+    Twitch unreachable) rather than raising, since this backs a dashboard
+    status dot that should just read "offline" on failure, not break the
+    page."""
+    try:
+        headers, broadcaster_id = _helix_headers()
+        r = requests.get(f"{HELIX}/streams", headers=headers,
+                         params={"user_id": broadcaster_id}, timeout=8)
+        r.raise_for_status()
+        return bool(r.json().get("data"))
+    except Exception:
+        return False
+
+
+def start_commercial(length=90):
+    """Real Helix "Start Commercial" call -- requires channel:edit:commercial
+    (already in this project's own SCOPES) and only actually works while
+    the channel is live, which Twitch enforces server-side."""
+    headers, broadcaster_id = _helix_headers()
+    r = requests.post(f"{HELIX}/channels/commercial", headers=headers,
+                      json={"broadcaster_id": broadcaster_id, "length": length}, timeout=10)
+    if r.status_code >= 400:
+        try:
+            detail = r.json().get("message", r.text)
+        except Exception:
+            detail = r.text
+        raise RuntimeError(detail or f"Twitch returned {r.status_code}")
+    return True
+
+
+def create_clip():
+    """Real Helix "Create Clip" call -- also only works while live (Twitch
+    enforces this, not this code). Clip creation is async on Twitch's
+    side, so this returns the edit URL to open, not a finished clip."""
+    headers, broadcaster_id = _helix_headers()
+    r = requests.post(f"{HELIX}/clips", headers=headers,
+                      params={"broadcaster_id": broadcaster_id}, timeout=10)
+    r.raise_for_status()
+    data = r.json().get("data", [])
+    if not data:
+        raise RuntimeError("Twitch didn't return a clip ID.")
+    return data[0].get("edit_url", "")
+
+
+def get_last_vod_url():
+    headers, broadcaster_id = _helix_headers()
+    r = requests.get(f"{HELIX}/videos", headers=headers,
+                     params={"user_id": broadcaster_id, "type": "archive", "first": 1}, timeout=10)
+    r.raise_for_status()
+    data = r.json().get("data", [])
+    if not data:
+        return ""
+    return data[0].get("url", "")
+
+
 def disconnect():
     """Best-effort revoke on Twitch's side, then wipe everything local
     either way -- an unreachable Twitch is exactly the case where

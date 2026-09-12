@@ -646,6 +646,26 @@ def current_player():
     return None
 
 
+def pause_playback():
+    _, status, raw = _request("PUT", "/me/player/pause")
+    return status in (200, 202, 204), raw
+
+
+def resume_playback():
+    _, status, raw = _request("PUT", "/me/player/play")
+    return status in (200, 202, 204), raw
+
+
+def next_track():
+    _, status, raw = _request("POST", "/me/player/next")
+    return status in (200, 202, 204), raw
+
+
+def previous_track():
+    _, status, raw = _request("POST", "/me/player/previous")
+    return status in (200, 202, 204), raw
+
+
 def _play_request(uri, device_id=None):
     params = {}
     if device_id:
