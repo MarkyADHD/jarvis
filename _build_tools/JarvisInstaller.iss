@@ -61,7 +61,12 @@ Source: "{#ExportDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdi
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "DISCLAIMER.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "FRIEND_SETUP.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
+; README.md deliberately NOT listed here -- the wildcard export line
+; above already includes the real, current root README.md. This used
+; to explicitly overwrite it with a separate, much shorter copy that
+; lived only in _build_tools/ and had drifted badly out of date (no
+; Govee, no local Qwen brain, no JarvisClipper/Thumbnails/Code -- it
+; predated all of them). One README now, always current.
 Source: "setup_environment.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
