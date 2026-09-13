@@ -24,7 +24,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SERVER_DIR = HERE / "jarviscode"
-BASE_URL = "http://127.0.0.1:8795"
+PORT = 8795
+BASE_URL = f"http://127.0.0.1:{PORT}"
 
 EDGE_CANDIDATES = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -44,16 +45,42 @@ def _find_edge():
     raise FileNotFoundError("Microsoft Edge was not found on this machine.")
 
 
-def _server_alive():
+def _port_open():
+    """Cheap, fast check: is anything even listening on the port yet.
+    Deliberately separate from _server_alive() below -- on this machine,
+    connecting to a closed loopback port doesn't fail instantly, it
+    genuinely times out (confirmed live: ~1s per attempt even with
+    nothing listening, likely Windows Firewall dropping the SYN rather
+    than sending RST) -- so this uses a short timeout and gets polled
+    repeatedly while the process is still starting."""
     try:
-        with urllib.request.urlopen(f"{BASE_URL}/api/state", timeout=1) as r:
+        with socket.create_connection(("127.0.0.1", PORT), timeout=0.3):
+            return True
+    except Exception:
+        return False
+
+
+def _server_alive():
+    """Real bug, confirmed live: this used to use timeout=1, but
+    /api/state can legitimately take several seconds to answer -- it
+    queries the active provider's real model list, which for Ollama
+    means a live API call, and Ollama no longer runs in the background
+    by default (see jarvis_provider_router_v1.ensure_ollama_running()).
+    The server was actually up and would have answered fine; the health
+    check just gave up before it could, so JarvisCode never looked ready
+    and jarvis_remote_chat.py kept relaunching it from scratch on every
+    request. Only ever called once the port is confirmed open (see
+    _ensure_server_running), so the longer timeout here doesn't slow
+    down the "still starting up" phase at all."""
+    try:
+        with urllib.request.urlopen(f"{BASE_URL}/api/state", timeout=10) as r:
             return r.status == 200
     except Exception:
         return False
 
 
 def _ensure_server_running():
-    if _server_alive():
+    if _port_open() and _server_alive():
         return
 
     subprocess.Popen(
@@ -62,10 +89,13 @@ def _ensure_server_running():
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
-    for _ in range(100):
-        if _server_alive():
-            return
-        time.sleep(0.1)
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if _port_open():
+            break
+        time.sleep(0.2)
+
+    _server_alive()
 
 
 def main():
