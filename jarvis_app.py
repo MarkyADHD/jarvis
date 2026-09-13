@@ -3133,6 +3133,17 @@ def should_use_screen_vision(command):
 
 
 def ask_vision_model(question, image_base64):
+    # Ollama doesn't run until something needs it -- this is that trigger
+    # for screen-vision commands (real cold start on first use in a
+    # session, confirmed ~15s live; a no-op if it's already running).
+    try:
+        import jarvis_provider_router_v1 as _provider_router
+        ready, reason = _provider_router.ensure_ollama_running()
+        if not ready:
+            raise RuntimeError(reason)
+    except ImportError:
+        pass
+
     prompt = f"""
 {vision_prompt()}
 
@@ -4242,8 +4253,13 @@ class JarvisApp:
             daemon=True,
         ).start()
         threading.Thread(target=preload_whisper, daemon=True).start()
-        threading.Thread(target=prewarm_ollama, daemon=True).start()
-        threading.Thread(target=prewarm_vision, daemon=True).start()
+        # Deliberately no prewarm_ollama()/prewarm_vision() here -- Ollama
+        # (and the local model it runs) should not start just because
+        # Jarvis did. It only launches on demand now: when the user
+        # actually switches to the backup brain, or the first time a
+        # screen-vision command needs it (see ensure_ollama_running() in
+        # jarvis_provider_router_v1.py and its use in ask_vision_model()
+        # below).
 
     def build_ui(self):
         title = tk.Label(self.root, text="JARVIS", font=("Segoe UI", 26, "bold"))

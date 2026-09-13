@@ -229,7 +229,10 @@ def settings_ai_switch(provider_id: str) -> dict:
             pass
         return {"ok": True}
 
-    ready, reason = provider_router.is_ready("ollama")
+    # Ollama deliberately doesn't run until something needs it -- this
+    # launches it on demand (confirmed live: ~15s cold start) rather than
+    # just checking whether it happens to already be running.
+    ready, reason = provider_router.ensure_ollama_running()
     if not ready:
         return {"ok": False, "error": reason, "active_provider": provider_router.get_active_provider()}
 

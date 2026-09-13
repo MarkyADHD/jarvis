@@ -427,6 +427,49 @@ def _ollama_list_models():
         return []
 
 
+def _ollama_app_path():
+    """Resolves the Windows Ollama app under %LOCALAPPDATA%\\Programs\\
+    Ollama -- the same executable the user's own Windows Startup shortcut
+    used to point at before it was disabled so Ollama would stop
+    auto-launching on every login. Launching this exact exe (rather than
+    a bare `ollama serve`) matches how the user already had it configured
+    -- same tray icon, same update mechanism."""
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if not local_app_data:
+        return None
+    candidate = Path(local_app_data) / "Programs" / "Ollama" / "ollama app.exe"
+    return str(candidate) if candidate.exists() else None
+
+
+def ensure_ollama_running(timeout_seconds=25):
+    """Starts Ollama on demand instead of it running in the background
+    all the time. Explicit user call: the local model should sit at zero
+    resource cost until something actually needs it, not idle from every
+    Windows login. Both the "switch to backup brain" command and
+    JarvisVision's screen-analysis path call this before touching
+    Ollama's API, so either one transparently starts it the first time
+    it's actually needed in a session rather than failing outright."""
+    if _ollama_list_models():
+        return True, ""
+
+    exe = _ollama_app_path()
+    if not exe:
+        return False, "Ollama isn't installed on this PC."
+
+    try:
+        subprocess.Popen([exe], close_fds=True)
+    except Exception as e:
+        return False, f"I couldn't start Ollama: {e}"
+
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if _ollama_list_models():
+            return True, ""
+        time.sleep(1.0)
+
+    return False, "Ollama is taking longer than expected to start."
+
+
 def _ollama_auto_model():
     """Prefers whatever's already pulled over guessing -- a fresh Jarvis
     install already has OLLAMA_FALLBACK_MODEL from JarvisVision setup, but
@@ -1037,6 +1080,27 @@ def is_brain_request(command):
             or c in BRAIN_SWITCH_BACKUP_QUERIES or c in BRAIN_RESTORE_CLAUDE_QUERIES)
 
 
+def _switch_to_ollama_job(app_module, spoken_name):
+    ready, reason = ensure_ollama_running()
+    if not ready:
+        try:
+            app_module.speak(f"I couldn't switch to the backup brain, {spoken_name} -- {reason}.")
+        except Exception:
+            pass
+        return
+
+    set_active_provider_override("ollama")
+    try:
+        app_module.speak(
+            f"Switching to the backup brain, {spoken_name} -- I'm on my local "
+            f"Qwen model now, running right here on your PC. Everything else "
+            f"about me is the same; I'll stay here until you ask me to switch "
+            f"back to Claude."
+        )
+    except Exception:
+        pass
+
+
 def brain_command_fast(command, spoken_name="Sir", app_module=None):
     c = _strip_wake(command)
 
@@ -1044,16 +1108,36 @@ def brain_command_fast(command, spoken_name="Sir", app_module=None):
         return None
 
     if c in BRAIN_SWITCH_BACKUP_QUERIES:
-        ready, reason = is_ready("ollama")
-        if not ready:
-            return _reply(f"I can't switch to the backup brain, {spoken_name} -- {reason}.")
-        set_active_provider_override("ollama")
-        return _reply(
-            f"Switching to the backup brain, {spoken_name} -- I'm on my local "
-            f"Qwen model now, running right here on your PC. Everything else "
-            f"about me is the same; I'll stay here until you ask me to switch "
-            f"back to Claude."
-        )
+        # Ollama deliberately doesn't run until something needs it (no
+        # auto-start at Windows login or Jarvis startup), so switching to
+        # it can mean a real ~15s cold start, confirmed live. If it's
+        # already running this replies immediately like before; otherwise
+        # it hands off to a background thread (same pattern as
+        # jarvis_clipper_v1's _run_ad_job/_run_job) so the voice command
+        # doesn't sit in dead silence for 15+ seconds before replying.
+        if _ollama_list_models():
+            set_active_provider_override("ollama")
+            return _reply(
+                f"Switching to the backup brain, {spoken_name} -- I'm on my local "
+                f"Qwen model now, running right here on your PC. Everything else "
+                f"about me is the same; I'll stay here until you ask me to switch "
+                f"back to Claude."
+            )
+
+        if app_module is None:
+            ready, reason = ensure_ollama_running()
+            if not ready:
+                return _reply(f"I can't switch to the backup brain, {spoken_name} -- {reason}.")
+            set_active_provider_override("ollama")
+            return _reply(
+                f"Switching to the backup brain, {spoken_name} -- I'm on my local "
+                f"Qwen model now, running right here on your PC."
+            )
+
+        threading.Thread(
+            target=_switch_to_ollama_job, args=(app_module, spoken_name), daemon=True
+        ).start()
+        return _reply(f"Give me a moment, {spoken_name} -- starting up my local brain now.")
 
     if c in BRAIN_RESTORE_CLAUDE_QUERIES:
         if _manual_override_provider() == "ollama":

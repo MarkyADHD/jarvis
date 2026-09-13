@@ -281,6 +281,7 @@ const AV = (() => {
       .catch(() => {});
 
     brainSelect.addEventListener("change", async () => {
+      if (brainSelect.value === "ollama") flash("starting local model...", 20000);
       try {
         const r = await fetch(settingsBase + "/settings/ai/switch", {
           method: "POST",
