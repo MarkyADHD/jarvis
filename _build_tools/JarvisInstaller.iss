@@ -18,7 +18,7 @@
 
 #define AppName "JARVIS"
 #define AppPublisher "MarkyADHD"
-#define AppVersion "1.99"
+#define AppVersion "2.00"
 #define ExportDir "C:\JarvisExport"
 #define ArtDir "installer_art"
 
@@ -66,7 +66,6 @@ Source: "setup_environment.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\JARVIS"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarvis_app_v2.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
-Name: "{group}\JarvisCode"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\jarviscode_app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
 Name: "{group}\Finish Setup (run this first)"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_environment.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\jarvis_icon.ico"
 Name: "{group}\Setup Guide"; Filename: "{app}\FRIEND_SETUP.md"
 Name: "{group}\Disclaimer"; Filename: "{app}\DISCLAIMER.txt"
