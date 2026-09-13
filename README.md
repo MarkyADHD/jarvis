@@ -65,8 +65,8 @@ below, including recommended specs for the local model.
   own Govee API key (no per-device pairing needed). Checks every 10
   minutes for any newly-connected Govee light and announces it by name
   the first time it sees it
-- Add or remove any of these yourself from the in-HUD settings panel —
-  no code editing required, no restarting anything
+- Add or remove any of these yourself from the dashboard's Settings
+  view — no code editing required, no restarting anything
 
 ### See your screen — JarvisVision
 - Ask "what's on my screen", "what does this error mean", or "what
@@ -123,19 +123,24 @@ below, including recommended specs for the local model.
 - Saved to `Jarvis Thumbnails` on your desktop, folder opens
   automatically the moment it's ready
 
-### Show you what he's doing
-- A live animated face (the HUD) that reacts to whether he's idle,
-  listening, thinking, or speaking — several visual styles to choose
-  from
+### Show you what he's doing — the dashboard
+- A full home dashboard, not just a floating chat window: sidebar
+  navigation, a live chat dial that actually switches to a speaking
+  state and reacts to a real audio visualizer every time he talks (not
+  a canned animation), and a persistent right-side rail with Now
+  Playing, Stream Control, Smart Home, and Quick Tools
+- Now Playing picks up whatever's actually making sound on your PC —
+  Spotify, a browser tab, anything with a Windows media session — with
+  real album art, not just Spotify
+- Real System Overview gauges (CPU/GPU/memory) and a Recent Activity
+  feed pulled from what he's actually been doing, not placeholders
+- A Settings view, right there in the dashboard, for connecting
+  Spotify/Nanoleaf/Hue/Key Light/Govee without ever touching a config
+  file
 - A small floating bar that hovers above your taskbar while you're
   actually talking to him — mic input in blue, his own voice in green
   — and fades away again once the conversation's over, so it's never
   in the way the rest of the time
-- A small always-on chat bar built right into the HUD, so you can type
-  instead of talk when you'd rather stay quiet
-- A gear-icon settings panel, right there in the HUD, for connecting
-  Spotify/Nanoleaf/Hue/Key Light/Govee without ever touching a config
-  file
 - Tells you out loud when his own code has just changed, so a self-
   edit is never invisible
 
@@ -146,14 +151,15 @@ below, including recommended specs for the local model.
 - Talk to him from your phone over voice or text, anywhere, through
   that private Tailscale connection — never exposed to the open
   internet, never port-forwarded
-- The face HUD is viewable remotely too, so you can check in on him
-  the same way you would sitting in front of the PC
+- The full dashboard is reachable remotely too, so you can check in on
+  him the same way you would sitting in front of the PC
 
-### JarvisCode — a separate app for real coding work
-- Say "open jarviscode" for a standalone companion app built specifically
-  for repositories and software projects — normal Jarvis stays your
-  everyday assistant, JarvisCode is where the coding-focused work
-  happens, in its own window
+### JarvisCode — for real coding work
+- Built specifically for repositories and software projects — normal
+  Jarvis stays your everyday assistant, JarvisCode is where the coding-
+  focused work happens. Reached right from the main dashboard's own
+  sidebar now, no separate app to open; say "open jarviscode" if you'd
+  rather have it in its own standalone window instead
 - Open any project folder, see its real file tree, and chat about it —
   JarvisCode reads the actual project structure into context
   automatically, not just whatever you type
@@ -188,15 +194,17 @@ switch any time:
   automatically during install. Noticeably less capable than Claude on
   hard reasoning/coding tasks, but a real, usable brain for
   conversation, questions, and everyday commands — and a genuinely free
-  way to run Jarvis end to end.
+  way to run Jarvis end to end. Ollama itself sits at zero resource
+  cost until you actually use it — it doesn't run at Windows login or
+  in the background all the time, it starts the moment you switch to
+  it (or the first time a screen-vision command needs it).
 
 Both installed side by side, switch whenever:
 - Say **"switch to backup brain"** / **"switch to Qwen"** to move to
   the local model on purpose (handy if you want Claude off your GPU
   while gaming, say), and **"switch back to Claude"** to return.
-- A dropdown on the right of the HUD's chat bar does the same thing
-  with a click, and Jarvis confirms out loud which brain actually
-  answered.
+- A dropdown right in the dashboard does the same thing with a click,
+  and Jarvis confirms out loud which brain actually answered.
 - If Claude ever comes back rate-limited or out of quota mid-
   conversation, Jarvis switches to the local Qwen model **automatically**
   and tells you it happened — a real conversation never just dies
@@ -262,7 +270,7 @@ than telling you he can't.
     See the recommended specs above for how well it'll run on your
     hardware.
   - Set up both and switch between them any time — say "switch to
-    Qwen"/"switch to Claude", or use the dropdown on the HUD.
+    Qwen"/"switch to Claude", or use the dropdown in the dashboard.
 - Windows 10/11
 - A microphone and speakers (or headphones)
 - Optional: Spotify, Nanoleaf, Philips Hue, Elgato Key Light, or
@@ -327,7 +335,7 @@ If Jarvis has been useful to you and you'd like to support the project,
 **[buymeacoffee.com/markyadhd](https://buymeacoffee.com/markyadhd)** —
 entirely optional, always appreciated, never required.
 
-Jarvis's HUD and memory system were built drawing on ideas from Jared
+Jarvis's memory system was built drawing on ideas from Jared
 Rhodenizer's own open-source AI-assistant stack
 ([github.com/jaredrhod](https://github.com/jaredrhod)) — credit where
 it's due.
