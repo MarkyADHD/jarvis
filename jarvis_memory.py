@@ -326,7 +326,6 @@ def bootstrap_default_memories():
 
     starter_memories = [
         ("identity", "The user is building a local Windows Jarvis-style assistant.", 8),
-        ("identity", "The user's creator or brand name is MarkyADHD.", 8),
         ("preference", "By default, Jarvis should call the user Sir unless the user asks to be called something else.", 10),
         ("preference", "The user prefers full replacement files when code is updated, not tiny patch snippets.", 7),
     ]

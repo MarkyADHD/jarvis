@@ -256,7 +256,18 @@ WAKE_WORD_ALIASES = [
     "jarvus", "yarvis", "travis", "charvis", "service",
 ]
 
-CONVERSATION_TIMEOUT_SECONDS = 15
+
+# Explicit user requirement: the wake word ("Jarvis") must be used every
+# single time in wake-word mode -- no grace window where a follow-up
+# command works without saying it again. Push-to-talk is unaffected
+# (already inherently per-press). 0 makes conversation_mode_active()
+# below always evaluate false in practice (conversation_mode_until gets
+# set to time.time() + 0, which is already in the past by the time
+# anything checks it) -- deliberately left at a real constant rather
+# than removing the whole mechanism, since every call site downstream
+# (activate/deactivate/status text) still behaves correctly with it at
+# zero, and it can be raised again in one place if ever wanted back.
+CONVERSATION_TIMEOUT_SECONDS = 0
 
 def _whisper_model_name():
     """The real model name in use -- sourced live from backtalk's own
@@ -1673,17 +1684,6 @@ def make_direct_web_reply(query, web_data):
     if not useful:
         return None
 
-    query_lower = normalize_transcript(query)
-
-    if "markyadhd" in query_lower or "marky adhd" in query_lower:
-        reply = (
-            "From my memory, MarkyADHD is your creator brand. "
-            "From the web results, I found public pages connected to MarkyADHD, "
-            "such as creator stats or GTA RP streamer-listing style pages. "
-            "The strongest result I found was: " + useful[0] + f" {spoken_name()}."
-        )
-        return {"mode": "chat", "reply": reply, "steps": []}
-
     return {
         "mode": "chat",
         "reply": "I found this online: " + "; ".join(useful[:3]) + f" {spoken_name()}.",
@@ -2466,7 +2466,6 @@ Jarvis, what have you learned?
 Jarvis, forget training.
 Jarvis, search the internet for GTA 6 latest news.
 Jarvis, look up Blender neon material tutorial.
-Jarvis, what do you know about MarkyADHD?
 Jarvis, full skill mode, click the continue button.
 Jarvis, take control and open Blender.
 Jarvis, what is on my screen?

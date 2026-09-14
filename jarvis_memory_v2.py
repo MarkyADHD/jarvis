@@ -497,7 +497,6 @@ def load_profile():
         profile["known_facts"] = [
             "The user is building a local Jarvis assistant on Windows.",
             "The assistant should call the user Sir by default unless told otherwise.",
-            "MarkyADHD is the user's current creator/brand name.",
         ]
         changed = True
 
@@ -1073,10 +1072,8 @@ def memory_summary(spoken_name="Sir"):
     lines = []
 
     identity = profile.get("identity", {})
-    creator_brand = identity.get("creator_brand", "MarkyADHD")
     preferred_name = identity.get("preferred_spoken_name", spoken_name)
 
-    lines.append(f"I remember your creator brand is {creator_brand}.")
     lines.append(f"I should call you {preferred_name}.")
 
     projects = profile.get("projects", {})

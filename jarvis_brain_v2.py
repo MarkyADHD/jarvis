@@ -90,7 +90,6 @@ def load_profile():
 
     if "known_facts" not in profile:
         profile["known_facts"] = [
-            "MarkyADHD is the user's creator/brand name.",
             "The user wants Jarvis to be direct, useful, and more like ChatGPT with PC skills.",
             "Jarvis should answer the question directly instead of dumping search results.",
         ]
