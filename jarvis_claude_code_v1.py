@@ -252,23 +252,32 @@ def status() -> Dict[str, Any]:
 
 
 def _log_call(data: Dict[str, Any]) -> None:
+    """Real bug, confirmed live: CALL_LOG lives on E:\\ (MEMORY_ROOT), and
+    that drive has a known recurring health problem (confirmed live via
+    Get-Volume: HealthStatus Warning, "Full Repair Needed") where it stays
+    *mounted* but hangs indefinitely on real reads/writes rather than
+    failing fast -- so the plain try/except here never even got a chance
+    to catch anything, the open() call itself just never returned. That
+    silently hung every single call through this module (_run() and
+    run_with_images() both call this at the very end) whenever the drive
+    was in one of these episodes, with nothing in the call itself wrong.
+    Logging is best-effort and must never be able to block the actual
+    call it's logging -- moved onto a daemon thread with a short join
+    timeout, so a stuck drive costs at most a couple of skipped log lines,
+    never a hung Claude Code response."""
     record = dict(data or {})
     record["timestamp"] = time.time()
 
-    try:
-        with CALL_LOG.open(
-            "a",
-            encoding="utf-8",
-        ) as handle:
-            handle.write(
-                json.dumps(
-                    record,
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
+    def _write():
+        try:
+            with CALL_LOG.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_write, daemon=True)
+    thread.start()
+    thread.join(2.0)
 
 
 def _safe_env() -> Dict[str, str]:
@@ -376,10 +385,15 @@ def _run(
 
     if system_prompt:
         try:
+            # Deliberately NOT dir=MEMORY_ROOT (E:\) -- confirmed live
+            # that drive can hang indefinitely on a real write during one
+            # of its known health episodes (Get-Volume: HealthStatus
+            # Warning), and this write happens in THIS process before the
+            # CLI call even starts, so a hung E:\ write here blocks every
+            # Claude call that passes a system prompt, the common case.
             fd, system_prompt_file = tempfile.mkstemp(
                 prefix="jarvis_claude_sp_",
                 suffix=".txt",
-                dir=str(MEMORY_ROOT),
             )
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(str(system_prompt))
@@ -542,6 +556,184 @@ def _run(
         "raw": data,
         "error": error,
     }
+
+
+def run_with_images(
+    content_blocks: list,
+    *,
+    system_prompt: str = "",
+    model: str = "",
+    effort: str = "",
+    timeout: Optional[int] = None,
+    tools: str = "",
+) -> Dict[str, Any]:
+    """Same one-shot, stateless, no-tools contract as _run() above, but
+    for a prompt that includes real images alongside text (built for
+    jarvis_clipper_v1's clip judging, which needs to see the actual
+    screen content, not just a transcript -- confirmed live this is the
+    one Claude Code CLI actually supports image input: --print's default
+    text input has no way to carry an image at all, but
+    --input-format=stream-json accepts the same {"type": "image", ...}
+    content blocks the Claude API itself uses. Confirmed live that this
+    stays cheap: the CLI's fixed per-invocation overhead (~$0.04 with
+    tools disabled) is paid once per call regardless of how many images
+    are in that one call, so batching many candidates' images into ONE
+    call here is far cheaper than one call per candidate.
+
+    content_blocks: a list of dicts already shaped like Claude API
+    content blocks, e.g. {"type": "text", "text": "..."} or
+    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "..."}}.
+    """
+    settings = load_settings()
+
+    if not settings.get("enabled", True):
+        return {"ok": False, "error": "Claude routing is disabled.", "kind": "disabled"}
+
+    cli = find_cli()
+    if not cli:
+        return {"ok": False, "error": "Claude Code CLI was not found.", "kind": "not_found"}
+
+    model = clean(model) or clean(settings.get("model", DEFAULT_MODEL))
+    effort = clean(effort) or DEFAULT_EFFORT
+    timeout = int(timeout or settings.get("timeout_seconds", DEFAULT_TIMEOUT))
+
+    command = [
+        str(cli), "-p",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--model", model,
+        "--effort", effort,
+        "--max-turns", "1",
+        "--no-session-persistence",
+        "--no-chrome",
+        "--disable-slash-commands",
+        "--permission-prompts", "none",
+        "--tools", str(tools),
+        "--disallowedTools", "mcp__*",
+    ]
+
+    system_prompt_file = None
+    if system_prompt:
+        try:
+            # Not dir=MEMORY_ROOT (E:\) -- see the matching note in _run().
+            fd, system_prompt_file = tempfile.mkstemp(
+                prefix="jarvis_claude_sp_", suffix=".txt",
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(str(system_prompt))
+            command.extend(["--system-prompt-file", system_prompt_file])
+        except Exception:
+            system_prompt_file = None
+            command.extend(["--system-prompt", str(system_prompt)])
+
+    stdin_line = json.dumps({
+        "type": "user",
+        "message": {"role": "user", "content": content_blocks},
+    })
+
+    # Real bug, confirmed live: passing this via subprocess.run(input=...)
+    # (an anonymous pipe Python feeds from a writer thread) hangs forever
+    # against this specific CLI -- find_cli() resolves to a .cmd wrapper
+    # on Windows, and something about that extra cmd.exe relay layer
+    # breaks stream-json's chattier stdin/stdout pattern specifically
+    # (plain --input-format=text, what _run() above uses, is unaffected).
+    # A real file handle for stdin sidesteps it entirely -- EXCEPT
+    # confirmed live that the file must be on the same drive as cwd
+    # (C:\AI-Agent): putting it on E:\ (MEMORY_ROOT, where the system-
+    # prompt file above lives) reproduced the exact same hang, even
+    # though that file is only ever opened directly by the CLI itself,
+    # never inherited as a stdin handle the way this one is. Cross-drive
+    # inherited stdin handles into this specific cmd.exe-wrapped child
+    # is the actual trigger, not stream-json itself -- so this one
+    # deliberately uses the default system temp dir (same drive as
+    # cwd/PROJECT_ROOT), not MEMORY_ROOT.
+    stdin_file = None
+    try:
+        fd, stdin_path = tempfile.mkstemp(prefix="jarvis_claude_stdin_", suffix=".jsonl")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(stdin_line)
+    except Exception as exc:
+        return {"ok": False, "error": f"Could not write stdin temp file: {exc}", "kind": "exception"}
+
+    started = time.time()
+
+    try:
+        with open(stdin_path, "rb") as stdin_file:
+            proc = subprocess.run(
+                command,
+                cwd=str(PROJECT_ROOT),
+                env=_safe_env(),
+                stdin=stdin_file,
+                capture_output=True,
+                timeout=timeout,
+                shell=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        proc_stdout = proc.stdout.decode("utf-8", errors="replace")
+        proc_stderr = proc.stderr.decode("utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        _log_call({"ok": False, "kind": "timeout", "model": model, "effort": effort,
+                   "elapsed": time.time() - started})
+        return {"ok": False, "error": "Claude Code timed out.", "kind": "timeout"}
+    except Exception as exc:
+        _log_call({"ok": False, "kind": "exception", "error": str(exc), "model": model, "effort": effort})
+        return {"ok": False, "error": str(exc), "kind": "exception"}
+    finally:
+        if system_prompt_file:
+            try:
+                os.remove(system_prompt_file)
+            except Exception:
+                pass
+        try:
+            os.remove(stdin_path)
+        except Exception:
+            pass
+
+    elapsed = time.time() - started
+
+    # stream-json output is JSON-LINES, not one object -- the final
+    # "result" line carries the same fields _run()'s plain --output-
+    # format=json gives, so everything downstream can treat this the
+    # same way once that one line is found.
+    data = {}
+    for line in reversed(proc_stdout.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(parsed, dict) and parsed.get("type") == "result":
+            data = parsed
+            break
+
+    result = clean(data.get("result", "") if isinstance(data, dict) else "")
+    if not result and proc.returncode == 0:
+        result = clean(proc_stdout)
+
+    ok = bool(proc.returncode == 0 and result)
+    error = clean(proc_stderr)
+    if not ok and not error:
+        error = clean(data.get("error", "") if isinstance(data, dict) else "")
+
+    call_info = {
+        "ok": ok,
+        "kind": "success" if ok else "failure",
+        "model": model,
+        "effort": effort,
+        "elapsed": round(elapsed, 3),
+        "returncode": proc.returncode,
+        "session_id": clean(data.get("session_id", "") if isinstance(data, dict) else ""),
+        "total_cost_usd": data.get("total_cost_usd") if isinstance(data, dict) else None,
+    }
+    if error:
+        call_info["error"] = error[:1000]
+
+    _log_call(call_info)
+
+    return {**call_info, "result": result, "raw": data, "error": error}
 
 
 def jarvis_system_prompt(
