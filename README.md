@@ -76,10 +76,27 @@ below, including recommended specs for the local model.
 ### Cut your own highlight clips — JarvisClipper
 - Say "find clips from my last stream" and he'll go through your most
   recent Twitch VOD on his own: scan the audio for loud/exciting
-  moments, then actually judge each one with Claude for whether it
-  reads like a real clip-worthy moment — a joke landing, a big
-  reaction, something quotable — rather than just cutting whatever was
-  loudest (which, unfiltered, is just the stream intro half the time)
+  moments, then have Claude actually judge each one — **looking at a
+  real screenshot from that exact moment, not just reading the
+  transcript**, since a lot of the best moments on a gameplay stream
+  are visual (a clutch, a funny death, a reaction) and say nothing
+  remarkable out loud. A jump-scare face-filter gag scores; a loud
+  loading screen doesn't
+- **Cut like an editor, not a timer**: each clip opens right as the
+  hook starts and ends on a clean beat, found from where speech
+  actually pauses — not a fixed window that chops a sentence in half
+- **Burned-in captions**, StreamLadder-style: fast, word-timed cards
+  of a few words at a time, ready to post as-is
+- Every clip gets a 1-10 **virality score** and a punchy suggested
+  **title**, so you can see at a glance which ones are worth posting
+  first instead of getting an unranked folder of files
+- Optional **vertical 9:16 export** (centered crop) for TikTok, Shorts
+  and Reels
+- **A full clip browser in the dashboard** — the "Media & Clips" tab
+  (or say "open jarvisclipper" for its own window): pick a VOD or paste
+  a link, choose captions/vertical, watch live progress, then browse
+  every clip as a card with a thumbnail, score, title and inline video
+  preview you can scrub through
 - Saved to a local folder for you to review and post yourself — no
   subscription service standing between your stream and your clips,
   and no auto-posting anywhere without you looking first
