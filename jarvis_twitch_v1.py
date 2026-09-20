@@ -23,6 +23,7 @@ Examples:
 import base64
 import json
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -47,9 +48,38 @@ HELIX = "https://api.twitch.tv/helix"
 # token -- a fresh authorize is the only way, same as any OAuth app).
 SCOPES = "channel:manage:broadcast channel:edit:commercial clips:edit user:read:email"
 
-MEMORY_ROOT = Path("E:/JarvisMemory")
-if not MEMORY_ROOT.exists():
-    MEMORY_ROOT = Path("C:/AI-Agent/JarvisMemory")
+def _pick_healthy_memory_root(primary, fallback, timeout=1.5):
+    """Real bug, confirmed live: E:\\ has a known recurring health
+    problem (Get-Volume: HealthStatus Warning, "Full Repair Needed")
+    where it stays *mounted* but hangs indefinitely on real reads/
+    writes instead of failing fast -- so a plain .exists() check isn't
+    enough, it returns True right up until the moment an actual read
+    hangs. This was traced directly to a real, live bug: JarvisClipper's
+    "list my VODs" call hung forever reading the Twitch token from here,
+    with nothing wrong in that code at all. Runs a real, bounded write+
+    read probe in a background thread; if the primary root doesn't
+    answer within `timeout`, falls back without waiting for it -- same
+    fix jarvis_claude_code_v1.py needed for its own E:\\-dependent
+    reads/writes."""
+    result = {"healthy": False}
+
+    def probe():
+        try:
+            primary.mkdir(parents=True, exist_ok=True)
+            marker = primary / ".health_check"
+            marker.write_text("ok", encoding="utf-8")
+            marker.unlink()
+            result["healthy"] = True
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=probe, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return primary if result["healthy"] else fallback
+
+
+MEMORY_ROOT = _pick_healthy_memory_root(Path("E:/JarvisMemory"), Path("C:/AI-Agent/JarvisMemory"))
 
 CONFIG_DIR = MEMORY_ROOT / "twitch"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
