@@ -63,6 +63,7 @@ Examples:
     Jarvis run ads
     Jarvis run a 60 second ad
 """
+import base64
 import json
 import re
 import subprocess
@@ -141,6 +142,33 @@ INTRO_SKIP_SECONDS = 600
 # Claude's judgment call -- wide enough to capture a whole reaction/joke,
 # not just the loudest half-second of it.
 JUDGE_WINDOW_SECONDS = 15
+
+# StreamLadder-level quality: judge on the actual screen content too, not
+# just words. One representative frame per candidate keeps the single
+# batched judge call cheap (confirmed live: the CLI's own fixed per-
+# invocation overhead, ~$0.04, dwarfs the marginal cost of extra images
+# in the SAME call -- so one big call stays far cheaper than judging each
+# candidate separately, which would pay that overhead 60 times over).
+FRAME_OFFSET_SECONDS = 2.0  # frame grabbed slightly after the spike, not at it
+
+# Smart trim: clips aren't a fixed window anymore -- the real start/end
+# come from where speech actually pauses around the hook, found from
+# word-level timestamps. These are the outer bounds that search is
+# allowed to land within.
+CLIP_MIN_SECONDS = 6
+CLIP_MAX_SECONDS = 45
+SILENCE_GAP_MIN_SECONDS = 0.35  # a gap at least this long counts as a real pause
+
+# Burned-in captions, grouped a few words per card (StreamLadder's own
+# fast-paced caption style) rather than one huge subtitle block.
+CAPTION_WORDS_PER_CARD = 4
+
+# Vertical export for TikTok/Shorts/Reels -- a centered crop, not dynamic
+# face-tracking (that needs a running face-detection model per frame,
+# a much bigger lift than this pass; a static centered crop is the
+# honest, tractable default every clip still gets cut from cleanly).
+VERTICAL_WIDTH = 1080
+VERTICAL_HEIGHT = 1920
 
 
 def _run(cmd, timeout=None):
@@ -428,75 +456,177 @@ def find_candidate_timestamps(wav_path, pool_size=CANDIDATE_POOL_SIZE):
 def _extract_audio_window(wav_path, center_seconds, half_window_seconds=JUDGE_WINDOW_SECONDS):
     """Slices a window directly out of the already-downloaded full-VOD
     WAV rather than re-fetching anything from the stream -- the analysis
-    pass already paid for this audio once."""
+    pass already paid for this audio once. Returns (pcm, window_start_seconds)
+    -- the window's own absolute start time in VOD time, needed to convert
+    word-level timestamps (which faster-whisper reports relative to
+    whatever audio it was handed) back to real VOD-relative time."""
     with wave.open(str(wav_path), "rb") as wf:
         rate = wf.getframerate()
         n_frames = wf.getnframes()
-        start_frame = max(0, int((center_seconds - half_window_seconds) * rate))
+        window_start_seconds = max(0.0, center_seconds - half_window_seconds)
+        start_frame = int(window_start_seconds * rate)
         end_frame = min(n_frames, int((center_seconds + half_window_seconds) * rate))
         wf.setpos(start_frame)
         raw = wf.readframes(max(0, end_frame - start_frame))
-    return np.frombuffer(raw, dtype=np.int16)
+    return np.frombuffer(raw, dtype=np.int16), window_start_seconds
 
 
-def transcribe_candidates(wav_path, candidates):
-    """Each candidate gets a real transcript of the audio around it --
-    this is what Claude's judgment call actually reads. A candidate that
-    fails to transcribe (music, muted DMCA segment) still gets kept in
-    the pool with an empty transcript; Claude sees that and can judge
-    accordingly (usually rejecting it) rather than it just vanishing."""
+def _transcribe_with_words(pcm):
+    """Same model backtalk's own voice pipeline already warmed (never a
+    second large-v3 load), but called directly instead of through
+    backtalk_ears.transcribe() so word-level timestamps survive -- that
+    function deliberately only returns plain text. Falls back to
+    (plain_text, []) on the mlx backend or any failure; smart trim and
+    captions both degrade to fixed-window behaviour when words is empty,
+    they don't hard-require this."""
     from backtalk import ears as backtalk_ears
 
+    model = backtalk_ears.warm()
+    audio = pcm.astype(np.float32) / 32768.0
+
+    if backtalk_ears._backend != "faster-whisper":
+        text = backtalk_ears.transcribe(pcm) if pcm.size else ""
+        return text, []
+
+    segments, _info = model.transcribe(audio, temperature=0.0, language="en", word_timestamps=True)
+    words = []
+    text_parts = []
+    for seg in segments:
+        text_parts.append(seg.text)
+        for w in (seg.words or []):
+            word = str(w.word or "").strip()
+            if word:
+                words.append({"word": word, "start": float(w.start), "end": float(w.end)})
+
+    text = backtalk_ears._NONSPEECH.sub("", "".join(text_parts)).strip()
+    return text, words
+
+
+def _extract_frame(stream_url, timestamp_seconds, output_path):
+    """Grabs one real JPEG frame from the VOD at an exact timestamp via a
+    direct seek -- confirmed live this takes a few seconds per frame
+    (ffmpeg decoding forward from the nearest keyframe), same seek
+    mechanism cut_clip() already uses for the final clips."""
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(max(0, timestamp_seconds)),
+        "-i", stream_url,
+        "-frames:v", "1",
+        "-q:v", "3",
+        str(output_path),
+    ]
+    result = _run(cmd, timeout=30)
+    return result.returncode == 0 and Path(output_path).exists()
+
+
+def transcribe_candidates(wav_path, candidates, stream_url=None, frame_dir=None):
+    """Each candidate gets a real transcript (with word-level timestamps,
+    for smart trim/captions later) and, when stream_url/frame_dir are
+    given, one real frame grabbed from the VOD -- this is what Claude's
+    judgment call actually reads and sees. A candidate that fails to
+    transcribe (music, muted DMCA segment) still gets kept in the pool
+    with an empty transcript; Claude sees that and can judge accordingly
+    (usually rejecting it) rather than it just vanishing."""
     results = []
-    for ts, score in candidates:
+    for i, (ts, score) in enumerate(candidates):
+        transcript, words = "", []
         try:
-            pcm = _extract_audio_window(wav_path, ts)
-            transcript = backtalk_ears.transcribe(pcm) if pcm.size else ""
+            pcm, window_start = _extract_audio_window(wav_path, ts)
+            if pcm.size:
+                transcript, rel_words = _transcribe_with_words(pcm)
+                words = [
+                    {"word": w["word"], "start": window_start + w["start"], "end": window_start + w["end"]}
+                    for w in rel_words
+                ]
         except Exception as e:
             print(f"[clipper] transcribe_candidates failed at {ts}s: {e}", file=sys.stderr)
-            transcript = ""
-        results.append({"timestamp_seconds": ts, "score": score, "transcript": transcript})
+
+        frame_path = None
+        if stream_url and frame_dir:
+            candidate_frame = Path(frame_dir) / f"frame_{i:03d}.jpg"
+            try:
+                if _extract_frame(stream_url, ts + FRAME_OFFSET_SECONDS, candidate_frame):
+                    frame_path = candidate_frame
+            except Exception as e:
+                print(f"[clipper] frame capture failed at {ts}s: {e}", file=sys.stderr)
+
+        results.append({
+            "timestamp_seconds": ts,
+            "score": score,
+            "transcript": transcript,
+            "words": words,
+            "frame_path": frame_path,
+        })
     return results
 
 
-_JUDGE_SYSTEM_PROMPT = """You are curating short highlight clips from a livestream VOD for social media (TikTok/YouTube Shorts/Instagram Reels).
+_JUDGE_SYSTEM_PROMPT = """You are curating short highlight clips from a livestream VOD for social media (TikTok/YouTube Shorts/Instagram Reels) -- the same kind of judgment call a real clip editor makes, not a keyword filter.
 
-You will be given a numbered list of candidate moments, each with a timestamp and a transcript of roughly 30 seconds of speech around that moment. These candidates were already pre-filtered by audio loudness, so some are genuinely exciting moments and others are just loud stream noise (ad breaks, dead air, someone bumping their mic, mundane chatter that happened to be loud).
+You will be given a numbered list of candidate moments. For each one you get a real screenshot from that exact moment in the stream AND a transcript of roughly 30 seconds of speech around it. These candidates were already pre-filtered by audio loudness, so some are genuinely exciting moments and others are just loud stream noise (ad breaks, dead air, someone bumping their mic, mundane chatter that happened to be loud). LOOK AT THE IMAGE, not just the words -- a lot of real highlights on a gameplay stream are visual (a near-miss, a funny death, a reaction) and say nothing remarkable, while a loud but visually dead moment (staring at a loading screen, a menu) is almost never a real clip even with an exciting transcript.
 
-Judge each candidate on whether it would actually make a good standalone social media clip: something FUNNY, EPIC, impressive, a big reaction, a surprising or quotable moment, genuine excitement -- the kind of moment someone would actually stop scrolling for. Reject anything that reads as mundane, incoherent, an ad/sponsor read, filler chat, or has no real content (e.g. an empty or nonsense transcript).
+Judge each candidate on whether it would actually make a good standalone social media clip: something FUNNY, EPIC, impressive, a big reaction, a surprising or quotable moment, genuine excitement -- the kind of moment someone would actually stop scrolling for. Reject anything that reads as mundane, incoherent, an ad/sponsor read, filler chat, or has no real content.
 
 Be a real curator, not a quota-filler: you may be shown up to 60 candidates and asked for as many as 25 keepers, but only mark "keep": true for moments that are genuinely good. A quiet or low-energy VOD might only have 3 real highlights in it -- approving mediocre moments just to reach a higher number is the wrong call every time. Quality over quantity.
 
+For every candidate you keep, also give:
+- "score": 1-10, how strong this clip is as a standalone post (10 = genuinely could go viral, 5 = a decent clip, worth including but not a standout)
+- "title": a short, punchy caption for the clip (under 8 words, the kind of on-screen hook text that makes someone stop scrolling -- not a dry description)
+
 Respond with ONLY a JSON array, one object per candidate, in the same order given:
-[{"index": 0, "keep": true, "reason": "one short phrase why"}, ...]
+[{"index": 0, "keep": true, "score": 8, "title": "He did NOT see that coming", "reason": "one short phrase why"}, ...]
+
+For rejected candidates just give {"index": N, "keep": false, "reason": "..."} -- no score/title needed.
 
 No other text before or after the JSON."""
 
 
-def judge_candidates(candidates, vod_title, max_clips=DEFAULT_MAX_CLIPS):
-    """Sends the transcribed candidate pool to Claude and returns only
-    the ones it judged worth keeping, best/earliest first, capped at
-    max_clips. Falls back to the top-scoring candidates by loudness alone
-    if the Claude call fails or its response can't be parsed -- a broken
-    judgment call should degrade to the old behaviour, not produce zero
-    clips."""
-    if not candidates:
-        return []
+def _build_judge_content_blocks(candidates, vod_title):
+    """One candidate's worth of content is a short text block (index,
+    timestamp, transcript) immediately followed by its real screenshot,
+    if one was captured -- keeping each candidate's image next to its
+    own text (rather than all text then all images) so Claude reads them
+    as paired, not as two unrelated lists to cross-reference."""
+    blocks = [{"type": "text", "text": f'VOD title: "{vod_title}"\n\nCandidates:'}]
 
-    lines = [f'VOD title: "{vod_title}"', "", "Candidates:"]
     for i, c in enumerate(candidates):
         mm, ss = divmod(int(c["timestamp_seconds"]), 60)
         transcript = c["transcript"].strip() or "(no speech detected)"
-        lines.append(f'{i}. [{mm:02d}:{ss:02d}] "{transcript}"')
+        blocks.append({"type": "text", "text": f'\n{i}. [{mm:02d}:{ss:02d}] "{transcript}"'})
 
-    prompt = "\n".join(lines)
+        frame_path = c.get("frame_path")
+        if frame_path:
+            try:
+                with open(frame_path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("ascii")
+                blocks.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                })
+            except Exception as e:
+                print(f"[clipper] couldn't attach frame for candidate {i}: {e}", file=sys.stderr)
 
-    result = claude_v1._run(
-        prompt,
+    return blocks
+
+
+def judge_candidates(candidates, vod_title, max_clips=DEFAULT_MAX_CLIPS):
+    """Sends the transcribed + screenshotted candidate pool to Claude in
+    ONE batched multi-modal call and returns only the ones it judged
+    worth keeping, with a score and a suggested title, best/earliest
+    first, capped at max_clips. Falls back to the top-scoring candidates
+    by loudness alone if the Claude call fails or its response can't be
+    parsed -- a broken judgment call should degrade to the old
+    behaviour, not produce zero clips."""
+    if not candidates:
+        return []
+
+    blocks = _build_judge_content_blocks(candidates, vod_title)
+
+    result = claude_v1.run_with_images(
+        blocks,
         system_prompt=_JUDGE_SYSTEM_PROMPT,
         effort="medium",
-        max_turns=1,
         tools="",
+        timeout=180,
     )
 
     if not result.get("ok"):
@@ -520,37 +650,191 @@ def judge_candidates(candidates, vod_title, max_clips=DEFAULT_MAX_CLIPS):
             if j.get("keep") and 0 <= idx < len(candidates):
                 entry = dict(candidates[idx])
                 entry["reason"] = str(j.get("reason", "")).strip()
+                entry["virality_score"] = max(1, min(10, int(j.get("score", 5) or 5)))
+                entry["title"] = str(j.get("title", "")).strip()
                 approved.append(entry)
         except Exception:
             continue
 
+    approved.sort(key=lambda c: c.get("virality_score", 0), reverse=True)
     return approved[:max_clips]
 
 
 def _fallback_rank_by_score(candidates, max_clips):
+    """Claude never actually judged these (the call failed or didn't
+    parse) -- virality_score stays None rather than reusing the raw
+    loudness number under that name, so the manifest/UI can honestly
+    tell "Claude scored this" apart from "loudness ranking only"."""
     ranked = sorted(candidates, key=lambda c: c["score"], reverse=True)[:max_clips]
     for c in ranked:
         c.setdefault("reason", "")
+        c["virality_score"] = None
+        c.setdefault("title", "")
     ranked.sort(key=lambda c: c["timestamp_seconds"])
     return ranked
+
+
+# -------------------------------------------------------------------------
+# Smart trim -- real start/end from word-level timestamps, not a fixed window
+# -------------------------------------------------------------------------
+
+def _find_smart_clip_bounds(words, center_seconds,
+                             min_clip=CLIP_MIN_SECONDS, max_clip=CLIP_MAX_SECONDS,
+                             default_lead_in=DEFAULT_LEAD_IN_SECONDS,
+                             default_total=DEFAULT_CLIP_SECONDS):
+    """Real editors cut on the silence, not a fixed offset. Given the
+    word-level timestamps around a candidate, finds the nearest real
+    pause before the moment (so the clip opens right as the hook starts,
+    not mid-sentence or sitting on dead air) and the nearest real pause
+    after it (so it ends on a clean beat instead of chopping the next
+    sentence in half). Falls back to the old fixed lead-in/duration
+    behaviour when there aren't enough words to find real gaps in --
+    music, a muted segment, or a transcription miss are all real
+    possibilities this has to degrade gracefully from.
+
+    Returns (start_seconds, end_seconds) in absolute VOD time."""
+    if not words:
+        start = max(0.0, center_seconds - default_lead_in)
+        return start, start + default_total
+
+    ordered = sorted(words, key=lambda w: w["start"])
+
+    # Largest gap strictly before center, within the allowed lead-in
+    # range -- prefers a real pause over the raw largest gap anywhere,
+    # since a huge gap far outside the usable window is no use.
+    best_start = None
+    earliest_allowed = center_seconds - max_clip
+    latest_allowed_start = center_seconds - 1.0  # always keep >=1s of lead-in
+    for i in range(1, len(ordered)):
+        gap_start, gap_end = ordered[i - 1]["end"], ordered[i]["start"]
+        if gap_end - gap_start < SILENCE_GAP_MIN_SECONDS:
+            continue
+        candidate_point = (gap_start + gap_end) / 2
+        if earliest_allowed <= candidate_point <= latest_allowed_start:
+            if best_start is None or candidate_point > best_start:
+                best_start = candidate_point
+
+    start = best_start if best_start is not None else max(0.0, center_seconds - default_lead_in)
+    start = max(0.0, start)
+
+    # Largest real pause after center, within [min_clip, max_clip] of start.
+    best_end = None
+    earliest_allowed_end = start + min_clip
+    latest_allowed_end = start + max_clip
+    for i in range(1, len(ordered)):
+        gap_start, gap_end = ordered[i - 1]["end"], ordered[i]["start"]
+        if gap_end - gap_start < SILENCE_GAP_MIN_SECONDS:
+            continue
+        candidate_point = (gap_start + gap_end) / 2
+        if earliest_allowed_end <= candidate_point <= latest_allowed_end:
+            if best_end is None or candidate_point < best_end:
+                best_end = candidate_point
+
+    end = best_end if best_end is not None else start + default_total
+    end = min(end, start + max_clip)
+    if end - start < min_clip:
+        end = start + min_clip
+
+    return start, end
+
+
+# -------------------------------------------------------------------------
+# Burned-in captions
+# -------------------------------------------------------------------------
+
+def _srt_timestamp(seconds):
+    """Real bug, caught in testing: computing ms from the fractional part
+    separately from hh/mm/ss can round UP into 1000 (e.g. 1.9995s ->
+    ms=1000, an invalid SRT timestamp) since the rounding happens after
+    the whole-second truncation already threw away the carry. Rounding
+    the total millisecond count FIRST, then deriving every field from
+    that one integer, can't produce that inconsistency."""
+    total_ms = max(0, int(round(seconds * 1000)))
+    hh, rem_ms = divmod(total_ms, 3_600_000)
+    mm, rem_ms = divmod(rem_ms, 60_000)
+    ss, ms = divmod(rem_ms, 1000)
+    return f"{hh:02d}:{mm:02d}:{ss:02d},{ms:03d}"
+
+
+def _build_srt(words, clip_start_abs, clip_end_abs, words_per_card=CAPTION_WORDS_PER_CARD):
+    """StreamLadder-style captions: short, fast-paced cards of a few
+    words each, timed relative to the CLIP's own start (not the VOD's),
+    since that's the timeline the burned-in subtitle filter actually
+    plays against. Returns None if there's nothing to caption (no words
+    landed inside this clip's own trimmed range) -- silent clips or a
+    transcription miss just ship without captions rather than an empty
+    subtitle track."""
+    in_range = [
+        w for w in words
+        if w["end"] > clip_start_abs and w["start"] < clip_end_abs
+    ]
+    if not in_range:
+        return None
+
+    cards = []
+    for i in range(0, len(in_range), words_per_card):
+        chunk = in_range[i:i + words_per_card]
+        text = " ".join(w["word"].strip() for w in chunk if w["word"].strip())
+        if not text:
+            continue
+        start_rel = max(0.0, chunk[0]["start"] - clip_start_abs)
+        end_rel = max(start_rel + 0.2, chunk[-1]["end"] - clip_start_abs)
+        cards.append((start_rel, end_rel, text))
+
+    if not cards:
+        return None
+
+    lines = []
+    for i, (start_rel, end_rel, text) in enumerate(cards, start=1):
+        lines.append(str(i))
+        lines.append(f"{_srt_timestamp(start_rel)} --> {_srt_timestamp(end_rel)}")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _ffmpeg_path_escape(path):
+    """ffmpeg's subtitles filter parses its own argument like a mini INI
+    file, where ':' and '\\' are both special -- a plain Windows path
+    (C:\\Users\\...) breaks it outright without this. Confirmed pattern
+    for ffmpeg on Windows: escape backslashes, then escape the drive
+    colon specifically."""
+    escaped = str(path).replace("\\", "\\\\").replace(":", "\\:")
+    return escaped
 
 
 # -------------------------------------------------------------------------
 # Cutting + labelling clips
 # -------------------------------------------------------------------------
 
-def cut_clip(stream_url, center_seconds, output_path,
-             clip_seconds=DEFAULT_CLIP_SECONDS, lead_in_seconds=DEFAULT_LEAD_IN_SECONDS):
-    start = max(0, center_seconds - lead_in_seconds)
-    cmd = [
-        "ffmpeg", "-y",
-        "-ss", str(start),
-        "-i", stream_url,
-        "-t", str(clip_seconds),
-        "-c", "copy",
-        str(output_path),
-    ]
-    result = _run(cmd, timeout=120)
+def cut_clip(stream_url, start_seconds, end_seconds, output_path,
+             srt_path=None, vertical=False):
+    """Cuts one clip from start_seconds to end_seconds (absolute VOD
+    time). When srt_path is given, captions get burned in (ffmpeg has to
+    re-encode for that -- "-c copy" only works with no filters at all).
+    When vertical is True, applies a centered 9:16 crop for TikTok/
+    Shorts/Reels -- a static crop, not dynamic face-tracking (that needs
+    a running face-detection model per frame, a real separate project;
+    this is the honest, tractable version every clip still gets cut
+    from cleanly)."""
+    duration = max(0.5, end_seconds - start_seconds)
+    filters = []
+
+    if vertical:
+        filters.append(f"crop=ih*9/16:ih,scale={VERTICAL_WIDTH}:{VERTICAL_HEIGHT}")
+    if srt_path:
+        filters.append(f"subtitles='{_ffmpeg_path_escape(srt_path)}'")
+
+    cmd = ["ffmpeg", "-y", "-ss", str(max(0, start_seconds)), "-i", stream_url, "-t", str(duration)]
+
+    if filters:
+        cmd += ["-vf", ",".join(filters), "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"]
+    else:
+        cmd += ["-c", "copy"]
+
+    cmd += [str(output_path)]
+
+    result = _run(cmd, timeout=180)
     if result.returncode != 0 or not Path(output_path).exists():
         raise RuntimeError(
             f"ffmpeg couldn't cut that clip: {result.stderr.decode(errors='replace')[-400:]}"
@@ -567,12 +851,18 @@ def _safe_folder_name(text):
     return text[:60] or "vod"
 
 
-def make_clips_from_vod(vod, max_clips=DEFAULT_MAX_CLIPS,
-                         clip_seconds=DEFAULT_CLIP_SECONDS, progress_cb=None):
+def make_clips_from_vod(vod, max_clips=DEFAULT_MAX_CLIPS, progress_cb=None,
+                         captions=True, vertical=False):
     """vod: one item from list_recent_vods() (needs at least "url" and
     "title"). Returns the list of saved clip info dicts. Raises on
     unrecoverable failure (no VOD, ffmpeg/yt-dlp missing, etc) -- the
-    caller decides how to report that."""
+    caller decides how to report that.
+
+    captions: burn in StreamLadder-style word-timed captions (on by
+    default -- this is the "ready for social media" feature, not an
+    editing nicety). vertical: also crop to 9:16 for TikTok/Shorts/
+    Reels (off by default -- it changes what's actually visible in the
+    frame, a bigger call than captions, left as an explicit opt-in)."""
     def report(msg):
         if progress_cb:
             try:
@@ -586,47 +876,70 @@ def make_clips_from_vod(vod, max_clips=DEFAULT_MAX_CLIPS,
         raise RuntimeError("Could not determine the VOD's length.")
 
     report(f"Scanning {duration // 60} minutes of audio for loud moments...")
-    with tempfile.TemporaryDirectory(prefix="jarvis_clipper_") as tmp_dir:
-        audio_path = Path(tmp_dir) / "full_audio.wav"
-        _extract_full_audio(stream_url, audio_path, duration=duration)
-        pool = find_candidate_timestamps(audio_path)
 
-        if not pool:
+    # Frames need to survive past this block -- judge_candidates() (and,
+    # for approved clips, the smart-trim/caption step) reads them AFTER
+    # the audio WAV itself has already served its purpose and can be
+    # freed. Two temp dirs with different lifetimes, not one.
+    with tempfile.TemporaryDirectory(prefix="jarvis_clipper_frames_") as frames_dir:
+        with tempfile.TemporaryDirectory(prefix="jarvis_clipper_audio_") as audio_dir:
+            audio_path = Path(audio_dir) / "full_audio.wav"
+            _extract_full_audio(stream_url, audio_path, duration=duration)
+            pool = find_candidate_timestamps(audio_path)
+
+            if not pool:
+                return [], None
+
+            report(f"Transcribing {len(pool)} candidate moments and grabbing frames...")
+            transcribed = transcribe_candidates(audio_path, pool, stream_url=stream_url, frame_dir=frames_dir)
+
+        report("Asking Claude which ones are actually clip-worthy (looking at the screen, not just words)...")
+        approved = judge_candidates(transcribed, vod.get("title", ""), max_clips=max_clips)
+
+        if not approved:
             return [], None
 
-        report(f"Transcribing {len(pool)} candidate moments...")
-        transcribed = transcribe_candidates(audio_path, pool)
+        created = datetime.now().strftime("%Y-%m-%d_%H%M")
+        folder_name = f"{created}_{_safe_folder_name(vod.get('title', 'vod'))}"
+        output_dir = CLIPS_ROOT / folder_name
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    report("Asking Claude which ones are actually clip-worthy...")
-    approved = judge_candidates(transcribed, vod.get("title", ""), max_clips=max_clips)
+        clips = []
+        for i, candidate in enumerate(approved, start=1):
+            report(f"Cutting clip {i} of {len(approved)}...")
+            clip_path = output_dir / f"clip_{i:02d}.mp4"
 
-    if not approved:
-        return [], None
+            words = candidate.get("words") or []
+            start_s, end_s = _find_smart_clip_bounds(words, candidate["timestamp_seconds"])
 
-    created = datetime.now().strftime("%Y-%m-%d_%H%M")
-    folder_name = f"{created}_{_safe_folder_name(vod.get('title', 'vod'))}"
-    output_dir = CLIPS_ROOT / folder_name
-    output_dir.mkdir(parents=True, exist_ok=True)
+            srt_path = None
+            if captions:
+                srt_text = _build_srt(words, start_s, end_s)
+                if srt_text:
+                    srt_path = output_dir / f"clip_{i:02d}.srt"
+                    srt_path.write_text(srt_text, encoding="utf-8")
 
-    clips = []
-    for i, candidate in enumerate(approved, start=1):
-        report(f"Cutting clip {i} of {len(approved)}...")
-        clip_path = output_dir / f"clip_{i:02d}.mp4"
-        try:
-            cut_clip(stream_url, candidate["timestamp_seconds"], clip_path, clip_seconds=clip_seconds)
-        except Exception as e:
-            report(f"Clip {i} failed: {e}")
-            continue
+            try:
+                cut_clip(stream_url, start_s, end_s, clip_path, srt_path=srt_path, vertical=vertical)
+            except Exception as e:
+                report(f"Clip {i} failed: {e}")
+                continue
 
-        clips.append({
-            "file": clip_path.name,
-            "vod_id": vod.get("id", ""),
-            "vod_title": vod.get("title", ""),
-            "timestamp_seconds": candidate["timestamp_seconds"],
-            "score": round(candidate["score"], 1),
-            "reason": candidate.get("reason", ""),
-            "transcript_snippet": candidate.get("transcript", ""),
-        })
+            clips.append({
+                "file": clip_path.name,
+                "vod_id": vod.get("id", ""),
+                "vod_title": vod.get("title", ""),
+                "timestamp_seconds": candidate["timestamp_seconds"],
+                "start_seconds": round(start_s, 2),
+                "end_seconds": round(end_s, 2),
+                "duration_seconds": round(end_s - start_s, 2),
+                "virality_score": candidate.get("virality_score"),
+                "title": candidate.get("title", ""),
+                "reason": candidate.get("reason", ""),
+                "transcript_snippet": candidate.get("transcript", ""),
+                "captioned": srt_path is not None,
+                "vertical": bool(vertical),
+            })
 
     manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(clips, indent=2, ensure_ascii=False), encoding="utf-8")
