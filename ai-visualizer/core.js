@@ -1192,6 +1192,7 @@ const AV = (() => {
         font-size:11px;margin-bottom:8px}
 
       #jarvisHomeCode{width:100%;height:100%;border:0}
+      #jarvisHomeClipper{width:100%;height:100%;border:0}
 
       /* -------- Chat view: the HUD dial, an original design (see the
          conversation this shipped from -- deliberately NOT a recreation
@@ -1321,7 +1322,7 @@ const AV = (() => {
       <div id="jarvisHomeSidebar">
         <div class="brand">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.5" stroke="#4fc3f7" stroke-width="1.4"/><circle cx="12" cy="12" r="5.5" stroke="#4fc3f7" stroke-width="1.4" opacity=".65"/><circle cx="12" cy="12" r="1.8" fill="#4fc3f7"/></svg>
-          <div><span>JARVIS</span><small>v1.99</small></div>
+          <div><span>JARVIS</span><small>v2.03</small></div>
         </div>
         <div class="nav-item active" data-view="home">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1v-9"/></svg>
@@ -1339,7 +1340,7 @@ const AV = (() => {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 7-6 5 6 5M15 7l6 5-6 5"/><path d="M13 4 9 20"/></svg>
           <span>Stream Tools</span>
         </div>
-        <div class="nav-item" data-view="streamtools">
+        <div class="nav-item" data-view="jarvisclipper">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m9 10 4 3-4 3v-6Z" fill="currentColor" stroke="none"/></svg>
           <span>Media &amp; Clips</span>
         </div>
@@ -1504,6 +1505,12 @@ const AV = (() => {
         <iframe id="jarvisHomeCode" src="about:blank" style="display:none"></iframe>
       </div>
 
+      <div class="jarvisHomeMain hidden" data-panel="jarvisclipper" style="padding:0">
+        <div id="jarvisHomeClipperStatus" style="position:absolute;inset:0;display:flex;
+          align-items:center;justify-content:center;font-size:12px;color:#8a9aa0">Starting JarvisClipper...</div>
+        <iframe id="jarvisHomeClipper" src="about:blank" style="display:none"></iframe>
+      </div>
+
       <div class="jarvisHomeMain hidden" data-panel="smarthome">
         <h2>Smart Home</h2>
         <div class="jh-widgets" style="grid-template-columns:repeat(2, minmax(0,1fr));max-width:600px">
@@ -1622,6 +1629,8 @@ const AV = (() => {
     const panels = home.querySelectorAll(".jarvisHomeMain");
     const codeFrame = home.querySelector("#jarvisHomeCode");
     const codeStatus = home.querySelector("#jarvisHomeCodeStatus");
+    const clipperFrame = home.querySelector("#jarvisHomeClipper");
+    const clipperStatus = home.querySelector("#jarvisHomeClipperStatus");
     const chatBar = document.getElementById("jarvisChatBar");
 
     // Settings and Stream Tools reuse the EXACT existing panels (built by
@@ -1685,6 +1694,26 @@ const AV = (() => {
           }
         } catch (e) {
           codeStatus.textContent = "Couldn't reach Jarvis to start JarvisCode.";
+        }
+      }
+      // Same on-demand pattern as JarvisCode (see jarvisclipper_app.py) --
+      // its own separate process, not part of Jarvis's always-running
+      // tree, so opening this view launches it first (a no-op if it's
+      // already running) instead of pointing an iframe at a port that
+      // might not be listening yet.
+      if (view === "jarvisclipper" && clipperFrame.src === "about:blank") {
+        try {
+          const r = await fetch(api("/settings/jarvisclipper/ensure"), authed({ method: "GET" }));
+          const data = await r.json();
+          if (data.ok) {
+            clipperFrame.src = "http://127.0.0.1:8796/";
+            clipperFrame.style.display = "block";
+            clipperStatus.style.display = "none";
+          } else {
+            clipperStatus.textContent = "Couldn't start JarvisClipper" + (data.error ? ": " + data.error : ".");
+          }
+        } catch (e) {
+          clipperStatus.textContent = "Couldn't reach Jarvis to start JarvisClipper.";
         }
       }
     }

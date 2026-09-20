@@ -57,6 +57,7 @@ import jarvis_tailscale_v1 as tailscale
 import jarvis_thumbnail_v1 as thumbnail
 import jarvis_system_stats_v1 as system_stats
 import jarviscode_app
+import jarvisclipper_app
 
 try:
     import jarvis_system_media_v1 as system_media
@@ -287,6 +288,16 @@ def settings_jarviscode_ensure() -> dict:
     try:
         jarviscode_app._ensure_server_running()
         return {"ok": jarviscode_app._server_alive()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def settings_jarvisclipper_ensure() -> dict:
+    """Same on-demand-process pattern as JarvisCode above, same reason --
+    see jarvisclipper_app.py's own docstring."""
+    try:
+        jarvisclipper_app._ensure_server_running()
+        return {"ok": jarvisclipper_app._server_alive()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -1370,6 +1381,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 self._send_json(settings_jarviscode_ensure())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/jarvisclipper/ensure":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_jarvisclipper_ensure())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
         elif path == "/settings/stream/status":

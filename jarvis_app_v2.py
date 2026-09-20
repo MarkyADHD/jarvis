@@ -599,6 +599,23 @@ def quick_handle_command_v2(command):
                 c, name, "jarviscode_launch",
             )
 
+    if c in {"open jarvisclipper", "open jarvis clipper", "launch jarvisclipper", "launch jarvis clipper", "start jarvisclipper", "start jarvis clipper"}:
+        try:
+            subprocess.Popen(
+                [sys.executable, "jarvisclipper_app.py"],
+                cwd=r"C:\AI-Agent",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"Opening JarvisClipper, {name}.", "steps": []},
+                c, name, "jarvisclipper_launch",
+            )
+        except Exception as e:
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"I couldn't open JarvisClipper, {name}: {e}", "steps": []},
+                c, name, "jarvisclipper_launch",
+            )
+
     brain_result = provider_router.brain_command_fast(c, name, app)
     if brain_result:
         return finish_plan_v3(brain_result, c, name, "provider_router")

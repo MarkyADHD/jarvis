@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JarvisClipper</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div id="topbar-title">
+      <span id="logo-dot"></span>
+      <span>JarvisClipper</span>
+    </div>
+    <button id="generate-btn">+ Find Clips From a VOD</button>
+  </header>
+
+  <div id="generate-panel" class="hidden">
+    <div id="generate-panel-inner">
+      <h3>Find clips from a VOD</h3>
+
+      <label class="field-label">Recent VODs</label>
+      <select id="vod-select"></select>
+
+      <label class="field-label">Or paste a VOD link</label>
+      <input id="vod-url" type="text" placeholder="https://twitch.tv/videos/...">
+
+      <div class="field-row">
+        <div class="field-col">
+          <label class="field-label">Max clips</label>
+          <input id="max-clips" type="number" min="1" max="25" value="25">
+        </div>
+        <div class="field-col checkbox-col">
+          <label class="checkbox-label"><input id="opt-captions" type="checkbox" checked> Burned-in captions</label>
+          <label class="checkbox-label"><input id="opt-vertical" type="checkbox"> Vertical (9:16) crop</label>
+        </div>
+      </div>
+
+      <div id="generate-actions">
+        <button id="generate-cancel">Cancel</button>
+        <button id="generate-submit">Start</button>
+      </div>
+
+      <div id="job-progress" class="hidden">
+        <div id="job-progress-log"></div>
+      </div>
+    </div>
+  </div>
+
+  <main id="content">
+    <div id="empty-state" class="hidden">
+      <p>No clips yet.</p>
+      <p class="dim">Click "Find Clips From a VOD" above to have Jarvis go through one of your streams.</p>
+    </div>
+    <div id="folders"></div>
+  </main>
+</div>
+
+<div id="preview-overlay" class="hidden">
+  <div id="preview-box">
+    <video id="preview-video" controls></video>
+    <div id="preview-info">
+      <div id="preview-title"></div>
+      <div id="preview-meta"></div>
+    </div>
+    <button id="preview-close">&times;</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
