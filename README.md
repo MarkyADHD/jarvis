@@ -149,9 +149,18 @@ below, including recommended specs for the local model.
   positions on virtual money — through the exact same risk engine and
   Guardian Financial Gate a real order would use — and journals every
   decision, including every NO_TRADE, to an append-only log. Still no
-  AI-generated strategies yet (that's a later phase), no real broker
-  order has ever been placed by any of this, and none of it is exposed
-  in the UI yet either
+  AI-generated strategies yet (that's a later phase), and none of it
+  is exposed in the UI yet either. `Trading212Client` can now place
+  and cancel real orders on the **demo** environment (Market orders
+  only for now), behind a hard, source-level lockout
+  (`LIVE_ORDER_SUBMISSION_ENABLED = False`) that makes live order
+  submission structurally impossible — not a runtime setting, only
+  changeable by a deliberate later code edit. An execution engine
+  tracks every order through a real state machine and never blindly
+  retries on a timeout/5xx; a reconciliation module resolves what
+  actually happened against the broker's own order history. Still
+  nothing in the UI can trigger any of this yet — it's only reachable
+  by direct code/test calls right now
 - The eventual design (being built in phases): Jarvis proposes trade
   ideas, but a separate, deterministic risk engine and safety gate —
   which the AI cannot edit or talk its way around — decides whether

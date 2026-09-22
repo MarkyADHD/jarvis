@@ -33,21 +33,44 @@ function fmtQty(value) {
   return Number(value).toFixed(4).replace(/\.?0+$/, "");
 }
 
+let connectedEnvironments = { demo: false, live: false };
+
 async function refreshCredentialStatus() {
   try {
     const r = await fetch("/api/credentials/status");
     const s = await r.json();
+    connectedEnvironments = { demo: !!s.demo, live: !!s.live };
     document.getElementById("connectStatusDemo").textContent =
       "Demo: " + (s.demo ? "connected" : "not connected");
     document.getElementById("connectStatusLive").textContent =
       "Live: " + (s.live ? "connected" : "not connected");
-    if (s.demo || s.live) {
-      loadAccount(s.live ? "live" : "demo");
+
+    // Show whichever environment the dropdown currently has selected,
+    // if it's actually connected -- previously this always preferred
+    // LIVE the moment both were connected, so a demo key never showed
+    // its own account data at all. Falls back to demo, then live, if
+    // the selected one isn't connected yet.
+    const selected = document.getElementById("connectEnv").value;
+    if (connectedEnvironments[selected]) {
+      loadAccount(selected);
+    } else if (connectedEnvironments.demo) {
+      loadAccount("demo");
+    } else if (connectedEnvironments.live) {
+      loadAccount("live");
+    } else {
+      document.getElementById("accountPanel").classList.add("hidden");
     }
   } catch (e) {
     // credentials status is best-effort; leave the default labels
   }
 }
+
+document.getElementById("connectEnv").addEventListener("change", (e) => {
+  const env = e.target.value;
+  if (connectedEnvironments[env]) {
+    loadAccount(env);
+  }
+});
 
 async function loadAccount(environment) {
   const panel = document.getElementById("accountPanel");

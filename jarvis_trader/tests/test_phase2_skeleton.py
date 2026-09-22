@@ -57,10 +57,12 @@ def test_no_api_secret_columns_in_schema():
         assert banned not in trader_database.SCHEMA.lower()
 
 
-def test_credentials_round_trip_or_gracefully_declines():
+def test_credentials_round_trip_or_gracefully_declines(isolated_credentials):
     """DPAPI may or may not be available in a given test environment;
     either real encryption round-trips correctly, or save_api_credentials
-    refuses (never silently falls back to plaintext)."""
+    refuses (never silently falls back to plaintext). isolated_credentials
+    redirects storage to a throwaway temp file -- see conftest.py's own
+    docstring for why this is mandatory, not optional, here."""
     ok = credentials.save_api_credentials("demo", "test-key", "test-secret")
     if not credentials.DPAPI_AVAILABLE:
         assert ok is False
