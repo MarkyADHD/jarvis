@@ -87,7 +87,16 @@ def submit_approved_intent(intent: TradeIntent, environment: str, guardian_resul
 
     quantity = None
     if intent.position_value and last_known_price:
-        quantity = round(intent.position_value / last_known_price, 6)
+        # Real bug, confirmed live against the actual Trading 212 demo
+        # API: a 6-decimal quantity was rejected with a real 400 --
+        # {"type":"/api-errors/quantity-precision-mismatch",
+        # "detail":"invalid quantity precision 4"}. Trading 212's
+        # instrument metadata doesn't expose the exact allowed
+        # precision per ticker, so this is a conservative fix (2
+        # decimals, the commonly supported fractional-share precision)
+        # rather than a confirmed-correct one -- if a specific
+        # instrument still rejects this, tighten further.
+        quantity = round(intent.position_value / last_known_price, 2)
         if intent.action == IntentAction.CLOSE_POSITION.value:
             quantity = -abs(quantity)
 
