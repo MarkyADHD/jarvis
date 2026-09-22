@@ -135,7 +135,17 @@ below, including recommended specs for the local model.
   strategy bar-by-bar against real historical price data with no
   look-ahead, and scores it on total return, win rate, profit factor,
   max drawdown, and Sharpe/Sortino — not yet exposed in the UI, and
-  still entirely offline/historical, nowhere near live trading
+  still entirely offline/historical, nowhere near live trading. A
+  Strategy Lab now exists too: strategies are versioned and stored
+  (never silently edited — a parameter change means a new version),
+  three deterministic template strategies (SMA crossover, RSI
+  mean-reversion, momentum breakout) can be backtested and compared
+  against a mandatory buy-and-hold baseline, and promotion to the next
+  stage (EXPERIMENTAL → BACKTESTING → PAPER_TESTING →
+  APPROVED_FOR_LIVE) only happens when fixed, non-AI-editable
+  thresholds are actually met — nothing gets to just declare its own
+  strategy "good." Still no AI-generated strategies yet (that's a
+  later phase) and none of this is exposed in the UI yet either
 - The eventual design (being built in phases): Jarvis proposes trade
   ideas, but a separate, deterministic risk engine and safety gate —
   which the AI cannot edit or talk its way around — decides whether
