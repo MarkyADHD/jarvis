@@ -117,11 +117,12 @@ below, including recommended specs for the local model.
   212 accounts**. Each install connects its **own** Trading 212 API
   keys and trades with its **own** money — nothing is shared between
   installs, and nothing is enabled by default
-- **Current status: skeleton only.** The "Trader" tab (or "open
-  jarvistrader") shows a real dashboard shell — mode, status, and your
-  protected risk limits — but there is no broker connection, no
-  strategy engine, and no way to place a trade yet. It cannot touch
-  your money right now, full stop
+- **Current status: read-only.** The "Trader" tab (or "open
+  jarvistrader") lets you connect your own Trading 212 API key/secret
+  (demo or live) and see your real account summary, cash, and open
+  positions. There is still no strategy engine and no way to place,
+  modify, or cancel any order — it cannot touch your money right now,
+  full stop
 - The eventual design (being built in phases): Jarvis proposes trade
   ideas, but a separate, deterministic risk engine and safety gate —
   which the AI cannot edit or talk its way around — decides whether

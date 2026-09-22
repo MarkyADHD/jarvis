@@ -6,17 +6,18 @@ JarvisClipper server -- no external web framework, 127.0.0.1 only,
 never exposed to the Tailscale mesh (this one touches real money,
 eventually -- staying loopback-only is not optional).
 
-Phase 2 scope: serves the static UI shell and a read-only /api/state
-built from jarvis_trader.core.trader_core (which always starts
-DISABLED/PAUSED). No broker calls, no order placement, no LLM calls
-exist in this server yet -- those are later phases.
+Phase 3 scope: adds credential entry (save/status/delete, DPAPI-
+encrypted via security/credentials.py) and read-only Trading 212 data
+(account summary, cash, positions, orders via broker/trading212_client
+.py). Still no order placement, no risk engine, no LLM calls -- those
+are later phases. Nothing here can place a trade.
 """
 import json
 import mimetypes
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 STATIC_DIR = HERE / "static"
@@ -25,6 +26,8 @@ REPO_ROOT = HERE.parent
 sys.path.insert(0, str(REPO_ROOT))
 from jarvis_trader.core.trader_core import core  # noqa: E402
 from jarvis_trader.memory import trader_database  # noqa: E402
+from jarvis_trader.security import credentials  # noqa: E402
+from jarvis_trader.broker.trading212_client import Trading212Client  # noqa: E402
 
 trader_database.init_db()
 
@@ -46,16 +49,83 @@ class Handler(BaseHTTPRequestHandler):
     def _send_json(self, obj, code=200):
         self._send(json.dumps(obj).encode("utf-8"), "application/json", code)
 
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if not length:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except Exception:
+            return {}
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        qs = parse_qs(parsed.query)
 
         try:
             if path == "/api/state":
                 self._send_json(core.status())
                 return
 
+            if path == "/api/credentials/status":
+                self._send_json({
+                    "demo": credentials.has_credentials("demo"),
+                    "live": credentials.has_credentials("live"),
+                })
+                return
+
+            if path == "/api/account":
+                environment = (qs.get("environment") or ["demo"])[0]
+                if environment not in ("demo", "live"):
+                    self._send_json({"ok": False, "error": "environment must be 'demo' or 'live'"}, 400)
+                    return
+                if not credentials.has_credentials(environment):
+                    self._send_json({"ok": False, "error": f"No Trading 212 {environment} credentials configured."})
+                    return
+                client = Trading212Client(environment)
+                self._send_json(client.get_snapshot())
+                return
+
             self._static(path)
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, 500)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        try:
+            if path == "/api/credentials":
+                body = self._read_json_body()
+                environment = str(body.get("environment", "")).strip().lower()
+                api_key = str(body.get("api_key", "")).strip()
+                api_secret = str(body.get("api_secret", "")).strip()
+                if environment not in ("demo", "live"):
+                    self._send_json({"ok": False, "error": "environment must be 'demo' or 'live'"}, 400)
+                    return
+                if not api_key or not api_secret:
+                    self._send_json({"ok": False, "error": "API key and secret are both required."}, 400)
+                    return
+                ok = credentials.save_api_credentials(environment, api_key, api_secret)
+                if not ok:
+                    self._send_json({"ok": False, "error": "Windows DPAPI is unavailable, so Jarvis refused to save this in plaintext."})
+                    return
+                self._send_json({"ok": True})
+                return
+
+            if path == "/api/credentials/delete":
+                body = self._read_json_body()
+                environment = str(body.get("environment", "")).strip().lower()
+                if environment not in ("demo", "live"):
+                    self._send_json({"ok": False, "error": "environment must be 'demo' or 'live'"}, 400)
+                    return
+                credentials.delete_credentials(environment)
+                self._send_json({"ok": True})
+                return
+
+            self._send_json({"error": "not found"}, 404)
         except Exception as exc:
             self._send_json({"error": str(exc)}, 500)
 

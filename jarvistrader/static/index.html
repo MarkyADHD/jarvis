@@ -29,6 +29,39 @@
   </div>
 
   <main class="content">
+    <section class="connect-panel" id="connectPanel">
+      <h2>Connect Trading 212</h2>
+      <div class="connect-row">
+        <div class="connect-status" id="connectStatusDemo">Demo: not connected</div>
+        <div class="connect-status" id="connectStatusLive">Live: not connected</div>
+      </div>
+      <form id="connectForm">
+        <select id="connectEnv">
+          <option value="demo">Demo (paper trading)</option>
+          <option value="live">Live (real money)</option>
+        </select>
+        <input type="text" id="connectApiKey" placeholder="API key" autocomplete="off">
+        <input type="password" id="connectApiSecret" placeholder="API secret" autocomplete="off">
+        <button type="submit">Connect</button>
+        <button type="button" id="disconnectBtn">Disconnect</button>
+      </form>
+      <div class="connect-hint">
+        Generate keys from the Trading 212 app: Settings &rarr; API (beta).
+        Stored locally, encrypted with Windows DPAPI &mdash; never leaves this
+        machine, never seen by any AI model.
+      </div>
+      <div class="connect-msg" id="connectMsg"></div>
+    </section>
+
+    <section class="account-panel hidden" id="accountPanel">
+      <h2>Account (<span id="accountEnvLabel"></span>)</h2>
+      <div class="account-grid" id="accountGrid"></div>
+      <div class="positions-panel">
+        <h3>Open Positions</h3>
+        <div id="positionsList" class="positions-list"></div>
+      </div>
+    </section>
+
     <section class="overview-grid">
       <div class="card">
         <div class="card-label">Portfolio Value</div>
@@ -81,12 +114,12 @@
     </section>
 
     <section class="notice" id="phaseNotice">
-      <strong>Phase 2 build.</strong> This is the skeleton, UI shell, database,
-      and credential layer only. JarvisTrader is not connected to Trading 212
-      yet, has no risk engine, no strategies, and cannot place any order &mdash;
-      trading state always starts <code>DISABLED</code> / <code>PAUSED</code>
-      and stays that way until later phases are built and you deliberately
-      enable each one.
+      <strong>Phase 3 build.</strong> You can connect a real Trading 212 account
+      and see live account data (read-only) above. There is still no risk
+      engine, no strategies, and no way to place, modify, or cancel any
+      order &mdash; trading state always starts <code>DISABLED</code> /
+      <code>PAUSED</code> and stays that way until later phases are built
+      and you deliberately enable each one.
     </section>
 
     <section class="limits-panel">
