@@ -190,6 +190,14 @@ yarl==1.24.5
 yt-dlp==2026.8.19
 zeroconf==0.151.3
 
+# --- JarvisTrader: test runner (Phase 7) -- CLAUDE.md's own Change
+# workflow calls for running relevant tests, and pytest wasn't
+# installed in this venv until now (tests were run via manual direct
+# invocation before this, which skips fixtures like setup_function).
+iniconfig==2.3.0
+pluggy==1.6.0
+pytest==9.1.1
+
 # --- JarvisTrader: historical market data for backtesting (Phase 5).
 # The Trading 212 API has no historical-OHLCV/candles endpoint at all
 # (confirmed via the Phase 1 API research) -- yfinance is the standard

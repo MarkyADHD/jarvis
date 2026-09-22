@@ -144,8 +144,14 @@ below, including recommended specs for the local model.
   stage (EXPERIMENTAL → BACKTESTING → PAPER_TESTING →
   APPROVED_FOR_LIVE) only happens when fixed, non-AI-editable
   thresholds are actually met — nothing gets to just declare its own
-  strategy "good." Still no AI-generated strategies yet (that's a
-  later phase) and none of this is exposed in the UI yet either
+  strategy "good." Paper trading now runs fully autonomously too:
+  scans real market data, decides, opens, manages, and closes
+  positions on virtual money — through the exact same risk engine and
+  Guardian Financial Gate a real order would use — and journals every
+  decision, including every NO_TRADE, to an append-only log. Still no
+  AI-generated strategies yet (that's a later phase), no real broker
+  order has ever been placed by any of this, and none of it is exposed
+  in the UI yet either
 - The eventual design (being built in phases): Jarvis proposes trade
   ideas, but a separate, deterministic risk engine and safety gate —
   which the AI cannot edit or talk its way around — decides whether
