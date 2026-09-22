@@ -130,7 +130,12 @@ below, including recommended specs for the local model.
   works as a deterministic voice command — neither depends on any AI
   model. None of this is wired to anything that can actually place an
   order yet — that's still later phases — so it cannot touch your
-  money right now, full stop
+  money right now, full stop. There's now also a real backtesting
+  engine (`jarvis_trader/simulation/backtester.py`) that runs a
+  strategy bar-by-bar against real historical price data with no
+  look-ahead, and scores it on total return, win rate, profit factor,
+  max drawdown, and Sharpe/Sortino — not yet exposed in the UI, and
+  still entirely offline/historical, nowhere near live trading
 - The eventual design (being built in phases): Jarvis proposes trade
   ideas, but a separate, deterministic risk engine and safety gate —
   which the AI cannot edit or talk its way around — decides whether
