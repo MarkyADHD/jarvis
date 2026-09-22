@@ -271,10 +271,25 @@ body {
 .limit-row .k { color: var(--text-dim); }
 .limit-row .v { font-weight: 600; }
 
-.kill-switch {
+.kill-switch-dock {
   position: fixed;
   bottom: 20px;
   right: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.kill-switch-status {
+  font-size: 11px;
+  color: var(--red);
+  font-weight: 700;
+  max-width: 220px;
+  text-align: right;
+}
+
+.kill-switch {
   background: var(--red);
   color: #fff;
   border: none;
@@ -282,7 +297,18 @@ body {
   letter-spacing: 1px;
   padding: 16px 22px;
   border-radius: 8px;
-  cursor: not-allowed;
-  opacity: 0.5;
+  cursor: pointer;
   font-size: 14px;
 }
+.kill-switch:hover { background: #ff2e2e; }
+
+.kill-switch-resume {
+  background: transparent;
+  color: var(--green);
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.kill-switch-resume.hidden { display: none; }

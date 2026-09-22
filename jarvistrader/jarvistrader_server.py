@@ -24,6 +24,7 @@ STATIC_DIR = HERE / "static"
 REPO_ROOT = HERE.parent
 
 sys.path.insert(0, str(REPO_ROOT))
+from jarvis_trader.core import kill_switch  # noqa: E402
 from jarvis_trader.core.trader_core import core  # noqa: E402
 from jarvis_trader.memory import trader_database  # noqa: E402
 from jarvis_trader.security import credentials  # noqa: E402
@@ -113,6 +114,16 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "Windows DPAPI is unavailable, so Jarvis refused to save this in plaintext."})
                     return
                 self._send_json({"ok": True})
+                return
+
+            if path == "/api/kill_switch/engage":
+                kill_switch.engage("dashboard STOP TRADING button")
+                self._send_json({"ok": True, **kill_switch.status()})
+                return
+
+            if path == "/api/kill_switch/disengage":
+                kill_switch.disengage()
+                self._send_json({"ok": True, **kill_switch.status()})
                 return
 
             if path == "/api/credentials/delete":

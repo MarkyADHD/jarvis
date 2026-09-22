@@ -10,6 +10,7 @@ fully inert.
 import json
 from datetime import datetime, timezone
 
+from jarvis_trader.core import kill_switch
 from jarvis_trader.core.paths import TRADER_ROOT
 from jarvis_trader.core.state_machine import TraderState, TradingMode
 from jarvis_trader.risk import protected_limits
@@ -37,10 +38,18 @@ class TraderCore:
         self._write_status()
 
     def status(self) -> dict:
+        ks = kill_switch.status()
+        # Kill switch overrides the displayed state -- checked fresh on
+        # every status() call (this endpoint is polled every few
+        # seconds by the UI) rather than needing a background thread,
+        # since engage()/disengage() write synchronously and this reads
+        # fresh each time.
+        effective_state = TraderState.LOCKED.value if ks.get("engaged") else self.state.value
         return {
-            "state": self.state.value,
+            "state": effective_state,
             "mode": self.mode.value,
-            "autonomous_live_trading_enabled": self.autonomous_live_trading_enabled,
+            "autonomous_live_trading_enabled": self.autonomous_live_trading_enabled and not ks.get("engaged"),
+            "kill_switch": ks,
             "last_decision": self.last_decision,
             "next_scan": self.next_scan,
             "protected_limits": protected_limits.as_dict(),

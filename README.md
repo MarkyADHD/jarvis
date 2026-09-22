@@ -117,12 +117,20 @@ below, including recommended specs for the local model.
   212 accounts**. Each install connects its **own** Trading 212 API
   keys and trades with its **own** money — nothing is shared between
   installs, and nothing is enabled by default
-- **Current status: read-only.** The "Trader" tab (or "open
-  jarvistrader") lets you connect your own Trading 212 API key/secret
-  (demo or live) and see your real account summary, cash, and open
-  positions. There is still no strategy engine and no way to place,
-  modify, or cancel any order — it cannot touch your money right now,
-  full stop
+- **Current status: read-only, with real safety infrastructure now
+  built.** The "Trader" tab (or "open jarvistrader") lets you connect
+  your own Trading 212 API key/secret (demo or live) and see your real
+  account summary, cash, and open positions. A deterministic risk
+  engine and a Guardian Financial Gate — which the AI cannot see,
+  influence, or bypass — now exist and are fully tested, checking
+  every one of your protected limits (position size, exposure, open
+  positions, daily/weekly loss, equity floor, trade frequency) plus
+  kill-switch state, stale data, and duplicate orders. There's a real
+  **STOP TRADING** kill switch in the tab, and "Jarvis, stop trading"
+  works as a deterministic voice command — neither depends on any AI
+  model. None of this is wired to anything that can actually place an
+  order yet — that's still later phases — so it cannot touch your
+  money right now, full stop
 - The eventual design (being built in phases): Jarvis proposes trade
   ideas, but a separate, deterministic risk engine and safety gate —
   which the AI cannot edit or talk its way around — decides whether

@@ -181,6 +181,17 @@ async function refresh() {
     }
 
     document.getElementById("lastDecision").textContent = s.last_decision || "—";
+
+    const ks = s.kill_switch || {};
+    const ksStatus = document.getElementById("killSwitchStatus");
+    const ksResume = document.getElementById("killSwitchResume");
+    if (ks.engaged) {
+      ksStatus.textContent = "KILL SWITCH ENGAGED" + (ks.reason ? " (" + ks.reason + ")" : "");
+      ksResume.classList.remove("hidden");
+    } else {
+      ksStatus.textContent = "";
+      ksResume.classList.add("hidden");
+    }
     document.getElementById("dailyLossRemaining").textContent =
       fmtGbp(s.protected_limits.max_daily_realised_loss_gbp);
     document.getElementById("weeklyLossRemaining").textContent =
@@ -191,6 +202,20 @@ async function refresh() {
     document.getElementById("stateBadge").textContent = "STATUS: OFFLINE";
   }
 }
+
+document.getElementById("killSwitch").addEventListener("click", async () => {
+  try {
+    await fetch("/api/kill_switch/engage", { method: "POST" });
+  } catch (e) {}
+  refresh();
+});
+
+document.getElementById("killSwitchResume").addEventListener("click", async () => {
+  try {
+    await fetch("/api/kill_switch/disengage", { method: "POST" });
+  } catch (e) {}
+  refresh();
+});
 
 refresh();
 setInterval(refresh, 5000);

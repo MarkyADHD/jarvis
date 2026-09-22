@@ -128,9 +128,11 @@
     </section>
   </main>
 
-  <button class="kill-switch" id="killSwitch" disabled title="Not wired up yet -- Phase 4">
-    STOP TRADING
-  </button>
+  <div class="kill-switch-dock">
+    <div class="kill-switch-status" id="killSwitchStatus"></div>
+    <button class="kill-switch" id="killSwitch">STOP TRADING</button>
+    <button class="kill-switch-resume hidden" id="killSwitchResume">Resume</button>
+  </div>
 
 </div>
 <script src="app.js"></script>

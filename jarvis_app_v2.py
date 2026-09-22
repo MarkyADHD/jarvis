@@ -633,6 +633,26 @@ def quick_handle_command_v2(command):
                 c, name, "jarvistrader_launch",
             )
 
+    # Deterministic kill switch -- per the JarvisTrader design, this must
+    # NEVER depend on Claude/OpenAI/Gemini/Ollama/LLM interpretation, so
+    # it's handled here as a plain string match, before any brain call,
+    # calling jarvis_trader.core.kill_switch directly rather than routing
+    # through provider_router at all. A local import keeps JarvisTrader
+    # decoupled from the main app's startup import chain.
+    if c in {"jarvis stop trading", "stop trading", "jarvis, stop trading"}:
+        try:
+            from jarvis_trader.core import kill_switch as trader_kill_switch
+            trader_kill_switch.engage("voice command")
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"Trading's stopped, {name}. Stays stopped until you turn it back on yourself.", "steps": []},
+                c, name, "jarvistrader_kill_switch",
+            )
+        except Exception as e:
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"I couldn't confirm the kill switch engaged, {name}: {e}. Check the Trader tab directly.", "steps": []},
+                c, name, "jarvistrader_kill_switch",
+            )
+
     brain_result = provider_router.brain_command_fast(c, name, app)
     if brain_result:
         return finish_plan_v3(brain_result, c, name, "provider_router")
