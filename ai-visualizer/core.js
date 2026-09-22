@@ -1344,6 +1344,10 @@ const AV = (() => {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m9 10 4 3-4 3v-6Z" fill="currentColor" stroke="none"/></svg>
           <span>Media &amp; Clips</span>
         </div>
+        <div class="nav-item" data-view="jarvistrader">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19h16M6 16l4-5 3 3 5-7"/></svg>
+          <span>Trader <span style="font-size:9px;opacity:.7;border:1px solid currentColor;border-radius:6px;padding:0 4px;margin-left:2px">BETA</span></span>
+        </div>
         <div class="nav-item" data-view="smarthome">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21V12h6v9M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4"/></svg>
           <span>Smart Home</span>
@@ -1511,6 +1515,12 @@ const AV = (() => {
         <iframe id="jarvisHomeClipper" src="about:blank" style="display:none"></iframe>
       </div>
 
+      <div class="jarvisHomeMain hidden" data-panel="jarvistrader" style="padding:0">
+        <div id="jarvisHomeTraderStatus" style="position:absolute;inset:0;display:flex;
+          align-items:center;justify-content:center;font-size:12px;color:#8a9aa0">Starting JarvisTrader...</div>
+        <iframe id="jarvisHomeTrader" src="about:blank" style="display:none"></iframe>
+      </div>
+
       <div class="jarvisHomeMain hidden" data-panel="smarthome">
         <h2>Smart Home</h2>
         <div class="jh-widgets" style="grid-template-columns:repeat(2, minmax(0,1fr));max-width:600px">
@@ -1631,6 +1641,8 @@ const AV = (() => {
     const codeStatus = home.querySelector("#jarvisHomeCodeStatus");
     const clipperFrame = home.querySelector("#jarvisHomeClipper");
     const clipperStatus = home.querySelector("#jarvisHomeClipperStatus");
+    const traderFrame = home.querySelector("#jarvisHomeTrader");
+    const traderStatus = home.querySelector("#jarvisHomeTraderStatus");
     const chatBar = document.getElementById("jarvisChatBar");
 
     // Settings and Stream Tools reuse the EXACT existing panels (built by
@@ -1714,6 +1726,25 @@ const AV = (() => {
           }
         } catch (e) {
           clipperStatus.textContent = "Couldn't reach Jarvis to start JarvisClipper.";
+        }
+      }
+      // Same on-demand pattern as JarvisCode/JarvisClipper -- its own
+      // separate process (see jarvistrader_app.py), launched first
+      // (a no-op if already running) rather than pointing an iframe at
+      // a port that might not be listening yet.
+      if (view === "jarvistrader" && traderFrame.src === "about:blank") {
+        try {
+          const r = await fetch(api("/settings/jarvistrader/ensure"), authed({ method: "GET" }));
+          const data = await r.json();
+          if (data.ok) {
+            traderFrame.src = "http://127.0.0.1:8797/";
+            traderFrame.style.display = "block";
+            traderStatus.style.display = "none";
+          } else {
+            traderStatus.textContent = "Couldn't start JarvisTrader" + (data.error ? ": " + data.error : ".");
+          }
+        } catch (e) {
+          traderStatus.textContent = "Couldn't reach Jarvis to start JarvisTrader.";
         }
       }
     }

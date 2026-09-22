@@ -112,6 +112,29 @@ below, including recommended specs for the local model.
   the settings panel if it predates this — Twitch has no way to add a
   new permission to an existing connection
 
+### Trade for you (BETA, real money) — JarvisTrader
+- An experimental, opt-in autonomous trading module for **UK Trading
+  212 accounts**. Each install connects its **own** Trading 212 API
+  keys and trades with its **own** money — nothing is shared between
+  installs, and nothing is enabled by default
+- **Current status: skeleton only.** The "Trader" tab (or "open
+  jarvistrader") shows a real dashboard shell — mode, status, and your
+  protected risk limits — but there is no broker connection, no
+  strategy engine, and no way to place a trade yet. It cannot touch
+  your money right now, full stop
+- The eventual design (being built in phases): Jarvis proposes trade
+  ideas, but a separate, deterministic risk engine and safety gate —
+  which the AI cannot edit or talk its way around — decides whether
+  anything is actually allowed to execute, inside hard limits (max
+  position size, max exposure, max daily/weekly loss, a hard equity
+  floor) that only you can change
+- Autonomous **live** trading will always start **paused** after every
+  restart, update, or crash — it never resumes on its own, ever. You
+  have to deliberately turn it back on each time
+- This is real-money software and genuinely experimental. Only use it
+  with money you can afford to lose, and only once you've actually
+  read what a given release supports — see DISCLAIMER.txt
+
 ### Design your thumbnails — JarvisThumbnails
 - Say "make me a thumbnail for my GTA stream" and he'll actually generate
   one — real image generation, not a template filler
@@ -377,3 +400,10 @@ you would with any software that touches your files, and only install
 it if you're comfortable running an AI assistant with real control over
 your own computer. The installer shows this same notice before setup
 begins.
+
+**JarvisTrader specifically** is BETA, experimental, real-money
+software. It trades on Trading 212 using API keys you supply yourself,
+with your own capital, entirely at your own risk. The creator is not
+liable for any financial loss arising from installing, configuring, or
+using it. Only connect a real account if you understand and accept
+that risk, and never with money you can't afford to lose.

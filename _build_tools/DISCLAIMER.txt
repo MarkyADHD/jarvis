@@ -10,6 +10,11 @@ JARVIS is a personal AI assistant with real, broad access to your machine:
   model running with real file-write access on your machine.
 - It listens to your microphone continuously (or via push-to-talk) to
   respond to voice commands.
+- It includes an OPT-IN, BETA autonomous trading module (JarvisTrader)
+  that can trade REAL MONEY on a Trading 212 account YOU connect with
+  YOUR OWN API keys. Nothing is connected and nothing trades unless you
+  deliberately set this up yourself -- it ships inert. If you do connect
+  it, you are trading with real money, entirely at your own risk.
 
 THIS IS PROVIDED AS-IS, NO WARRANTY
 JARVIS is free, open-source, hobbyist software (MIT licensed -- see

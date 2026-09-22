@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JARVIS TRADER</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand">JARVIS TRADER</div>
+    <div class="beta-badge">BETA</div>
+    <div class="mode-badge" id="modeBadge">MODE: --</div>
+    <div class="state-badge" id="stateBadge">STATUS: --</div>
+  </header>
+
+  <div class="risk-banner">
+    This trades with REAL MONEY on YOUR OWN Trading 212 account. It is
+    experimental (BETA) software. Nothing is connected or enabled until
+    you deliberately set it up, and it will never place a live order
+    without you explicitly turning on autonomous live trading. Use at
+    your own risk.
+  </div>
+
+  <div class="live-banner hidden" id="liveBanner">
+    LIVE &mdash; REAL MONEY
+  </div>
+
+  <main class="content">
+    <section class="overview-grid">
+      <div class="card">
+        <div class="card-label">Portfolio Value</div>
+        <div class="card-value" id="portfolioValue">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Cash</div>
+        <div class="card-value" id="cashValue">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Market Exposure</div>
+        <div class="card-value" id="exposureValue">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Today's P&amp;L</div>
+        <div class="card-value" id="dailyPnl">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Weekly P&amp;L</div>
+        <div class="card-value" id="weeklyPnl">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Total P&amp;L</div>
+        <div class="card-value" id="totalPnl">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Open Positions</div>
+        <div class="card-value" id="openPositions">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Daily Loss Remaining</div>
+        <div class="card-value" id="dailyLossRemaining">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Weekly Loss Remaining</div>
+        <div class="card-value" id="weeklyLossRemaining">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Strategy</div>
+        <div class="card-value" id="strategyValue">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Model</div>
+        <div class="card-value" id="modelValue">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Last Decision</div>
+        <div class="card-value" id="lastDecision">&mdash;</div>
+      </div>
+    </section>
+
+    <section class="notice" id="phaseNotice">
+      <strong>Phase 2 build.</strong> This is the skeleton, UI shell, database,
+      and credential layer only. JarvisTrader is not connected to Trading 212
+      yet, has no risk engine, no strategies, and cannot place any order &mdash;
+      trading state always starts <code>DISABLED</code> / <code>PAUSED</code>
+      and stays that way until later phases are built and you deliberately
+      enable each one.
+    </section>
+
+    <section class="limits-panel">
+      <h2>Protected Risk Envelope (owner-only, not AI-editable)</h2>
+      <div class="limits-grid" id="limitsGrid"></div>
+    </section>
+  </main>
+
+  <button class="kill-switch" id="killSwitch" disabled title="Not wired up yet -- Phase 4">
+    STOP TRADING
+  </button>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>

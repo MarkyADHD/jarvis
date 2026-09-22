@@ -58,6 +58,7 @@ import jarvis_thumbnail_v1 as thumbnail
 import jarvis_system_stats_v1 as system_stats
 import jarviscode_app
 import jarvisclipper_app
+import jarvistrader_app
 
 try:
     import jarvis_system_media_v1 as system_media
@@ -298,6 +299,20 @@ def settings_jarvisclipper_ensure() -> dict:
     try:
         jarvisclipper_app._ensure_server_running()
         return {"ok": jarvisclipper_app._server_alive()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def settings_jarvistrader_ensure() -> dict:
+    """Same on-demand-process pattern as JarvisCode/JarvisClipper above,
+    same reason -- see jarvistrader_app.py's own docstring. JarvisTrader
+    (BETA) is real-money software; this route only ever launches its
+    UI shell, never places a trade -- see jarvis_trader/core/trader_core.py,
+    which always starts DISABLED/PAUSED regardless of how this server
+    process starts."""
+    try:
+        jarvistrader_app._ensure_server_running()
+        return {"ok": jarvistrader_app._server_alive()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -1391,6 +1406,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 self._send_json(settings_jarvisclipper_ensure())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/settings/jarvistrader/ensure":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(settings_jarvistrader_ensure())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
         elif path == "/settings/stream/status":

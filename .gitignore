@@ -70,6 +70,10 @@ temp_screenshots/
 .maintenance_v2/installations/
 .maintenance_v2/runtime.lock
 
+# --- JarvisTrader: real-money BETA feature, its per-user Edge profile
+# is machine-specific noise same as every other satellite app's.
+jarvistrader/.edge-app-profile/
+
 # --- Editor/OS noise ---
 .vscode/
 Thumbs.db

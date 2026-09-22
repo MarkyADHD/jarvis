@@ -616,6 +616,23 @@ def quick_handle_command_v2(command):
                 c, name, "jarvisclipper_launch",
             )
 
+    if c in {"open jarvistrader", "open jarvis trader", "launch jarvistrader", "launch jarvis trader", "start jarvistrader", "start jarvis trader"}:
+        try:
+            subprocess.Popen(
+                [sys.executable, "jarvistrader_app.py"],
+                cwd=r"C:\AI-Agent",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"Opening JarvisTrader, {name}. It's still BETA and starts fully paused.", "steps": []},
+                c, name, "jarvistrader_launch",
+            )
+        except Exception as e:
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"I couldn't open JarvisTrader, {name}: {e}", "steps": []},
+                c, name, "jarvistrader_launch",
+            )
+
     brain_result = provider_router.brain_command_fast(c, name, app)
     if brain_result:
         return finish_plan_v3(brain_result, c, name, "provider_router")
