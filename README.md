@@ -158,9 +158,13 @@ below, including recommended specs for the local model.
   changeable by a deliberate later code edit. An execution engine
   tracks every order through a real state machine and never blindly
   retries on a timeout/5xx; a reconciliation module resolves what
-  actually happened against the broker's own order history. Still
-  nothing in the UI can trigger any of this yet — it's only reachable
-  by direct code/test calls right now
+  actually happened against the broker's own order history. The Trader
+  tab now has a real **Autonomous Demo Trading** section: pick tickers
+  and a strategy, hit Start, and it runs on a real background loop —
+  real market data, real risk engine, real Guardian gate, real orders
+  on your demo account — until you hit Stop, say "Jarvis, stop
+  trading," or restart Jarvis (it never resumes on its own). "Jarvis,
+  start/stop demo trading" work as voice commands too
 - The eventual design (being built in phases): Jarvis proposes trade
   ideas, but a separate, deterministic risk engine and safety gate —
   which the AI cannot edit or talk its way around — decides whether

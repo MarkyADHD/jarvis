@@ -141,6 +141,80 @@ body {
   color: var(--accent);
 }
 
+.demo-trading-panel {
+  background: var(--panel);
+  border: 1px solid var(--green);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.demo-trading-panel h2 {
+  font-size: 14px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0 0 10px;
+}
+
+.demo-trading-status {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.demo-trading-status.running { color: var(--green); }
+
+#demoTradingForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+#demoTradingForm input, #demoTradingForm select {
+  background: #04141f;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 5px;
+  font-size: 13px;
+}
+#demoTradingForm input { flex: 1 1 240px; }
+#demoTradingForm button {
+  background: var(--green);
+  color: #04141f;
+  border: none;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+#demoTradingForm button#demoStopBtn {
+  background: transparent;
+  color: var(--red);
+  border: 1px solid var(--red);
+}
+
+.demo-trading-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+.demo-trading-log {
+  font-size: 11px;
+  max-height: 160px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.demo-trading-log .log-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  color: var(--text-dim);
+}
+
 .connect-panel, .account-panel {
   background: var(--panel);
   border: 1px solid var(--border);

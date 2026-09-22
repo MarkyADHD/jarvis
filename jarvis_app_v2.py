@@ -653,6 +653,43 @@ def quick_handle_command_v2(command):
                 c, name, "jarvistrader_kill_switch",
             )
 
+    # Same deterministic pattern as the kill switch above -- starting
+    # autonomous DEMO trading is real (though fake-money) order
+    # placement, so this is a plain string match too, never LLM-routed.
+    if c in {"start demo trading", "jarvis start demo trading", "jarvis, start demo trading"}:
+        try:
+            from jarvis_trader.core import scheduler as trader_scheduler
+            from jarvis_trader.security import credentials as trader_credentials
+            if not trader_credentials.has_credentials("demo"):
+                return finish_plan_v3(
+                    {"mode": "chat", "reply": f"You need to connect a Trading 212 demo account first, {name} -- the Trader tab has the form.", "steps": []},
+                    c, name, "jarvistrader_demo_start",
+                )
+            trader_scheduler.start(["AAPL"], "sma_crossover")
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"Started, {name}. Autonomous demo trading on AAPL, SMA crossover, real orders on fake money. Say \"stop trading\" any time.", "steps": []},
+                c, name, "jarvistrader_demo_start",
+            )
+        except Exception as e:
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"Couldn't start demo trading, {name}: {e}", "steps": []},
+                c, name, "jarvistrader_demo_start",
+            )
+
+    if c in {"stop demo trading", "jarvis stop demo trading", "jarvis, stop demo trading"}:
+        try:
+            from jarvis_trader.core import scheduler as trader_scheduler
+            trader_scheduler.stop()
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"Stopped, {name}.", "steps": []},
+                c, name, "jarvistrader_demo_stop",
+            )
+        except Exception as e:
+            return finish_plan_v3(
+                {"mode": "chat", "reply": f"Couldn't confirm demo trading stopped, {name}: {e}", "steps": []},
+                c, name, "jarvistrader_demo_stop",
+            )
+
     brain_result = provider_router.brain_command_fast(c, name, app)
     if brain_result:
         return finish_plan_v3(brain_result, c, name, "provider_router")

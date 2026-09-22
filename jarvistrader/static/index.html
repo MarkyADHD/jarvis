@@ -53,6 +53,25 @@
       <div class="connect-msg" id="connectMsg"></div>
     </section>
 
+    <section class="demo-trading-panel" id="demoTradingPanel">
+      <h2>Autonomous Demo Trading</h2>
+      <div class="demo-trading-status" id="demoTradingStatus">Stopped.</div>
+      <form id="demoTradingForm">
+        <input type="text" id="demoTickers" placeholder="Tickers, comma-separated (e.g. AAPL, MSFT)" value="AAPL">
+        <select id="demoStrategy"></select>
+        <button type="submit" id="demoStartBtn">Start</button>
+        <button type="button" id="demoStopBtn">Stop</button>
+      </form>
+      <div class="demo-trading-hint">
+        Runs fully autonomously on your connected <strong>demo</strong> account
+        only &mdash; real orders, fake money, through the real risk engine and
+        Guardian Financial Gate. Stops instantly if you hit STOP TRADING below
+        or say &ldquo;Jarvis, stop trading.&rdquo; You have to click Start
+        yourself &mdash; nothing here starts on its own.
+      </div>
+      <div class="demo-trading-log" id="demoTradingLog"></div>
+    </section>
+
     <section class="account-panel hidden" id="accountPanel">
       <h2>Account (<span id="accountEnvLabel"></span>)</h2>
       <div class="account-grid" id="accountGrid"></div>

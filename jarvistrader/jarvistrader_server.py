@@ -6,11 +6,12 @@ JarvisClipper server -- no external web framework, 127.0.0.1 only,
 never exposed to the Tailscale mesh (this one touches real money,
 eventually -- staying loopback-only is not optional).
 
-Phase 3 scope: adds credential entry (save/status/delete, DPAPI-
-encrypted via security/credentials.py) and read-only Trading 212 data
-(account summary, cash, positions, orders via broker/trading212_client
-.py). Still no order placement, no risk engine, no LLM calls -- those
-are later phases. Nothing here can place a trade.
+Phases 1-8 scope: credential entry (Phase 3), risk engine + Guardian
+Financial Gate + kill switch (Phase 4), and autonomous DEMO trading
+(Phase 8) via core/scheduler.py's background loop -- the
+/api/demo_trading/start route is the deliberate owner action that
+enables it; nothing here starts trading on its own. Still no LLM calls
+anywhere in this project yet.
 """
 import json
 import mimetypes
@@ -24,11 +25,12 @@ STATIC_DIR = HERE / "static"
 REPO_ROOT = HERE.parent
 
 sys.path.insert(0, str(REPO_ROOT))
-from jarvis_trader.core import kill_switch  # noqa: E402
+from jarvis_trader.core import kill_switch, scheduler  # noqa: E402
 from jarvis_trader.core.trader_core import core  # noqa: E402
-from jarvis_trader.memory import trader_database  # noqa: E402
+from jarvis_trader.memory import journal, trader_database  # noqa: E402
 from jarvis_trader.security import credentials  # noqa: E402
 from jarvis_trader.broker.trading212_client import Trading212Client  # noqa: E402
+from jarvis_trader.strategy.strategy_engine import TEMPLATES  # noqa: E402
 
 trader_database.init_db()
 
@@ -75,6 +77,17 @@ class Handler(BaseHTTPRequestHandler):
                     "demo": credentials.has_credentials("demo"),
                     "live": credentials.has_credentials("live"),
                 })
+                return
+
+            if path == "/api/demo_trading/state":
+                self._send_json({
+                    **scheduler.get_state(),
+                    "available_strategies": list(TEMPLATES.keys()),
+                })
+                return
+
+            if path == "/api/demo_trading/recent":
+                self._send_json({"decisions": journal.recent_decisions(limit=20)})
                 return
 
             if path == "/api/account":
@@ -124,6 +137,25 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/kill_switch/disengage":
                 kill_switch.disengage()
                 self._send_json({"ok": True, **kill_switch.status()})
+                return
+
+            if path == "/api/demo_trading/start":
+                body = self._read_json_body()
+                tickers = body.get("tickers") or ["AAPL"]
+                strategy = str(body.get("strategy", "sma_crossover"))
+                if strategy not in TEMPLATES:
+                    self._send_json({"ok": False, "error": f"Unknown strategy template: {strategy!r}"}, 400)
+                    return
+                if not credentials.has_credentials("demo"):
+                    self._send_json({"ok": False, "error": "Connect your Trading 212 demo account first."}, 400)
+                    return
+                state = scheduler.start(tickers, strategy)
+                self._send_json({"ok": True, **state})
+                return
+
+            if path == "/api/demo_trading/stop":
+                state = scheduler.stop()
+                self._send_json({"ok": True, **state})
                 return
 
             if path == "/api/credentials/delete":

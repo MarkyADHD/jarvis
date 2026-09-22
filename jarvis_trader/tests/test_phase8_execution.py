@@ -135,9 +135,19 @@ def test_execution_engine_refuses_non_market_order_type():
         "action": "OPEN_POSITION", "instrument": "AAPL_US_EQ",
         "direction": "LONG", "position_value": 10, "order_type": "LIMIT",
     })
-    result = execution_engine.submit_approved_intent(intent, "demo", {}, last_known_price=150.0)
-    assert result["ok"] is False
-    assert result["execution_state"] == ExecutionState.REJECTED.value
+    try:
+        result = execution_engine.submit_approved_intent(intent, "demo", {}, last_known_price=150.0)
+        assert result["ok"] is False
+        assert result["execution_state"] == ExecutionState.REJECTED.value
+    finally:
+        # This test still persists a trade_intents row (rejected orders
+        # are recorded too) -- must clean it up like every other test
+        # here, or leftover rows silently pollute a later test's real
+        # trade-frequency-limit checks (confirmed live: this exact gap
+        # caused test_run_cycle_submits_real_order_when_signal_and_gate_allow
+        # in test_phase8b_demo_trading.py to fail against real leftover data).
+        with trader_database.get_connection() as conn:
+            conn.execute("DELETE FROM trade_intents WHERE trade_intent_id = ?", (intent.trade_intent_id,))
 
 
 def test_execution_engine_happy_path_persists_submitted_state(demo_credentials):

@@ -240,5 +240,72 @@ document.getElementById("killSwitchResume").addEventListener("click", async () =
   refresh();
 });
 
+async function refreshDemoTrading() {
+  try {
+    const r = await fetch("/api/demo_trading/state");
+    const s = await r.json();
+
+    const strategySelect = document.getElementById("demoStrategy");
+    if (strategySelect.options.length === 0 && s.available_strategies) {
+      for (const name of s.available_strategies) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        strategySelect.appendChild(opt);
+      }
+    }
+
+    const status = document.getElementById("demoTradingStatus");
+    if (s.enabled) {
+      status.textContent = "RUNNING on " + (s.tickers || []).join(", ") + " (" + s.strategy + ")" +
+        (s.last_cycle_at ? " -- last cycle " + s.last_cycle_at : "");
+      status.classList.add("running");
+    } else {
+      status.textContent = "Stopped.";
+      status.classList.remove("running");
+    }
+
+    const log = document.getElementById("demoTradingLog");
+    log.innerHTML = "";
+    for (const entry of (s.last_results || [])) {
+      const row = document.createElement("div");
+      row.className = "log-row";
+      row.innerHTML = `<span>${entry.ticker || ""}</span><span>${entry.outcome || entry.error || ""}</span>`;
+      log.appendChild(row);
+    }
+  } catch (e) {
+    // best-effort
+  }
+}
+
+document.getElementById("demoTradingForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const tickers = document.getElementById("demoTickers").value
+    .split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
+  const strategy = document.getElementById("demoStrategy").value;
+  try {
+    const r = await fetch("/api/demo_trading/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tickers, strategy }),
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      document.getElementById("demoTradingStatus").textContent = data.error || "Couldn't start.";
+    }
+  } catch (e) {}
+  refreshDemoTrading();
+});
+
+document.getElementById("demoStopBtn").addEventListener("click", async () => {
+  try {
+    await fetch("/api/demo_trading/stop", { method: "POST" });
+  } catch (e) {}
+  refreshDemoTrading();
+});
+
+refreshDemoTrading();
+setInterval(refreshDemoTrading, 5000);
+
 refresh();
 setInterval(refresh, 5000);
