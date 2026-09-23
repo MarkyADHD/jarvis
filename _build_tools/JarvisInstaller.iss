@@ -18,7 +18,7 @@
 
 #define AppName "JARVIS"
 #define AppPublisher "MarkyADHD"
-#define AppVersion "2.15"
+#define AppVersion "2.16"
 #define ExportDir "C:\JarvisExport"
 #define ArtDir "installer_art"
 
