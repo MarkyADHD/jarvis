@@ -75,6 +75,7 @@ import wave
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import numpy as np
 import requests
 
@@ -159,16 +160,31 @@ CLIP_MIN_SECONDS = 6
 CLIP_MAX_SECONDS = 45
 SILENCE_GAP_MIN_SECONDS = 0.35  # a gap at least this long counts as a real pause
 
-# Burned-in captions, grouped a few words per card (StreamLadder's own
-# fast-paced caption style) rather than one huge subtitle block.
-CAPTION_WORDS_PER_CARD = 4
-
-# Vertical export for TikTok/Shorts/Reels -- a centered crop, not dynamic
-# face-tracking (that needs a running face-detection model per frame,
-# a much bigger lift than this pass; a static centered crop is the
-# honest, tractable default every clip still gets cut from cleanly).
+# Vertical export for TikTok/Shorts/Reels. When a facecam overlay is
+# confidently detected (see detect_facecam_region below), it gets its
+# own strip at the top of the vertical canvas with the gameplay
+# center-cropped below it -- the StreamLadder-style layout. Falls back
+# to a plain centered crop of the full frame when no facecam can be
+# confidently located (an IRL/no-webcam stream, or one where the
+# detector just doesn't find a clear, consistent face).
 VERTICAL_WIDTH = 1080
 VERTICAL_HEIGHT = 1920
+FACECAM_PANE_HEIGHT = 620  # top strip height in the 1920-tall vertical canvas
+GAMEPLAY_PANE_HEIGHT = VERTICAL_HEIGHT - FACECAM_PANE_HEIGHT
+
+# Facecam detection samples a handful of frames spread across the VOD
+# (not every frame -- a real streamer's webcam overlay sits in the same
+# spot the whole broadcast, so this only ever needs to be located once,
+# not tracked). A face that keeps showing up in roughly the same corner
+# across widely-spaced samples is almost certainly the facecam, not a
+# random person walking through a game's cutscene.
+FACECAM_SAMPLE_FRACTIONS = (0.15, 0.3, 0.45, 0.6, 0.75, 0.9)
+FACECAM_MIN_CONFIDENT_HITS = 3  # of len(FACECAM_SAMPLE_FRACTIONS) samples
+# Real streamer overlays are noticeably larger than a Haar cascade's
+# tight face box (they include shoulders/chest and a border/frame) --
+# this pads the detected face region out to something that actually
+# looks like a webcam bubble instead of a tight face crop.
+FACECAM_BOX_PADDING_MULTIPLIER = 2.8
 
 
 def _run(cmd, timeout=None):
@@ -519,6 +535,83 @@ def _extract_frame(stream_url, timestamp_seconds, output_path):
     return result.returncode == 0 and Path(output_path).exists()
 
 
+_FACE_CASCADE = None
+
+
+def _face_cascade():
+    global _FACE_CASCADE
+    if _FACE_CASCADE is None:
+        path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        _FACE_CASCADE = cv2.CascadeClassifier(path)
+    return _FACE_CASCADE
+
+
+def detect_facecam_region(stream_url, vod_duration_seconds, frame_dir):
+    """Samples a handful of frames spread across the whole VOD and looks
+    for a face that keeps showing up in the same corner -- that's a
+    real webcam overlay, not a one-off face in a cutscene. Returns
+    (x, y, w, h) in the original frame's pixel coordinates (padded out
+    to something that looks like an actual webcam bubble, not a tight
+    face box), or None if nothing consistent enough was found.
+
+    Deliberately NOT per-frame face tracking -- a streamer's overlay
+    doesn't move during a broadcast, so locating it once from a few
+    samples is both cheaper and more reliable than running a detector
+    on every frame of every clip."""
+    cascade = _face_cascade()
+    detections = []  # (cx_norm, cy_norm, w_norm, h_norm)
+    frame_size = None
+
+    for i, frac in enumerate(FACECAM_SAMPLE_FRACTIONS):
+        t = vod_duration_seconds * frac
+        sample_path = frame_dir / f"facecam_sample_{i}.jpg"
+        if not _extract_frame(stream_url, t, sample_path):
+            continue
+        img = cv2.imread(str(sample_path))
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        frame_size = (w, h)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=6, minSize=(60, 60))
+        # Only the largest face per sample -- a webcam overlay face is
+        # usually the most prominent one; incidental faces on-screen
+        # (a game character, a video-in-video) are typically smaller.
+        if len(faces) == 0:
+            continue
+        fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+        detections.append(((fx + fw / 2) / w, (fy + fh / 2) / h, fw / w, fh / h))
+
+    if not detections or frame_size is None:
+        return None
+
+    # Cluster by screen quadrant (webcam overlays are corner-anchored
+    # in the overwhelming majority of real streaming layouts) and
+    # require enough consistent hits in one quadrant before trusting it.
+    quadrants = {}
+    for cx, cy, fw, fh in detections:
+        key = (cx >= 0.5, cy >= 0.5)
+        quadrants.setdefault(key, []).append((cx, cy, fw, fh))
+
+    best_quadrant = max(quadrants.values(), key=len)
+    if len(best_quadrant) < FACECAM_MIN_CONFIDENT_HITS:
+        return None
+
+    med_cx = float(np.median([d[0] for d in best_quadrant]))
+    med_cy = float(np.median([d[1] for d in best_quadrant]))
+    med_fw = float(np.median([d[2] for d in best_quadrant]))
+    med_fh = float(np.median([d[3] for d in best_quadrant]))
+
+    frame_w, frame_h = frame_size
+    box_w = min(frame_w, med_fw * frame_w * FACECAM_BOX_PADDING_MULTIPLIER)
+    box_h = min(frame_h, med_fh * frame_h * FACECAM_BOX_PADDING_MULTIPLIER)
+    cx_px, cy_px = med_cx * frame_w, med_cy * frame_h
+
+    x = int(max(0, min(frame_w - box_w, cx_px - box_w / 2)))
+    y = int(max(0, min(frame_h - box_h, cy_px - box_h / 2)))
+    return (x, y, int(box_w), int(box_h))
+
+
 def transcribe_candidates(wav_path, candidates, stream_url=None, frame_dir=None):
     """Each candidate gets a real transcript (with word-level timestamps,
     for smart trim/captions later) and, when stream_url/frame_dir are
@@ -742,65 +835,109 @@ def _find_smart_clip_bounds(words, center_seconds,
 # Burned-in captions
 # -------------------------------------------------------------------------
 
-def _srt_timestamp(seconds):
-    """Real bug, caught in testing: computing ms from the fractional part
-    separately from hh/mm/ss can round UP into 1000 (e.g. 1.9995s ->
-    ms=1000, an invalid SRT timestamp) since the rounding happens after
-    the whole-second truncation already threw away the carry. Rounding
-    the total millisecond count FIRST, then deriving every field from
-    that one integer, can't produce that inconsistency."""
-    total_ms = max(0, int(round(seconds * 1000)))
-    hh, rem_ms = divmod(total_ms, 3_600_000)
-    mm, rem_ms = divmod(rem_ms, 60_000)
-    ss, ms = divmod(rem_ms, 1000)
-    return f"{hh:02d}:{mm:02d}:{ss:02d},{ms:03d}"
-
-
-def _build_srt(words, clip_start_abs, clip_end_abs, words_per_card=CAPTION_WORDS_PER_CARD):
-    """StreamLadder-style captions: short, fast-paced cards of a few
-    words each, timed relative to the CLIP's own start (not the VOD's),
-    since that's the timeline the burned-in subtitle filter actually
-    plays against. Returns None if there's nothing to caption (no words
-    landed inside this clip's own trimmed range) -- silent clips or a
-    transcription miss just ship without captions rather than an empty
-    subtitle track."""
-    in_range = [
-        w for w in words
-        if w["end"] > clip_start_abs and w["start"] < clip_end_abs
-    ]
-    if not in_range:
-        return None
-
-    cards = []
-    for i in range(0, len(in_range), words_per_card):
-        chunk = in_range[i:i + words_per_card]
-        text = " ".join(w["word"].strip() for w in chunk if w["word"].strip())
-        if not text:
-            continue
-        start_rel = max(0.0, chunk[0]["start"] - clip_start_abs)
-        end_rel = max(start_rel + 0.2, chunk[-1]["end"] - clip_start_abs)
-        cards.append((start_rel, end_rel, text))
-
-    if not cards:
-        return None
-
-    lines = []
-    for i, (start_rel, end_rel, text) in enumerate(cards, start=1):
-        lines.append(str(i))
-        lines.append(f"{_srt_timestamp(start_rel)} --> {_srt_timestamp(end_rel)}")
-        lines.append(text)
-        lines.append("")
-    return "\n".join(lines)
-
 
 def _ffmpeg_path_escape(path):
-    """ffmpeg's subtitles filter parses its own argument like a mini INI
-    file, where ':' and '\\' are both special -- a plain Windows path
-    (C:\\Users\\...) breaks it outright without this. Confirmed pattern
-    for ffmpeg on Windows: escape backslashes, then escape the drive
-    colon specifically."""
+    """ffmpeg's subtitles/drawtext filters parse their own argument like
+    a mini INI file, where ':' and '\\' are both special -- a plain
+    Windows path (C:\\Users\\...) breaks it outright without this.
+    Confirmed pattern for ffmpeg on Windows: escape backslashes, then
+    escape the drive colon specifically."""
     escaped = str(path).replace("\\", "\\\\").replace(":", "\\:")
     return escaped
+
+
+# Single-word "pop" captions -- each word gets its own brief window and
+# a quick grow-in animation (StreamLadder's word-by-word style),
+# replacing the old multi-word static card. Built as one drawtext
+# filter per word via textfile= rather than inline text= -- ffmpeg's
+# own filter-string escaping for inline text is notoriously fragile
+# against real chat/speech text (colons, quotes, percent signs, commas
+# all mean something to the filtergraph parser); a textfile only ever
+# needs its own PATH escaped, never the caption text itself.
+WORD_POP_DURATION_SECONDS = 0.12  # how long the grow-in animation takes
+WORD_POP_HOLD_PADDING_SECONDS = 0.15  # extra hold after the last word's own end
+WORD_POP_BASE_FONTSIZE = 64
+WORD_POP_MAX_FONTSIZE = 86
+
+# Real bug, confirmed live: ffmpeg's drawtext filter needs Fontconfig to
+# resolve a font by name, and this Windows ffmpeg build has no
+# Fontconfig config file at all -- every drawtext call failed outright
+# ("Cannot load default config file") until pointed at an explicit
+# font FILE instead. Arial Bold ships on every Windows install, so
+# this doesn't depend on anything this project bundles itself.
+CAPTION_FONT_FILE = r"C:\Windows\Fonts\arialbd.ttf"
+
+
+def _build_word_pop_filters(words, clip_start_abs, clip_end_abs, temp_dir, y_expr="h-320"):
+    """Returns a list of ffmpeg drawtext filter strings, one per word,
+    each active only during its own [start, end) window with a quick
+    grow-in pop, timed relative to the CLIP's own start. Each word's
+    text is written to its own small file in temp_dir (the caller owns
+    that directory's lifetime). Returns [] if nothing from `words`
+    lands inside this clip's own trimmed range."""
+    in_range = [w for w in words if w["end"] > clip_start_abs and w["start"] < clip_end_abs]
+    if not in_range:
+        return []
+
+    clip_duration = clip_end_abs - clip_start_abs
+    pop = WORD_POP_MAX_FONTSIZE - WORD_POP_BASE_FONTSIZE
+    filters = []
+
+    for i, w in enumerate(in_range):
+        text = w["word"].strip()
+        if not text:
+            continue
+        start_rel = max(0.0, w["start"] - clip_start_abs)
+        # Hold each word on screen until the next one starts (never a
+        # visible gap with nothing on screen between words) -- or a
+        # short pad past its own end for the clip's final word.
+        if i + 1 < len(in_range):
+            end_rel = max(start_rel + 0.15, in_range[i + 1]["start"] - clip_start_abs)
+        else:
+            end_rel = (w["end"] - clip_start_abs) + WORD_POP_HOLD_PADDING_SECONDS
+        end_rel = min(end_rel, clip_duration)
+        if end_rel <= start_rel:
+            continue
+
+        word_file = temp_dir / f"word_{i}.txt"
+        word_file.write_text(text, encoding="utf-8")
+        escaped_path = _ffmpeg_path_escape(word_file)
+
+        # Commas inside a filter's own option value must be escaped
+        # (\,) or ffmpeg's filtergraph parser reads them as the next
+        # filter starting -- applies to both the fontsize expression
+        # and the enable=between(...) expression below.
+        fontsize_expr = (
+            f"if(lt(t-{start_rel:.3f}\\,{WORD_POP_DURATION_SECONDS})\\,"
+            f"{WORD_POP_BASE_FONTSIZE}+{pop}*(1-(t-{start_rel:.3f})/{WORD_POP_DURATION_SECONDS})\\,"
+            f"{WORD_POP_BASE_FONTSIZE})"
+        )
+        escaped_font = _ffmpeg_path_escape(CAPTION_FONT_FILE)
+        filters.append(
+            f"drawtext=fontfile='{escaped_font}':textfile='{escaped_path}':fontcolor=white:"
+            f"fontsize='{fontsize_expr}':borderw=5:bordercolor=black:x=(w-text_w)/2:y={y_expr}:"
+            f"enable='between(t\\,{start_rel:.3f}\\,{end_rel:.3f})'"
+        )
+
+    return filters
+
+
+def _build_facecam_layout_filter(facecam_region, canvas_width=VERTICAL_WIDTH,
+                                  facecam_pane_h=FACECAM_PANE_HEIGHT,
+                                  gameplay_pane_h=GAMEPLAY_PANE_HEIGHT):
+    """Returns an ffmpeg filter_complex string that stacks a cropped/
+    scaled facecam strip on top of a center-cropped gameplay pane into
+    one vertical canvas -- the StreamLadder-style split layout. Reads
+    the main input as [0:v]; produces a [layout] label the caller
+    chains any further filters (captions) onto."""
+    fx, fy, fw, fh = facecam_region
+    return (
+        f"[0:v]crop={fw}:{fh}:{fx}:{fy},"
+        f"scale={canvas_width}:{facecam_pane_h}:force_original_aspect_ratio=increase,"
+        f"crop={canvas_width}:{facecam_pane_h}[fc];"
+        f"[0:v]crop=ih*9/16:ih,scale={canvas_width}:{gameplay_pane_h}[gp];"
+        f"[fc][gp]vstack=inputs=2[layout]"
+    )
 
 
 # -------------------------------------------------------------------------
@@ -808,29 +945,53 @@ def _ffmpeg_path_escape(path):
 # -------------------------------------------------------------------------
 
 def cut_clip(stream_url, start_seconds, end_seconds, output_path,
-             srt_path=None, vertical=False):
+             words=None, temp_dir=None, vertical=False, facecam_region=None):
     """Cuts one clip from start_seconds to end_seconds (absolute VOD
-    time). When srt_path is given, captions get burned in (ffmpeg has to
-    re-encode for that -- "-c copy" only works with no filters at all).
-    When vertical is True, applies a centered 9:16 crop for TikTok/
-    Shorts/Reels -- a static crop, not dynamic face-tracking (that needs
-    a running face-detection model per frame, a real separate project;
-    this is the honest, tractable version every clip still gets cut
-    from cleanly)."""
-    duration = max(0.5, end_seconds - start_seconds)
-    filters = []
+    time).
 
-    if vertical:
-        filters.append(f"crop=ih*9/16:ih,scale={VERTICAL_WIDTH}:{VERTICAL_HEIGHT}")
-    if srt_path:
-        filters.append(f"subtitles='{_ffmpeg_path_escape(srt_path)}'")
+    words + temp_dir: when both are given, burns in StreamLadder-style
+    single-word pop-in captions (see _build_word_pop_filters), timed
+    against this specific clip's own trimmed window. temp_dir just
+    needs to be a real directory the caller owns the lifetime of --
+    each word gets its own tiny text file there.
+
+    vertical: 9:16 export. When facecam_region is also given, uses the
+    real StreamLadder-style split layout (facecam strip on top,
+    gameplay center-cropped below, see _build_facecam_layout_filter)
+    instead of a plain centered crop of the whole frame.
+
+    facecam_region: (x, y, w, h) in the source frame's own pixel
+    coordinates, from detect_facecam_region(). Ignored unless
+    vertical=True."""
+    duration = max(0.5, end_seconds - start_seconds)
+
+    caption_filters = []
+    if words and temp_dir:
+        caption_filters = _build_word_pop_filters(words, start_seconds, end_seconds, temp_dir)
 
     cmd = ["ffmpeg", "-y", "-ss", str(max(0, start_seconds)), "-i", stream_url, "-t", str(duration)]
 
-    if filters:
-        cmd += ["-vf", ",".join(filters), "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"]
+    if vertical and facecam_region:
+        layout = _build_facecam_layout_filter(facecam_region)
+        if caption_filters:
+            filter_complex = layout + ";[layout]" + ",".join(caption_filters) + "[out]"
+            map_label = "[out]"
+        else:
+            filter_complex = layout
+            map_label = "[layout]"
+        cmd += [
+            "-filter_complex", filter_complex, "-map", map_label, "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac",
+        ]
     else:
-        cmd += ["-c", "copy"]
+        filters = []
+        if vertical:
+            filters.append(f"crop=ih*9/16:ih,scale={VERTICAL_WIDTH}:{VERTICAL_HEIGHT}")
+        filters.extend(caption_filters)
+        if filters:
+            cmd += ["-vf", ",".join(filters), "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"]
+        else:
+            cmd += ["-c", "copy"]
 
     cmd += [str(output_path)]
 
@@ -904,6 +1065,21 @@ def make_clips_from_vod(vod, max_clips=DEFAULT_MAX_CLIPS, progress_cb=None,
         output_dir = CLIPS_ROOT / folder_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Facecam position is static for the whole broadcast -- detected
+        # ONCE per VOD here, not per clip (see detect_facecam_region's
+        # own docstring for why re-detecting per clip would be wasted
+        # work). None (no confident detection -- an IRL/no-webcam
+        # stream, or a fullscreen-facecam "just chatting" stream where
+        # the split layout wouldn't make sense anyway) falls back to
+        # cut_clip's plain centered crop automatically.
+        facecam_region = None
+        if vertical:
+            report("Looking for a facecam overlay to build the vertical layout around...")
+            try:
+                facecam_region = detect_facecam_region(stream_url, duration, frames_dir)
+            except Exception:
+                facecam_region = None
+
         clips = []
         for i, candidate in enumerate(approved, start=1):
             report(f"Cutting clip {i} of {len(approved)}...")
@@ -912,15 +1088,14 @@ def make_clips_from_vod(vod, max_clips=DEFAULT_MAX_CLIPS, progress_cb=None,
             words = candidate.get("words") or []
             start_s, end_s = _find_smart_clip_bounds(words, candidate["timestamp_seconds"])
 
-            srt_path = None
-            if captions:
-                srt_text = _build_srt(words, start_s, end_s)
-                if srt_text:
-                    srt_path = output_dir / f"clip_{i:02d}.srt"
-                    srt_path.write_text(srt_text, encoding="utf-8")
-
             try:
-                cut_clip(stream_url, start_s, end_s, clip_path, srt_path=srt_path, vertical=vertical)
+                with tempfile.TemporaryDirectory(prefix="jarvis_clipper_captions_") as caption_dir:
+                    cut_clip(
+                        stream_url, start_s, end_s, clip_path,
+                        words=words if captions else None,
+                        temp_dir=Path(caption_dir) if captions else None,
+                        vertical=vertical, facecam_region=facecam_region,
+                    )
             except Exception as e:
                 report(f"Clip {i} failed: {e}")
                 continue
@@ -937,8 +1112,9 @@ def make_clips_from_vod(vod, max_clips=DEFAULT_MAX_CLIPS, progress_cb=None,
                 "title": candidate.get("title", ""),
                 "reason": candidate.get("reason", ""),
                 "transcript_snippet": candidate.get("transcript", ""),
-                "captioned": srt_path is not None,
+                "captioned": bool(captions and words),
                 "vertical": bool(vertical),
+                "facecam_layout": facecam_region is not None,
             })
 
     manifest_path = output_dir / "manifest.json"

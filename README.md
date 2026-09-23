@@ -85,13 +85,20 @@ below, including recommended specs for the local model.
 - **Cut like an editor, not a timer**: each clip opens right as the
   hook starts and ends on a clean beat, found from where speech
   actually pauses — not a fixed window that chops a sentence in half
-- **Burned-in captions**, StreamLadder-style: fast, word-timed cards
-  of a few words at a time, ready to post as-is
+- **Burned-in captions**, StreamLadder-style: single words pop in one
+  at a time with a quick grow-in animation, ready to post as-is
 - Every clip gets a 1-10 **virality score** and a punchy suggested
   **title**, so you can see at a glance which ones are worth posting
   first instead of getting an unranked folder of files
-- Optional **vertical 9:16 export** (centered crop) for TikTok, Shorts
-  and Reels
+- **Vertical 9:16 export with real facecam layout**: when you have a
+  webcam overlay, he finds it (a real face detector samples a few
+  frames spread across the VOD — a streamer's camera doesn't move
+  mid-broadcast, so it only needs to be located once) and builds a
+  proper split layout — your facecam on top, gameplay center-cropped
+  below — instead of a blind center-crop that might miss your face
+  entirely. Falls back to a plain centered crop automatically for
+  fullscreen "just chatting" streams or any stream without a webcam
+  overlay, where a split layout wouldn't make sense anyway
 - **A full clip browser in the dashboard** — the "Media & Clips" tab
   (or say "open jarvisclipper" for its own window): pick a VOD or paste
   a link, choose captions/vertical, watch live progress, then browse

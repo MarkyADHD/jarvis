@@ -198,6 +198,15 @@ iniconfig==2.3.0
 pluggy==1.6.0
 pytest==9.1.1
 
+# --- JarvisClipper: facecam detection for StreamLadder-style vertical
+# layout composition. Uses OpenCV's bundled Haar cascade face detector
+# (ships inside the pip package itself -- no separate model download).
+# Pinned to 4.10.0.84, not the newer 5.0.0 -- confirmed live that
+# opencv-python 5.0.0.93's compiled bindings are missing
+# cv2.CascadeClassifier entirely (the whole objdetect module doesn't
+# expose it), a real bug in that specific build, not a usage mistake.
+opencv-python==4.10.0.84
+
 # --- JarvisTrader: historical market data for backtesting (Phase 5).
 # The Trading 212 API has no historical-OHLCV/candles endpoint at all
 # (confirmed via the Phase 1 API research) -- yfinance is the standard
