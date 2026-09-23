@@ -6,6 +6,7 @@ schema-invalid model output always degrades to NO_TRADE, never a
 guess, and that the AI's output gets no special treatment once it
 reaches the shared risk_engine + guardian_financial_gate pipeline.
 """
+import pytest
 from unittest.mock import patch, MagicMock
 
 from jarvis_trader.core import kill_switch
@@ -16,14 +17,13 @@ from jarvis_trader.memory import trader_database
 from jarvis_trader.strategy import ai_trading_brain
 
 
-def setup_function(_):
+@pytest.fixture(autouse=True)
+def _isolated(isolated_kill_switch):
     kill_switch.disengage()
     trader_database.init_db()
     with trader_database.get_connection() as conn:
         conn.execute("DELETE FROM trade_intents WHERE mode = 'demo'")
-
-
-def teardown_function(_):
+    yield
     kill_switch.disengage()
     with trader_database.get_connection() as conn:
         conn.execute("DELETE FROM trade_intents WHERE mode = 'demo'")

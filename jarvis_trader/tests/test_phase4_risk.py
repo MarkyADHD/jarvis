@@ -190,12 +190,12 @@ def test_risk_engine_allows_clean_intent_within_limits():
 
 # --- kill switch -----------------------------------------------------
 
-def test_kill_switch_starts_disengaged_or_reflects_file():
+def test_kill_switch_starts_disengaged_or_reflects_file(isolated_kill_switch):
     kill_switch.disengage()
     assert kill_switch.is_engaged() is False
 
 
-def test_kill_switch_engage_disengage_round_trip():
+def test_kill_switch_engage_disengage_round_trip(isolated_kill_switch):
     kill_switch.engage("unit test")
     assert kill_switch.is_engaged() is True
     st = kill_switch.status()
@@ -204,31 +204,25 @@ def test_kill_switch_engage_disengage_round_trip():
     assert kill_switch.is_engaged() is False
 
 
-def test_kill_switch_corrupted_file_fails_closed(tmp_path=None):
+def test_kill_switch_corrupted_file_fails_closed(isolated_kill_switch):
     kill_switch.KILL_SWITCH_FILE.write_text("not json", encoding="utf-8")
-    try:
-        assert kill_switch.is_engaged() is True
-    finally:
-        kill_switch.disengage()
+    assert kill_switch.is_engaged() is True
 
 
 # --- Guardian Financial Gate -----------------------------------------
 
-def test_gate_blocks_when_kill_switch_engaged():
+def test_gate_blocks_when_kill_switch_engaged(isolated_kill_switch):
     kill_switch.engage("test")
-    try:
-        intent, _ = validate_intent({
-            "action": "OPEN_POSITION", "instrument": "AAPL_US_EQ",
-            "direction": "LONG", "position_value": 10, "order_type": "MARKET",
-        })
-        decision = gate.evaluate(intent, _fresh_account(cash=1000), TradingMode.DEMO, TraderState.READY, False, 1.0)
-        assert decision.allowed is False
-        assert any("kill switch" in r.lower() for r in decision.reasons)
-    finally:
-        kill_switch.disengage()
+    intent, _ = validate_intent({
+        "action": "OPEN_POSITION", "instrument": "AAPL_US_EQ",
+        "direction": "LONG", "position_value": 10, "order_type": "MARKET",
+    })
+    decision = gate.evaluate(intent, _fresh_account(cash=1000), TradingMode.DEMO, TraderState.READY, False, 1.0)
+    assert decision.allowed is False
+    assert any("kill switch" in r.lower() for r in decision.reasons)
 
 
-def test_gate_blocks_on_stale_account_data():
+def test_gate_blocks_on_stale_account_data(isolated_kill_switch):
     kill_switch.disengage()
     intent, _ = validate_intent({
         "action": "OPEN_POSITION", "instrument": "AAPL_US_EQ",
@@ -239,7 +233,7 @@ def test_gate_blocks_on_stale_account_data():
     assert any("stale" in r.lower() for r in decision.reasons)
 
 
-def test_gate_blocks_duplicate_in_flight_intent():
+def test_gate_blocks_duplicate_in_flight_intent(isolated_kill_switch):
     kill_switch.disengage()
     intent, _ = validate_intent({
         "action": "OPEN_POSITION", "instrument": "AAPL_US_EQ",
@@ -261,7 +255,7 @@ def test_gate_blocks_duplicate_in_flight_intent():
             conn.execute("DELETE FROM trade_intents WHERE trade_intent_id = ?", (intent.trade_intent_id,))
 
 
-def test_gate_allows_clean_intent_end_to_end():
+def test_gate_allows_clean_intent_end_to_end(isolated_kill_switch):
     kill_switch.disengage()
     intent, _ = validate_intent({
         "action": "OPEN_POSITION", "instrument": "AAPL_US_EQ",

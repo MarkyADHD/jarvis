@@ -4,6 +4,7 @@ no real network call to Trading 212 or the broker, ever. Placing a
 real order (even on demo) is a real-world transaction the platform
 itself gates behind explicit human action, never an automated test.
 """
+import pytest
 from unittest.mock import patch, MagicMock
 
 from jarvis_trader.core import kill_switch, scheduler
@@ -12,7 +13,8 @@ from jarvis_trader.execution.intent import IntentAction
 from jarvis_trader.memory import trader_database
 
 
-def setup_function(_):
+@pytest.fixture(autouse=True)
+def _isolated(isolated_kill_switch, isolated_scheduler):
     kill_switch.disengage()
     trader_database.init_db()
     # Trade-frequency checks in the risk engine are real DB queries --
@@ -22,9 +24,7 @@ def setup_function(_):
     # 'demo' here only ever holds test-fixture rows, never a real order.
     with trader_database.get_connection() as conn:
         conn.execute("DELETE FROM trade_intents WHERE mode = 'demo'")
-
-
-def teardown_function(_):
+    yield
     kill_switch.disengage()
     scheduler.stop()
     with trader_database.get_connection() as conn:

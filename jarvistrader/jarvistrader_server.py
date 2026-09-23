@@ -35,6 +35,13 @@ from jarvis_trader.broker.trading212_client import Trading212Client  # noqa: E40
 from jarvis_trader.strategy.strategy_engine import TEMPLATES  # noqa: E402
 
 trader_database.init_db()
+# Real bug, found live: the demo-trading enabled flag is file-backed
+# and survives a restart, but the background thread that actually
+# polls it doesn't -- without this, a restart could leave the
+# dashboard claiming autonomous trading was RUNNING when no thread was
+# actually executing cycles. Forces it back to a deliberate re-enable,
+# same principle this project already applies to LIVE trading.
+scheduler.reset_on_startup()
 
 PORT = 8797
 

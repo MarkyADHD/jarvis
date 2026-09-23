@@ -3,18 +3,19 @@ Phase 7 tests: journal and the paper trading engine. Uses real live
 market data (yfinance) for the end-to-end cycles, same as Phases 5-6 --
 paper trading only ever simulates fills, never touches a real broker.
 """
+import pytest
+
 from jarvis_trader.core import kill_switch
 from jarvis_trader.execution.intent import IntentAction
 from jarvis_trader.memory import journal, trader_database
 from jarvis_trader.simulation import paper_engine
 
 
-def setup_function(_):
+@pytest.fixture(autouse=True)
+def _isolated(isolated_kill_switch):
     kill_switch.disengage()
     paper_engine.reset_portfolio()
-
-
-def teardown_function(_):
+    yield
     paper_engine.reset_portfolio()
     kill_switch.disengage()
 

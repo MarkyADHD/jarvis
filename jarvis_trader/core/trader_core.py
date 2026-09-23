@@ -1,16 +1,20 @@
 """
 TraderCore -- the single owner of JarvisTrader's current state/mode.
 
-Phase 2 scope: holds state, never resumes autonomous LIVE trading
-automatically, and exposes a status snapshot for the UI. Does not yet
-talk to Trading 212, run any scheduler, or evaluate any strategy --
-those are later phases. Every import of this module currently starts
-fully inert.
+Real bug, confirmed live: this class's state/mode were set once at
+process start and never updated again -- Phase 8's autonomous DEMO
+trading (core/scheduler.py) was built as an entirely separate,
+file-backed system that never reported back here, so the dashboard's
+top MODE/STATUS badges kept showing DISABLED/PAUSED even while
+autonomous demo trading was actively running real cycles every few
+minutes. status() now checks scheduler state fresh on every call
+(same pattern as the kill-switch check below) so the badges reflect
+reality instead of Phase 2's original startup snapshot.
 """
 import json
 from datetime import datetime, timezone
 
-from jarvis_trader.core import kill_switch
+from jarvis_trader.core import kill_switch, scheduler
 from jarvis_trader.core.paths import TRADER_ROOT
 from jarvis_trader.core.state_machine import TraderState, TradingMode
 from jarvis_trader.risk import protected_limits
@@ -39,18 +43,36 @@ class TraderCore:
 
     def status(self) -> dict:
         ks = kill_switch.status()
-        # Kill switch overrides the displayed state -- checked fresh on
-        # every status() call (this endpoint is polled every few
-        # seconds by the UI) rather than needing a background thread,
-        # since engage()/disengage() write synchronously and this reads
-        # fresh each time.
-        effective_state = TraderState.LOCKED.value if ks.get("engaged") else self.state.value
+        sched = scheduler.get_state()
+        demo_running = bool(sched.get("enabled")) and not ks.get("engaged")
+
+        # Kill switch overrides everything; otherwise reflect real
+        # autonomous demo trading state if it's running. All checked
+        # fresh on every call (this endpoint is polled every few
+        # seconds by the UI) rather than cached, since engage()/
+        # disengage()/scheduler.start()/stop() all write synchronously.
+        if ks.get("engaged"):
+            effective_state = TraderState.LOCKED.value
+            effective_mode = self.mode.value
+        elif demo_running:
+            effective_state = TraderState.MONITORING.value
+            effective_mode = TradingMode.DEMO.value
+        else:
+            effective_state = self.state.value
+            effective_mode = self.mode.value
+
+        last_decision = self.last_decision
+        if demo_running and sched.get("last_results"):
+            outcomes = [r.get("outcome", "?") for r in sched["last_results"]]
+            last_decision = f"{sched.get('strategy')}: {', '.join(outcomes)} ({sched.get('last_cycle_at', '')})"
+
         return {
             "state": effective_state,
-            "mode": self.mode.value,
+            "mode": effective_mode,
             "autonomous_live_trading_enabled": self.autonomous_live_trading_enabled and not ks.get("engaged"),
             "kill_switch": ks,
-            "last_decision": self.last_decision,
+            "demo_trading": sched,
+            "last_decision": last_decision,
             "next_scan": self.next_scan,
             "protected_limits": protected_limits.as_dict(),
             "updated_at": datetime.now(timezone.utc).isoformat(),

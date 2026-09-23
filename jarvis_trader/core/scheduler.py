@@ -39,6 +39,24 @@ def _save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
+def reset_on_startup() -> None:
+    """Real bug, found live: the enabled flag is file-backed so it
+    survives a server restart, but the background thread that actually
+    polls it does NOT -- nothing re-started it automatically, so a
+    restart could leave the file saying enabled: true while no thread
+    was actually running cycles, silently lying to the dashboard. This
+    module's own docstring already claims "never silently resumes
+    after a restart, same principle as LIVE trading" -- that claim
+    wasn't actually enforced anywhere until this function existed.
+    Call this exactly once, from the real server entry point
+    (jarvistrader_server.py), never from a test or a bare import (tests
+    isolate STATE_FILE via monkeypatch, which must happen first)."""
+    state = _load_state()
+    if state.get("enabled"):
+        state["enabled"] = False
+        _save_state(state)
+
+
 def is_enabled() -> bool:
     return bool(_load_state().get("enabled"))
 
