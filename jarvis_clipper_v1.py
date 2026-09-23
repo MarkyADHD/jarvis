@@ -857,7 +857,7 @@ def _ffmpeg_path_escape(path):
 WORD_POP_DURATION_SECONDS = 0.12  # how long the grow-in animation takes
 WORD_POP_HOLD_PADDING_SECONDS = 0.15  # extra hold after the last word's own end
 WORD_POP_BASE_FONTSIZE = 64
-WORD_POP_MAX_FONTSIZE = 86
+WORD_POP_MAX_FONTSIZE = 88
 
 # Real bug, confirmed live: ffmpeg's drawtext filter needs Fontconfig to
 # resolve a font by name, and this Windows ffmpeg build has no
@@ -867,6 +867,33 @@ WORD_POP_MAX_FONTSIZE = 86
 # this doesn't depend on anything this project bundles itself.
 CAPTION_FONT_FILE = r"C:\Windows\Fonts\arialbd.ttf"
 
+# Jarvis-brand caption "pill": a dark navy box (matches the dashboard's
+# own background colour) behind bright white text, plus a thin black
+# glyph stroke on top of that for crispness over busy gameplay footage
+# -- a plain white-text-black-outline caption reads as generic; a
+# background pill reads as an actual designed caption style.
+CAPTION_BOX_COLOR = "0x04141F@0.78"
+CAPTION_BOX_PADDING = 20
+CAPTION_STROKE_COLOR = "black"
+CAPTION_STROKE_WIDTH = 4
+
+# Real quirk, well-documented for Whisper-family models: a word's
+# reported start timestamp tends to land slightly AHEAD of when the
+# word is actually audible -- the acoustic model often starts counting
+# from just before the sound truly begins. Confirmed as the cause of
+# captions visibly popping in a beat before the mouth moves. Delaying
+# every word's on-screen appearance by a small fixed amount corrects
+# for that bias without needing per-clip tuning.
+WORD_START_DELAY_SECONDS = 0.09
+
+# A real spoken word essentially never registers as under this long --
+# anything shorter is almost always a breath, mouth click, or other
+# non-speech sound Whisper mis-transcribed as a short word (most common
+# right at the start of a clip, before real speech begins), which is
+# exactly what caused a caption to flash on screen before anyone
+# actually started talking. Dropped outright rather than shown.
+MIN_REAL_WORD_DURATION_SECONDS = 0.05
+
 
 def _build_word_pop_filters(words, clip_start_abs, clip_end_abs, temp_dir, y_expr="h-320"):
     """Returns a list of ffmpeg drawtext filter strings, one per word,
@@ -875,7 +902,11 @@ def _build_word_pop_filters(words, clip_start_abs, clip_end_abs, temp_dir, y_exp
     text is written to its own small file in temp_dir (the caller owns
     that directory's lifetime). Returns [] if nothing from `words`
     lands inside this clip's own trimmed range."""
-    in_range = [w for w in words if w["end"] > clip_start_abs and w["start"] < clip_end_abs]
+    in_range = [
+        w for w in words
+        if w["end"] > clip_start_abs and w["start"] < clip_end_abs
+        and (w["end"] - w["start"]) >= MIN_REAL_WORD_DURATION_SECONDS
+    ]
     if not in_range:
         return []
 
@@ -887,14 +918,17 @@ def _build_word_pop_filters(words, clip_start_abs, clip_end_abs, temp_dir, y_exp
         text = w["word"].strip()
         if not text:
             continue
-        start_rel = max(0.0, w["start"] - clip_start_abs)
+        start_rel = max(0.0, (w["start"] - clip_start_abs) + WORD_START_DELAY_SECONDS)
         # Hold each word on screen until the next one starts (never a
         # visible gap with nothing on screen between words) -- or a
         # short pad past its own end for the clip's final word.
         if i + 1 < len(in_range):
-            end_rel = max(start_rel + 0.15, in_range[i + 1]["start"] - clip_start_abs)
+            end_rel = max(
+                start_rel + 0.15,
+                (in_range[i + 1]["start"] - clip_start_abs) + WORD_START_DELAY_SECONDS,
+            )
         else:
-            end_rel = (w["end"] - clip_start_abs) + WORD_POP_HOLD_PADDING_SECONDS
+            end_rel = (w["end"] - clip_start_abs) + WORD_START_DELAY_SECONDS + WORD_POP_HOLD_PADDING_SECONDS
         end_rel = min(end_rel, clip_duration)
         if end_rel <= start_rel:
             continue
@@ -915,7 +949,9 @@ def _build_word_pop_filters(words, clip_start_abs, clip_end_abs, temp_dir, y_exp
         escaped_font = _ffmpeg_path_escape(CAPTION_FONT_FILE)
         filters.append(
             f"drawtext=fontfile='{escaped_font}':textfile='{escaped_path}':fontcolor=white:"
-            f"fontsize='{fontsize_expr}':borderw=5:bordercolor=black:x=(w-text_w)/2:y={y_expr}:"
+            f"fontsize='{fontsize_expr}':borderw={CAPTION_STROKE_WIDTH}:bordercolor={CAPTION_STROKE_COLOR}:"
+            f"box=1:boxcolor={CAPTION_BOX_COLOR}:boxborderw={CAPTION_BOX_PADDING}:"
+            f"x=(w-text_w)/2:y={y_expr}:"
             f"enable='between(t\\,{start_rel:.3f}\\,{end_rel:.3f})'"
         )
 
