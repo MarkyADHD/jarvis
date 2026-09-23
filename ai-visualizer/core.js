@@ -1323,7 +1323,7 @@ const AV = (() => {
       <div id="jarvisHomeSidebar">
         <div class="brand">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.5" stroke="#4fc3f7" stroke-width="1.4"/><circle cx="12" cy="12" r="5.5" stroke="#4fc3f7" stroke-width="1.4" opacity=".65"/><circle cx="12" cy="12" r="1.8" fill="#4fc3f7"/></svg>
-          <div><span>JARVIS</span><small>v2.13</small></div>
+          <div><span>JARVIS</span><small>v2.14</small></div>
         </div>
         <div class="nav-item active" data-view="home">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1v-9"/></svg>
