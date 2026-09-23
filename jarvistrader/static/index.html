@@ -67,7 +67,12 @@
         only &mdash; real orders, fake money, through the real risk engine and
         Guardian Financial Gate. Stops instantly if you hit STOP TRADING below
         or say &ldquo;Jarvis, stop trading.&rdquo; You have to click Start
-        yourself &mdash; nothing here starts on its own.
+        yourself &mdash; nothing here starts on its own. The <code>sma_crossover</code>/
+        <code>rsi_mean_reversion</code>/<code>momentum_breakout</code> strategies
+        are free, instant, and purely mechanical. <code>ai_brain</code> instead
+        asks Claude to research real news/sentiment before each decision &mdash;
+        slower, costs real API usage per cycle, and its output still has to
+        pass the exact same risk engine and gate as everything else.
       </div>
       <div class="demo-trading-log" id="demoTradingLog"></div>
     </section>

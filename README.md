@@ -164,7 +164,15 @@ below, including recommended specs for the local model.
   real market data, real risk engine, real Guardian gate, real orders
   on your demo account — until you hit Stop, say "Jarvis, stop
   trading," or restart Jarvis (it never resumes on its own). "Jarvis,
-  start/stop demo trading" work as voice commands too
+  start/stop demo trading" work as voice commands too. There's now
+  also an **AI trading brain**: pick `ai_brain` instead of a template
+  strategy and Claude researches real news/sentiment (WebSearch only —
+  no filesystem, no shell, no credentials) before proposing a trade.
+  Its output must be valid JSON matching the exact intent schema or
+  it's treated as NO_TRADE, and it goes through the identical risk
+  engine and Guardian gate as every deterministic strategy — it gets
+  no more authority than SMA crossover does. Slower and costs real API
+  usage per cycle, unlike the free instant template strategies
 - The eventual design (being built in phases): Jarvis proposes trade
   ideas, but a separate, deterministic risk engine and safety gate —
   which the AI cannot edit or talk its way around — decides whether

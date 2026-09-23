@@ -79,7 +79,7 @@ def record_cycle_result(results: list) -> None:
 def _loop():
     from jarvis_trader.core import kill_switch
     from jarvis_trader.strategy.strategy_engine import build_strategy_fn
-    from jarvis_trader.execution.demo_trading_engine import run_cycle
+    from jarvis_trader.execution.demo_trading_engine import run_cycle, run_ai_cycle
 
     while True:
         state = _load_state()
@@ -96,8 +96,11 @@ def _loop():
             if not is_enabled() or kill_switch.is_engaged():
                 break
             try:
-                strategy_fn = build_strategy_fn(strategy_name, {})
-                result = run_cycle(ticker, strategy_fn, strategy_id=f"auto-{strategy_name}")
+                if strategy_name == "ai_brain":
+                    result = run_ai_cycle(ticker, strategy_id="auto-ai_brain")
+                else:
+                    strategy_fn = build_strategy_fn(strategy_name, {})
+                    result = run_cycle(ticker, strategy_fn, strategy_id=f"auto-{strategy_name}")
                 results.append({"ticker": ticker, **result})
             except Exception as e:
                 results.append({"ticker": ticker, "ok": False, "error": str(e)})

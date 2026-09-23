@@ -6,12 +6,14 @@ JarvisClipper server -- no external web framework, 127.0.0.1 only,
 never exposed to the Tailscale mesh (this one touches real money,
 eventually -- staying loopback-only is not optional).
 
-Phases 1-8 scope: credential entry (Phase 3), risk engine + Guardian
-Financial Gate + kill switch (Phase 4), and autonomous DEMO trading
-(Phase 8) via core/scheduler.py's background loop -- the
-/api/demo_trading/start route is the deliberate owner action that
-enables it; nothing here starts trading on its own. Still no LLM calls
-anywhere in this project yet.
+Phases 1-9 scope: credential entry (Phase 3), risk engine + Guardian
+Financial Gate + kill switch (Phase 4), autonomous DEMO trading
+(Phase 8) via core/scheduler.py's background loop, and an optional AI
+trading brain (Phase 9, strategy="ai_brain") that proposes intents via
+a WebSearch-only, credential-free LLM call -- still gated by the exact
+same risk engine and Guardian gate as every deterministic template.
+/api/demo_trading/start is the deliberate owner action that enables
+any of this; nothing here starts trading on its own.
 """
 import json
 import mimetypes
@@ -82,7 +84,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/demo_trading/state":
                 self._send_json({
                     **scheduler.get_state(),
-                    "available_strategies": list(TEMPLATES.keys()),
+                    "available_strategies": list(TEMPLATES.keys()) + ["ai_brain"],
                 })
                 return
 
@@ -143,7 +145,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 tickers = body.get("tickers") or ["AAPL"]
                 strategy = str(body.get("strategy", "sma_crossover"))
-                if strategy not in TEMPLATES:
+                if strategy not in TEMPLATES and strategy != "ai_brain":
                     self._send_json({"ok": False, "error": f"Unknown strategy template: {strategy!r}"}, 400)
                     return
                 if not credentials.has_credentials("demo"):
