@@ -57,6 +57,7 @@ import jarvis_lights_v1 as room_lights_v1
 import jarvis_shutdown_systems_v1 as shutdown_systems_v1
 import jarvis_interrupt_v1 as interrupt_v1
 import jarvis_aliases_v1 as aliases_v1
+import jarvis_system_stats_v1 as system_stats_v1
 import jarvis_maintainer_v1 as maintainer_v1
 import jarvis_intelligence_core_v3 as intelligence_v3
 import jarvis_search_intelligence_v3 as search_v3
@@ -516,6 +517,311 @@ def _tool_registry_v1(name):
     }
 
 
+# =========================
+# WEATHER (ported from jarvis_app.py's old, never-live-wired
+# implementation -- real, tested code that just never made it into
+# jarvis_app_v2.py, the actual live execution path. Ported rather than
+# rewritten from scratch.)
+# =========================
+
+WEATHER_URL = "https://wttr.in/?m&format=j1"
+WEATHER_TIMEOUT_SECONDS = 8
+
+# Countries where ordinary daily speech uses Fahrenheit + mph rather
+# than Celsius + km/h -- the US is the big one; the rest are small
+# territories that also kept Fahrenheit. Everywhere else defaults to
+# metric (including the UK -- weather itself is reported in Celsius
+# there despite mph being used for road-speed limits).
+IMPERIAL_UNIT_COUNTRY_CODES = {"US", "BS", "BZ", "KY", "PW", "FM", "MH", "LR"}
+
+
+def _weather_safe_int(value, default=0):
+    try:
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def _weather_description(condition):
+    try:
+        return condition.get("weatherDesc", [{}])[0].get("value", "unknown conditions")
+    except Exception:
+        return "unknown conditions"
+
+
+def _weather_max_rain_chance(day):
+    highest = 0
+    for hour in day.get("hourly", []):
+        highest = max(highest, _weather_safe_int(hour.get("chanceofrain", 0)))
+    return highest
+
+
+def _weather_unit_system():
+    """Returns "imperial" or "metric" based on the same IP-geolocated
+    (or manually set) location jarvis_settings_v1 already detects and
+    caches -- reused here rather than a second, separate geolocation
+    lookup. Defaults to metric (the global majority) if location can't
+    be determined."""
+    try:
+        location = settings_v1.get_saved_location()
+        if not location:
+            location = settings_v1.detect_location()
+        country_code = str((location or {}).get("country_code", "")).strip().upper()
+        return "imperial" if country_code in IMPERIAL_UNIT_COUNTRY_CODES else "metric"
+    except Exception:
+        return "metric"
+
+
+def fetch_weather_snapshot():
+    """Fetches and parses current conditions + today/tomorrow's
+    forecast from wttr.in. wttr.in geolocates by requesting IP
+    server-side (WEATHER_URL has no city in it on purpose), so this
+    already follows Jarvis wherever he's actually running -- no
+    separate location lookup needed, nothing about the location gets
+    logged. Returns None on any failure -- callers decide how to
+    handle that."""
+    try:
+        response = requests.get(
+            WEATHER_URL,
+            headers={"User-Agent": "Jarvis Local Assistant", "Accept": "application/json"},
+            timeout=WEATHER_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        current = data.get("current_condition", [{}])[0]
+        days = data.get("weather", [])
+        units = _weather_unit_system()
+        imperial = units == "imperial"
+
+        return {
+            "units": units,
+            "temp": current.get("temp_F" if imperial else "temp_C", "?"),
+            "feels": current.get("FeelsLikeF" if imperial else "FeelsLikeC", "?"),
+            "desc": _weather_description(current),
+            "humidity": current.get("humidity", "?"),
+            "wind": current.get("windspeedMiles" if imperial else "windspeedKmph", "?"),
+            "today": days[0] if len(days) > 0 else {},
+            "tomorrow": days[1] if len(days) > 1 else {},
+        }
+    except Exception as e:
+        app.log(f"Weather fetch failed: {e}")
+        return None
+
+
+def weather_summary_line():
+    """Short spoken-friendly current-conditions sentence, no name/
+    sign-off -- meant to be dropped into a larger sentence (the daily
+    briefing) rather than stand alone. Returns None if the fetch failed."""
+    snap = fetch_weather_snapshot()
+    if not snap:
+        return None
+    temp_word = "Fahrenheit" if snap["units"] == "imperial" else "Celsius"
+    return (
+        f"it's currently {snap['temp']} degrees {temp_word} and {snap['desc']}, "
+        f"feeling like {snap['feels']}"
+    )
+
+
+def is_weather_request(text):
+    lowered = str(text).lower()
+    triggers = (
+        "weather", "temperature", "forecast", "rain", "raining",
+        "umbrella", "coat", "hoodie", "how cold", "how hot",
+    )
+    return any(trigger in lowered for trigger in triggers)
+
+
+def weather_fast(c, name):
+    if not is_weather_request(c):
+        return None
+
+    snap = fetch_weather_snapshot()
+    if not snap:
+        return {"mode": "chat", "reply": f"I couldn't get the weather right now, {name}.", "steps": []}
+
+    try:
+        imperial = snap["units"] == "imperial"
+        temp_word = "Fahrenheit" if imperial else "Celsius"
+        wind_word = "miles per hour" if imperial else "kilometres per hour"
+
+        temp, feels, desc = snap["temp"], snap["feels"], snap["desc"]
+        humidity, wind = snap["humidity"], snap["wind"]
+        today, tomorrow = snap["today"], snap["tomorrow"]
+
+        if "tomorrow" in c:
+            if not tomorrow:
+                return {"mode": "chat", "reply": f"I can't see tomorrow's weather right now, {name}.", "steps": []}
+            avg_key, high_key, low_key = ("avgtempF", "maxtempF", "mintempF") if imperial else ("avgtempC", "maxtempC", "mintempC")
+            avg, high, low = tomorrow.get(avg_key, "?"), tomorrow.get(high_key, "?"), tomorrow.get(low_key, "?")
+            rain_chance = _weather_max_rain_chance(tomorrow)
+            return {
+                "mode": "chat",
+                "reply": f"Tomorrow looks around {avg} degrees {temp_word} on average, with a high of {high} and a low of {low}. Rain chance peaks around {rain_chance} percent, {name}.",
+                "steps": [],
+            }
+
+        if "rain" in c or "raining" in c or "umbrella" in c:
+            rain_chance = _weather_max_rain_chance(today)
+            if rain_chance >= 50:
+                reply = f"Yes, I would take an umbrella. Rain chance peaks around {rain_chance} percent today, {name}."
+            else:
+                reply = f"Rain looks fairly low right now. The chance peaks around {rain_chance} percent today, {name}."
+            return {"mode": "chat", "reply": reply, "steps": []}
+
+        if "coat" in c or "hoodie" in c or "how cold" in c:
+            feels_number = _weather_safe_int(feels, 99)
+            cold_cutoff, mild_cutoff = (50, 61) if imperial else (10, 16)
+            if feels_number <= cold_cutoff:
+                advice = "I would wear a coat."
+            elif feels_number <= mild_cutoff:
+                advice = "A hoodie or light jacket would be sensible."
+            else:
+                advice = "You probably do not need a heavy coat."
+            return {"mode": "chat", "reply": f"It feels like {feels} degrees {temp_word}. {advice} {name}.", "steps": []}
+
+        reply = (
+            f"It's currently {temp} degrees {temp_word} and {desc}. "
+            f"It feels like {feels}, with humidity at {humidity} percent "
+            f"and wind around {wind} {wind_word}, {name}."
+        )
+        return {"mode": "chat", "reply": reply, "steps": []}
+    except Exception as e:
+        app.log(f"Weather failed: {e}")
+        return {"mode": "chat", "reply": f"I couldn't get the weather right now, {name}.", "steps": []}
+
+
+# =========================
+# DAILY BRIEFING (on-demand only -- CLAUDE.md is explicit that Jarvis
+# should never greet unprompted with "good morning/evening," so this
+# never auto-fires; it only ever runs when asked for by name, the same
+# way any other voice command does.)
+# =========================
+
+def daily_briefing_reply(name):
+    parts = []
+
+    weather_line = weather_summary_line()
+    if weather_line:
+        parts.append(f"Weather-wise, {weather_line}.")
+
+    try:
+        vault_priorities = Path(r"C:\Users\babym\Jarvis Memory\Active Priorities.md")
+        if vault_priorities.exists():
+            text = vault_priorities.read_text(encoding="utf-8", errors="ignore")
+            # Real bug, caught before shipping: the vault's own format is
+            # Obsidian-style open tasks ("- [ ] [[Jarvis Assistant]]:
+            # text"), not plain bullets -- a naive bullet-strip would have
+            # spoken the raw checkbox/wiki-link markdown aloud. Only
+            # OPEN tasks ("- [ ]"), never completed ones ("- [x]"), and
+            # strips [[wiki links]] down to their plain display text.
+            open_task_lines = []
+            for ln in text.splitlines():
+                stripped = ln.strip()
+                if not stripped.lower().startswith("- [ ]"):
+                    continue
+                task_text = stripped[5:].strip()
+                task_text = re.sub(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]", r"\1", task_text)
+                if task_text:
+                    open_task_lines.append(task_text)
+            if open_task_lines:
+                parts.append("Top of your priorities list: " + "; ".join(open_task_lines[:3]) + ".")
+    except Exception as e:
+        app.log(f"Briefing: couldn't read Active Priorities: {e}")
+
+    try:
+        stats = system_stats_v1.get_system_stats()
+        disk = stats.get("disk") if isinstance(stats, dict) else None
+        if isinstance(disk, dict) and disk.get("percent", 0) and disk["percent"] >= 90:
+            parts.append(f"Also, your main drive is at {disk['percent']} percent full -- worth a look.")
+    except Exception as e:
+        app.log(f"Briefing: couldn't read system stats: {e}")
+
+    if reliability_watchdog_flag():
+        parts.append(reliability_watchdog_flag())
+
+    if not parts:
+        return {"mode": "chat", "reply": f"Nothing major to brief you on right now, {name}.", "steps": []}
+
+    return {"mode": "chat", "reply": f"Here's your briefing, {name}. " + " ".join(parts), "steps": []}
+
+
+def is_briefing_request(c):
+    return c in {
+        "give me my briefing", "daily briefing", "my briefing",
+        "what's my briefing", "whats my briefing", "brief me",
+        "give me a briefing", "morning briefing",
+    }
+
+
+# =========================
+# RELIABILITY WATCHDOG -- alert-only, never auto-restarts or kills
+# anything (jarvis_process_dedup_v1.py already proved live that an
+# automated process-killer for this project is a real way to crash a
+# legitimate process mid-operation; this only ever reports, per
+# CLAUDE.md's "own the whole chain... report back" mandate, it doesn't
+# act on your behalf). Reuses the exact bounded-probe pattern already
+# established for the E: drive's known hang-not-fail failure mode.
+# =========================
+
+_RELIABILITY_FLAG_FILE = Path(r"C:\AI-Agent\.reliability_watchdog_flag.txt")
+_RELIABILITY_CHECK_INTERVAL_SECONDS = 900  # 15 minutes
+
+
+def _reliability_probe_e_drive(timeout=2.0):
+    result = {"healthy": False}
+
+    def probe():
+        try:
+            root = Path("E:/JarvisMemory")
+            root.mkdir(parents=True, exist_ok=True)
+            marker = root / ".watchdog_probe"
+            marker.write_text("ok", encoding="utf-8")
+            marker.unlink()
+            result["healthy"] = True
+        except Exception:
+            pass
+
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(timeout)
+    return result["healthy"]
+
+
+def _reliability_watchdog_loop():
+    while True:
+        try:
+            if not _reliability_probe_e_drive():
+                _RELIABILITY_FLAG_FILE.write_text(
+                    "Heads up -- your E: drive isn't responding to a real read/write check. "
+                    "Jarvis is already falling back to C: where that matters, but the drive itself may need attention.",
+                    encoding="utf-8",
+                )
+            elif _RELIABILITY_FLAG_FILE.exists():
+                _RELIABILITY_FLAG_FILE.unlink()
+        except Exception:
+            pass
+        time.sleep(_RELIABILITY_CHECK_INTERVAL_SECONDS)
+
+
+def start_reliability_watchdog():
+    threading.Thread(target=_reliability_watchdog_loop, daemon=True).start()
+
+
+def reliability_watchdog_flag():
+    """Read-only check for whatever the watchdog last found -- never
+    consumed/cleared here (unlike the flag-file-rename-claim pattern
+    used for one-shot announcements elsewhere in this project) since
+    this is a standing condition, not a one-time event: it should keep
+    showing up in the briefing for as long as it's actually still true."""
+    try:
+        if _RELIABILITY_FLAG_FILE.exists():
+            return _RELIABILITY_FLAG_FILE.read_text(encoding="utf-8", errors="ignore").strip()
+    except Exception:
+        pass
+    return ""
+
+
 def quick_handle_command_v2(command):
     name = refresh_spoken_name()
     prepared, c = prepare_command_v3(command)
@@ -689,6 +995,16 @@ def quick_handle_command_v2(command):
                 {"mode": "chat", "reply": f"Couldn't confirm demo trading stopped, {name}: {e}", "steps": []},
                 c, name, "jarvistrader_demo_stop",
             )
+
+    # Deterministic weather + briefing -- plain data lookups, no reason
+    # to pay for an LLM round-trip on either. Checked before the brain
+    # fallback, same as every other fast-path command here.
+    if is_briefing_request(c):
+        return finish_plan_v3(daily_briefing_reply(name), c, name, "daily_briefing")
+
+    weather_result = weather_fast(c, name)
+    if weather_result:
+        return finish_plan_v3(weather_result, c, name, "weather")
 
     brain_result = provider_router.brain_command_fast(c, name, app)
     if brain_result:
@@ -2403,6 +2719,7 @@ def install_v2(headless=False):
     behind it, forever."""
     _lower_process_priority()
     refresh_spoken_name()
+    start_reliability_watchdog()
 
     try:
         maintainer_v1.install_error_hooks()
