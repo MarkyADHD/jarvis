@@ -193,6 +193,15 @@ def settings_status() -> dict:
     }
 
 
+def chat_history() -> dict:
+    """Recent conversation turns for the dashboard's chat-log panel --
+    reuses jarvis_memory_v2's own existing recent-context store (up to
+    MAX_RECENT_TURNS turns) rather than keeping a second copy of
+    conversation history anywhere."""
+    context = jav2.memory.load_recent_context()
+    return {"turns": context.get("turns", [])}
+
+
 def settings_ai_status() -> dict:
     """Deliberately scoped to just the two brains that actually matter
     now: Claude (the default) and Ollama's local qwen3:8b (the quota-
@@ -1356,6 +1365,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 self._send_json(settings_status())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/chat/history":
+            if not self._authorized():
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            try:
+                self._send_json(chat_history())
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
         elif path == "/settings/ai/status":

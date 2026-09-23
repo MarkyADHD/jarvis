@@ -424,6 +424,30 @@ const AV = (() => {
       #jarvisTwitchPanel .status{font-size:10px;color:#5a6a72;margin-top:4px}
       #jarvisTwitchPanel .status.ok{color:#c9a8ff}
       #jarvisTwitchPanel .status.err{color:#ff8080}
+
+      #jarvisChatLogBtn{position:fixed;top:16px;right:96px;z-index:110;width:30px;height:30px;
+        border-radius:50%;border:1px solid rgba(79,195,247,.28);background:rgba(10,14,18,.55);
+        color:#4fc3f7;font-size:14px;line-height:28px;text-align:center;cursor:pointer;
+        pointer-events:auto;opacity:.5;transition:opacity .2s;user-select:none}
+      #jarvisChatLogBtn:hover{opacity:1}
+      #jarvisChatLogBtn.open{opacity:1;background:rgba(79,195,247,.18)}
+      #jarvisChatLogPanel{position:fixed;top:54px;right:16px;z-index:109;width:380px;
+        max-height:calc(100vh - 80px);overflow-y:auto;pointer-events:auto;
+        background:rgba(8,12,16,.92);border:1px solid rgba(79,195,247,.22);
+        border-radius:10px;padding:16px;backdrop-filter:blur(8px);
+        font:12px "SF Mono",Menlo,Consolas,monospace;color:#c8d6d8;
+        opacity:0;transform:translateY(-8px);transition:opacity .18s,transform .18s;
+        visibility:hidden}
+      #jarvisChatLogPanel.open{opacity:1;transform:translateY(0);visibility:visible}
+      #jarvisChatLogPanel h4{margin:0 0 8px;font-size:11px;letter-spacing:.14em;color:#4fc3f7;
+        text-transform:uppercase;border-bottom:1px solid rgba(79,195,247,.15);padding-bottom:6px}
+      #jarvisChatLogPanel .turn{margin-bottom:14px}
+      #jarvisChatLogPanel .turn .ts{font-size:9px;color:#4a5a62;margin-bottom:3px}
+      #jarvisChatLogPanel .turn .who{color:#5a6a72;font-size:10px;text-transform:uppercase;
+        letter-spacing:.06em;margin-right:5px}
+      #jarvisChatLogPanel .turn .user{color:#e8f0f2;line-height:1.4;margin-bottom:4px}
+      #jarvisChatLogPanel .turn .assistant{color:#9fd8ee;line-height:1.4}
+      #jarvisChatLogPanel .empty{color:#5a6a72;font-size:11px}
     `;
     document.head.appendChild(style);
 
@@ -710,6 +734,67 @@ const AV = (() => {
         refreshTwitch();
       } catch (e) { setStatus(statusEl, "connection failed", "err"); }
     });
+
+    /* ------------------------------ Chat log ------------------------------ */
+    // A quick way to see what's actually been said, from any tab, without
+    // digging through logs -- pulls from jarvis_memory_v2's own existing
+    // recent-context store (see jarvis_remote_chat.py's chat_history())
+    // rather than keeping a second copy of conversation history anywhere.
+    const chatLogBtn = document.createElement("div");
+    chatLogBtn.id = "jarvisChatLogBtn";
+    chatLogBtn.innerHTML = "&#128172;"; // speech balloon
+    chatLogBtn.title = "Chat log";
+    document.body.appendChild(chatLogBtn);
+
+    const chatLogPanel = document.createElement("div");
+    chatLogPanel.id = "jarvisChatLogPanel";
+    chatLogPanel.innerHTML = `
+      <h4>Chat Log</h4>
+      <div id="chatLogBody">Loading...</div>
+    `;
+    document.body.appendChild(chatLogPanel);
+
+    let chatLogOpen = false;
+    function setChatLogOpen(v) {
+      chatLogOpen = v;
+      chatLogBtn.classList.toggle("open", chatLogOpen);
+      chatLogPanel.classList.toggle("open", chatLogOpen);
+      if (chatLogOpen) refreshChatLog();
+    }
+    chatLogBtn.addEventListener("click", () => setChatLogOpen(!chatLogOpen));
+
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s || "";
+      return d.innerHTML;
+    }
+
+    async function refreshChatLog() {
+      const body = chatLogPanel.querySelector("#chatLogBody");
+      try {
+        const r = await fetch(api("/chat/history"), authed({ method: "GET" }));
+        const data = await r.json();
+        const turns = data.turns || [];
+        if (!turns.length) {
+          body.innerHTML = '<div class="empty">Nothing said yet this session.</div>';
+          return;
+        }
+        body.innerHTML = turns.map(t => `
+          <div class="turn">
+            <div class="ts">${t.created_at || ""}</div>
+            ${t.user ? `<div class="user"><span class="who">You</span>${escapeHtml(t.user)}</div>` : ""}
+            ${t.assistant ? `<div class="assistant"><span class="who">Jarvis</span>${escapeHtml(t.assistant)}</div>` : ""}
+          </div>
+        `).join("");
+        body.scrollTop = body.scrollHeight;
+      } catch (e) {
+        body.innerHTML = '<div class="empty">Couldn\'t load the chat log.</div>';
+      }
+    }
+
+    // Keep it live while open, same polling convention as the rest of
+    // this dashboard's panels (JarvisTrader's own state polling, etc).
+    setInterval(() => { if (chatLogOpen) refreshChatLog(); }, 4000);
 
     function renderNanoleafList(devices, def) {
       const list = panel.querySelector("#nanoleafList");
@@ -1056,7 +1141,7 @@ const AV = (() => {
       /* The old corner buttons are replaced by real sidebar nav items
          (Settings, Stream Tools) that reuse their exact panels below --
          hidden, not deleted, so none of that working logic is rebuilt. */
-      #jarvisGear, #jarvisTwitchBtn { display: none !important; }
+      #jarvisGear, #jarvisTwitchBtn, #jarvisChatLogBtn { display: none !important; }
 
       #jarvisHome{position:fixed;inset:0;z-index:95;display:flex;
         background:radial-gradient(1100px 700px at 78% -10%, rgba(79,195,247,.06), transparent 60%),#0a0e12;
