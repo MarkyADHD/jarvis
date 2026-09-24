@@ -77,3 +77,8 @@ jarvistrader/.edge-app-profile/
 # --- Editor/OS noise ---
 .vscode/
 Thumbs.db
+
+# Runtime state files written by jarvis_app_v2 watchdogs
+.reliability_watchdog_flag.txt
+.auto_briefing_time.txt
+.auto_briefing_last_fired.txt

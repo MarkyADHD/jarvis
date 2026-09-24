@@ -48,6 +48,13 @@ import jarvis_twitch_v1 as twitch_v1
 import jarvis_clipper_v1 as clipper_v1
 import jarvis_thumbnail_v1 as thumbnail_v1
 import jarvis_uber_v1 as uber_v1
+import jarvis_reminders_v1 as reminders_v1
+import jarvis_recall_v1 as recall_v1
+import jarvis_notes_v1 as notes_v1
+import jarvis_tasks_v1 as tasks_v1
+import jarvis_maps_v1 as maps_v1
+import jarvis_dictionary_v1 as dictionary_v1
+import jarvis_iss_v1 as iss_v1
 import jarvis_steam_v1 as steam_v1
 import jarvis_provider_router_v1 as provider_router
 import jarvis_onboarding_v1 as onboarding_v1
@@ -755,6 +762,86 @@ def is_briefing_request(c):
 
 
 # =========================
+# AUTO BRIEFING -- fires the existing daily_briefing_reply() out loud on
+# its own once a day at a time the user sets, instead of only answering
+# when asked. Added after researching other assistant projects (alfred_,
+# OpenClaw) that treat an unprompted morning digest as a core feature.
+# Off by default (no flag file) so nothing changes until the user
+# actually asks for it.
+# =========================
+
+_AUTO_BRIEFING_FLAG_FILE = Path(r"C:\AI-Agent\.auto_briefing_time.txt")
+_AUTO_BRIEFING_LAST_FIRED_FILE = Path(r"C:\AI-Agent\.auto_briefing_last_fired.txt")
+_AUTO_BRIEFING_CHECK_INTERVAL_SECONDS = 60
+
+_AUTO_BRIEFING_SET_PATTERN = re.compile(
+    r"(?:give me my briefing|brief me|my briefing) every (?:day|morning) at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b",
+    re.IGNORECASE,
+)
+_AUTO_BRIEFING_OFF_PHRASES = {
+    "turn off my daily briefing", "stop my daily briefing",
+    "cancel my daily briefing", "disable my daily briefing",
+}
+
+
+def is_auto_briefing_request(c):
+    c = str(c or "").strip()
+    return bool(_AUTO_BRIEFING_SET_PATTERN.search(c)) or c.lower() in _AUTO_BRIEFING_OFF_PHRASES
+
+
+def auto_briefing_command_fast(command, spoken_name="Sir"):
+    c = str(command or "").strip()
+    if not is_auto_briefing_request(c):
+        return None
+
+    if c.lower() in _AUTO_BRIEFING_OFF_PHRASES:
+        try:
+            if _AUTO_BRIEFING_FLAG_FILE.exists():
+                _AUTO_BRIEFING_FLAG_FILE.unlink()
+        except Exception:
+            pass
+        return {"mode": "chat", "reply": f"Turned off your daily briefing, {spoken_name}.", "steps": []}
+
+    m = _AUTO_BRIEFING_SET_PATTERN.search(c)
+    hour, minute, ampm = int(m.group(1)), m.group(2), m.group(3)
+    minute = int(minute) if minute else 0
+    if ampm:
+        hour = hour % 12
+        if ampm.lower() == "pm":
+            hour += 12
+    try:
+        _AUTO_BRIEFING_FLAG_FILE.write_text(f"{hour:02d}:{minute:02d}", encoding="utf-8")
+    except Exception as e:
+        return {"mode": "chat", "reply": f"I couldn't save that, {spoken_name}: {e}", "steps": []}
+
+    return {"mode": "chat", "reply": f"Done, {spoken_name} -- I'll give you your briefing every day at {hour:02d}:{minute:02d}.", "steps": []}
+
+
+def _auto_briefing_loop():
+    while True:
+        try:
+            if _AUTO_BRIEFING_FLAG_FILE.exists():
+                target = _AUTO_BRIEFING_FLAG_FILE.read_text(encoding="utf-8", errors="ignore").strip()
+                now = datetime.now()
+                today_key = now.strftime("%Y-%m-%d")
+                last_fired = ""
+                if _AUTO_BRIEFING_LAST_FIRED_FILE.exists():
+                    last_fired = _AUTO_BRIEFING_LAST_FIRED_FILE.read_text(encoding="utf-8", errors="ignore").strip()
+                if now.strftime("%H:%M") >= target and last_fired != today_key:
+                    name = refresh_spoken_name()
+                    reply = daily_briefing_reply(name)["reply"]
+                    app.speak(reply)
+                    _AUTO_BRIEFING_LAST_FIRED_FILE.write_text(today_key, encoding="utf-8")
+        except Exception:
+            pass
+        time.sleep(_AUTO_BRIEFING_CHECK_INTERVAL_SECONDS)
+
+
+def start_auto_briefing_watchdog():
+    threading.Thread(target=_auto_briefing_loop, daemon=True).start()
+
+
+# =========================
 # RELIABILITY WATCHDOG -- alert-only, never auto-restarts or kills
 # anything (jarvis_process_dedup_v1.py already proved live that an
 # automated process-killer for this project is a real way to crash a
@@ -883,6 +970,38 @@ def quick_handle_command_v2(command):
     uber_result = uber_v1.uber_command_fast(c, name, app)
     if uber_result:
         return finish_plan_v3(uber_result, c, name, "uber")
+
+    reminder_result = reminders_v1.reminder_command_fast(c, name, app)
+    if reminder_result:
+        return finish_plan_v3(reminder_result, c, name, "reminders")
+
+    auto_briefing_result = auto_briefing_command_fast(c, name)
+    if auto_briefing_result:
+        return finish_plan_v3(auto_briefing_result, c, name, "auto_briefing")
+
+    task_result = tasks_v1.task_command_fast(c, name, app)
+    if task_result:
+        return finish_plan_v3(task_result, c, name, "tasks")
+
+    note_result = notes_v1.note_command_fast(c, name, app)
+    if note_result:
+        return finish_plan_v3(note_result, c, name, "notes")
+
+    recall_result = recall_v1.recall_command_fast(c, name, app)
+    if recall_result:
+        return finish_plan_v3(recall_result, c, name, "recall")
+
+    maps_result = maps_v1.maps_command_fast(c, name, app)
+    if maps_result:
+        return finish_plan_v3(maps_result, c, name, "maps")
+
+    dictionary_result = dictionary_v1.dictionary_command_fast(c, name, app)
+    if dictionary_result:
+        return finish_plan_v3(dictionary_result, c, name, "dictionary")
+
+    iss_result = iss_v1.iss_command_fast(c, name, app)
+    if iss_result:
+        return finish_plan_v3(iss_result, c, name, "iss")
 
     steam_result = steam_v1.steam_command_fast(c, name, app)
     if steam_result:
@@ -2720,6 +2839,9 @@ def install_v2(headless=False):
     _lower_process_priority()
     refresh_spoken_name()
     start_reliability_watchdog()
+    if not headless:
+        reminders_v1.start_reminder_watchdog(app, refresh_spoken_name)
+        start_auto_briefing_watchdog()
 
     try:
         maintainer_v1.install_error_hooks()
