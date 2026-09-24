@@ -5,10 +5,23 @@ from pathlib import Path
 
 
 def _default_root():
+    import threading
     preferred = Path("E:/JarvisMemory")
-    if preferred.drive and Path(preferred.drive + "/").exists():
-        return preferred
-    return Path("C:/AI-Agent/JarvisMemory")
+    fallback = Path("C:/AI-Agent/JarvisMemory")
+    result = {"healthy": False}
+    def probe():
+        try:
+            preferred.mkdir(parents=True, exist_ok=True)
+            m = preferred / ".health_check"
+            m.write_text("ok", encoding="utf-8")
+            m.unlink()
+            result["healthy"] = True
+        except Exception:
+            pass
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(1.5)
+    return preferred if result["healthy"] else fallback
 
 
 MEMORY_ROOT = _default_root()

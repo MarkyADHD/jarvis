@@ -54,9 +54,25 @@ from pathlib import Path
 
 import requests
 
-MEMORY_ROOT = Path("E:/JarvisMemory")
-if not MEMORY_ROOT.exists():
-    MEMORY_ROOT = Path("C:/AI-Agent/JarvisMemory")
+def _pick_healthy_root(preferred, fallback, timeout=1.5):
+    import threading
+    result = {"healthy": False}
+    def probe():
+        try:
+            preferred.mkdir(parents=True, exist_ok=True)
+            m = preferred / ".health_check"
+            m.write_text("ok", encoding="utf-8")
+            m.unlink()
+            result["healthy"] = True
+        except Exception:
+            pass
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(timeout)
+    return preferred if result["healthy"] else fallback
+
+
+MEMORY_ROOT = _pick_healthy_root(Path("E:/JarvisMemory"), Path("C:/AI-Agent/JarvisMemory"))
 SETTINGS_DIR = MEMORY_ROOT / "settings"
 BACKEND_SETTING_PATH = SETTINGS_DIR / "thumbnail_backend.json"
 

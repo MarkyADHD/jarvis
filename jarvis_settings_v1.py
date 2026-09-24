@@ -42,9 +42,38 @@ except Exception:
     DPAPI_AVAILABLE = False
 
 
-MEMORY_ROOT = Path("E:/JarvisMemory")
-if not MEMORY_ROOT.exists():
-    MEMORY_ROOT = Path("C:/AI-Agent/JarvisMemory")
+def _pick_healthy_memory_root(preferred, fallback, timeout=1.5):
+    """Real bug, confirmed live: this used to be a plain `.exists()`
+    check -- looks safe, but E:\\ has a known recurring health problem
+    (Get-Volume: HealthStatus Warning, "Full Repair Needed") where it
+    stays *mounted* but hangs indefinitely on real reads/writes.
+    `.exists()` only checks the mount point, which answers instantly
+    even while E: is degraded -- so this check always passed, then the
+    very next line (a real mkdir/write) hung. Since this module is one
+    of the very FIRST things jarvis_app_v2.py imports, that hang blocked
+    the entire app before logging even started -- confirmed by A/B
+    testing the unmodified app against this exact symptom. Same
+    bounded-probe fix already proven in jarvis_twitch_v1.py,
+    jarvis_trader/core/paths.py, and jarvis_memory_v2.py tonight."""
+    result = {"healthy": False}
+
+    def probe():
+        try:
+            preferred.mkdir(parents=True, exist_ok=True)
+            marker = preferred / ".health_check"
+            marker.write_text("ok", encoding="utf-8")
+            marker.unlink()
+            result["healthy"] = True
+        except Exception:
+            pass
+
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(timeout)
+    return preferred if result["healthy"] else fallback
+
+
+MEMORY_ROOT = _pick_healthy_memory_root(Path("E:/JarvisMemory"), Path("C:/AI-Agent/JarvisMemory"))
 
 SETTINGS_DIR = MEMORY_ROOT / "settings"
 SETTINGS_DIR.mkdir(parents=True, exist_ok=True)

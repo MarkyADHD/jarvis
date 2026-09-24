@@ -6,15 +6,26 @@ from pathlib import Path
 
 
 def choose_root():
+    import threading
     preferred = Path("E:/JarvisMemory")
     fallback = Path("C:/AI-Agent/JarvisMemory")
-
-    try:
-        preferred.mkdir(parents=True, exist_ok=True)
+    result = {"healthy": False}
+    def probe():
+        try:
+            preferred.mkdir(parents=True, exist_ok=True)
+            m = preferred / ".health_check"
+            m.write_text("ok", encoding="utf-8")
+            m.unlink()
+            result["healthy"] = True
+        except Exception:
+            pass
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(1.5)
+    if result["healthy"]:
         return preferred
-    except Exception:
-        fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 ROOT = choose_root()

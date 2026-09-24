@@ -64,9 +64,25 @@ _KEYLIGHT_SERVICE_TYPE = "_elg._tcp.local."
 _KEYLIGHT_DEFAULT_PORT = 9123
 _KEYLIGHT_REQUEST_TIMEOUT = 2.5
 
-_KEYLIGHT_MEMORY_ROOT = Path("E:/JarvisMemory")
-if not _KEYLIGHT_MEMORY_ROOT.exists():
-    _KEYLIGHT_MEMORY_ROOT = Path("C:/AI-Agent/JarvisMemory")
+def _pick_healthy_root_v1(preferred, fallback, timeout=1.5):
+    import threading
+    result = {"healthy": False}
+    def probe():
+        try:
+            preferred.mkdir(parents=True, exist_ok=True)
+            m = preferred / ".health_check"
+            m.write_text("ok", encoding="utf-8")
+            m.unlink()
+            result["healthy"] = True
+        except Exception:
+            pass
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(timeout)
+    return preferred if result["healthy"] else fallback
+
+
+_KEYLIGHT_MEMORY_ROOT = _pick_healthy_root_v1(Path("E:/JarvisMemory"), Path("C:/AI-Agent/JarvisMemory"))
 
 _KEYLIGHT_CONFIG_DIR = _KEYLIGHT_MEMORY_ROOT / "elgato"
 _KEYLIGHT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -674,9 +690,7 @@ _NANOLEAF_SERVICE_TYPE = "_nanoleafapi._tcp.local."
 _NANOLEAF_DEFAULT_PORT = 16021
 _NANOLEAF_REQUEST_TIMEOUT = 2.8
 
-_NANOLEAF_MEMORY_ROOT = Path("E:/JarvisMemory")
-if not _NANOLEAF_MEMORY_ROOT.exists():
-    _NANOLEAF_MEMORY_ROOT = Path("C:/AI-Agent/JarvisMemory")
+_NANOLEAF_MEMORY_ROOT = _pick_healthy_root_v1(Path("E:/JarvisMemory"), Path("C:/AI-Agent/JarvisMemory"))
 
 _NANOLEAF_CONFIG_DIR = _NANOLEAF_MEMORY_ROOT / "nanoleaf"
 _NANOLEAF_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1430,9 +1444,7 @@ def _nanoleaf_nanoleaf_command_fast(command, spoken_name="Sir", app_module=None)
 _HUE_REQUEST_TIMEOUT = 3.5
 _HUE_DISCOVERY_URL = "https://discovery.meethue.com/"
 
-_HUE_MEMORY_ROOT = Path("E:/JarvisMemory")
-if not _HUE_MEMORY_ROOT.exists():
-    _HUE_MEMORY_ROOT = Path("C:/AI-Agent/JarvisMemory")
+_HUE_MEMORY_ROOT = _pick_healthy_root_v1(Path("E:/JarvisMemory"), Path("C:/AI-Agent/JarvisMemory"))
 
 _HUE_CONFIG_DIR = _HUE_MEMORY_ROOT / "hue"
 _HUE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1852,9 +1864,7 @@ _GOVEE_BASE_URL = "https://openapi.api.govee.com/router/api/v1"
 _GOVEE_REQUEST_TIMEOUT = 6.0
 _GOVEE_ENV_API_KEY = "GOVEE_API_KEY"
 
-_GOVEE_MEMORY_ROOT = Path("E:/JarvisMemory")
-if not _GOVEE_MEMORY_ROOT.exists():
-    _GOVEE_MEMORY_ROOT = Path("C:/AI-Agent/JarvisMemory")
+_GOVEE_MEMORY_ROOT = _pick_healthy_root_v1(Path("E:/JarvisMemory"), Path("C:/AI-Agent/JarvisMemory"))
 _GOVEE_SETTINGS_DIR = _GOVEE_MEMORY_ROOT / "settings"
 _GOVEE_KNOWN_DEVICES_PATH = _GOVEE_SETTINGS_DIR / "govee_known_devices.json"
 

@@ -11,15 +11,44 @@ import jarvis_settings_v1 as _settings_v1
 
 
 def choose_memory_root():
+    """Real bug, confirmed live: this used to be a plain try/except
+    around preferred.mkdir() -- fine when E: is genuinely absent (a
+    fast FileNotFoundError), but E:\\ has a known recurring health
+    problem (Get-Volume: HealthStatus Warning, "Full Repair Needed")
+    where it stays *mounted* but hangs indefinitely on real reads/
+    writes instead of failing fast. Since this runs at MODULE IMPORT
+    TIME -- one of the very first things that happens when
+    jarvis_app_v2.py starts -- a hung E: drive meant the whole app
+    silently hung before logging even initialized, with zero log
+    output and 0% CPU, easily mistaken for a totally different bug.
+    Confirmed by A/B testing: the pre-existing, unmodified app hung
+    identically. Same bounded-probe fix already proven in
+    jarvis_twitch_v1.py and jarvis_trader/core/paths.py -- runs the
+    real write+read+unlink probe in a background thread and falls back
+    without waiting for it if E: doesn't answer in time."""
     preferred = Path("E:/JarvisMemory")
     fallback = Path("C:/AI-Agent/JarvisMemory")
 
-    try:
-        preferred.mkdir(parents=True, exist_ok=True)
+    result = {"healthy": False}
+
+    def probe():
+        try:
+            preferred.mkdir(parents=True, exist_ok=True)
+            marker = preferred / ".health_check"
+            marker.write_text("ok", encoding="utf-8")
+            marker.unlink()
+            result["healthy"] = True
+        except Exception:
+            pass
+
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(1.5)
+
+    if result["healthy"]:
         return preferred
-    except Exception:
-        fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 MEMORY_ROOT = choose_memory_root()
