@@ -26,7 +26,7 @@
  * this module's exported shape.
  */
 
-import { spawn, spawnSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   ChatMessage,
@@ -58,10 +58,20 @@ export interface ClaudeRuntimeOptions {
 
 const DEFAULT_MODEL = "claude-opus-5-5";
 
-/** True if `<cliBin> --version` runs successfully. Cheap, synchronous, no network call. */
+/**
+ * True if `<cliBin> --version` runs successfully. Cheap, synchronous, no
+ * network call. Uses cross-spawn, not node:child_process directly: on
+ * Windows, npm installs `claude` as a `.cmd` shim, and Node's own
+ * spawnSync can't launch that without `shell: true` - which Node's docs
+ * warn does not safely escape arguments. cross-spawn resolves and
+ * invokes the shim correctly without going through a shell, so the
+ * prompt text in streamViaCli below can't break out into a command
+ * injection. Confirmed by hand: plain spawnSync("claude", ...) throws
+ * ENOENT on Windows; this is the actual fix, not a guess.
+ */
 function detectCli(cliBin: string): boolean {
   try {
-    const result = spawnSync(cliBin, ["--version"], { timeout: 5_000 });
+    const result = crossSpawn.sync(cliBin, ["--version"], { timeout: 5_000 });
     return result.status === 0;
   } catch {
     return false;
@@ -190,7 +200,7 @@ export class ClaudeRuntime {
     opts: { jobId: string; signal?: AbortSignal }
   ): AsyncGenerator<ChatStreamDelta, ChatMessage> {
     const prompt = flattenHistory(history);
-    const child = spawn(
+    const child = crossSpawn(
       this.cliBin,
       [
         "-p",

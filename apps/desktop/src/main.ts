@@ -45,11 +45,31 @@ function startCore(): void {
 async function waitForCoreToken(timeoutMs = 10_000): Promise<string> {
   const tokenPath = join(resolveDataDir(), "core-token");
   const start = Date.now();
+  let token: string | undefined;
   while (Date.now() - start < timeoutMs) {
-    if (existsSync(tokenPath)) return readFileSync(tokenPath, "utf8").trim();
+    if (existsSync(tokenPath)) {
+      token = readFileSync(tokenPath, "utf8").trim();
+      break;
+    }
     await new Promise((r) => setTimeout(r, 200));
   }
-  throw new Error(`core-token never appeared at ${tokenPath} - is the core service running?`);
+  if (!token) throw new Error(`core-token never appeared at ${tokenPath} - is the core service running?`);
+
+  // The token file persists across restarts (same file every launch), so
+  // its existence alone doesn't mean *this* process's server is actually
+  // listening yet - only that some past run wrote it. Confirmed by hand:
+  // without this probe, the renderer's first request could still lose
+  // the race with ECONNREFUSED even after the token-write-ordering fix
+  // in services/core/src/server.ts. Poll the port directly instead.
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await fetch(CORE_BASE);
+      return token;
+    } catch {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  throw new Error(`core service never answered at ${CORE_BASE} within ${timeoutMs}ms`);
 }
 
 async function coreFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -86,8 +106,14 @@ function createWindow(): void {
       sandbox: true,
     },
   });
-  win.loadFile(join(__dirname, "..", "index.html"));
 
+  // Register IPC handlers before loadFile: the renderer's first
+  // getSetupStatus() call fires as soon as its script runs, and if that
+  // race is lost, ipcRenderer.invoke rejects with "no handler registered"
+  // before anything is listening for the rejection - the setup banner
+  // then silently never updates. Confirmed by hand on Marky's machine:
+  // this was the second reason the chat UI looked dead alongside the
+  // preload.cts fix.
   ipcMain.handle("setup:get", async () => {
     const res = await coreFetch("/api/setup");
     return res.json();
@@ -109,6 +135,8 @@ function createWindow(): void {
     await coreFetch(`/api/chat/${jobId}/cancel`, { method: "POST" });
     return { cancelled: true };
   });
+
+  win.loadFile(join(__dirname, "..", "index.html"));
 }
 
 async function pipeSse(res: Response, win: BrowserWindow, jobId: string): Promise<void> {
