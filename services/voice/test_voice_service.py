@@ -16,8 +16,101 @@ from voice_service import (
     VoiceService,
     VoiceStateMachine,
     make_handler,
+    resample_linear,
+    resolve_input_device,
 )
 from http.server import ThreadingHTTPServer
+
+
+class _FakeSoundDevice:
+    """Stands in for the `sounddevice` module's query_devices/query_hostapis
+    shape, using the real ambiguous device list found by hand on Marky's
+    GoXLR-equipped PC - so this stays testable without real audio hardware.
+    """
+
+    _DEVICES = [
+        {"name": "Chat Mic (TC-HELICON GoXLR Mini)", "max_input_channels": 2, "hostapi": 0},
+        {"name": "Chat Mic (TC-HELICON GoXLR Mini)", "max_input_channels": 2, "hostapi": 1},
+        {"name": "Chat Mic (TC-HELICON GoXLR Mini)", "max_input_channels": 2, "hostapi": 2},
+        {"name": "Chat Mic (Chat Mic)", "max_input_channels": 2, "hostapi": 3},
+        {"name": "Speakers (Realtek)", "max_input_channels": 0, "hostapi": 0},
+        {"name": "Microphone (Realtek)", "max_input_channels": 2, "hostapi": 0},
+    ]
+    _HOSTAPIS = [
+        {"name": "MME"},
+        {"name": "Windows DirectSound"},
+        {"name": "Windows WASAPI"},
+        {"name": "Windows WDM-KS"},
+    ]
+
+    def query_devices(self, index=None, kind=None):  # noqa: ARG002 (kind unused, matches sd's signature shape)
+        if index is None:
+            return self._DEVICES
+        return self._DEVICES[index]
+
+    def query_hostapis(self):
+        return self._HOSTAPIS
+
+
+class ResolveInputDeviceTests(unittest.TestCase):
+    def test_unambiguous_name_resolves_to_its_index(self):
+        self.assertEqual(resolve_input_device(_FakeSoundDevice(), "Microphone (Realtek)"), 5)
+
+    def test_ambiguous_name_prefers_wasapi(self):
+        self.assertEqual(resolve_input_device(_FakeSoundDevice(), "Chat Mic"), 2)
+
+    def test_unknown_name_raises(self):
+        with self.assertRaises(ValueError):
+            resolve_input_device(_FakeSoundDevice(), "nonexistent device")
+
+    def test_int_and_none_pass_through_unchanged(self):
+        self.assertEqual(resolve_input_device(_FakeSoundDevice(), 3), 3)
+        self.assertIsNone(resolve_input_device(_FakeSoundDevice(), None))
+
+
+class ResampleTests(unittest.TestCase):
+    """Pure numpy, no hardware - but real regression coverage for the bug
+    found by hand on Marky's PC: his GoXLR mic only opens at 48kHz, so
+    capture happens at the device's real rate and gets resampled down to
+    what Whisper wants, not captured at 16kHz directly.
+    """
+
+    def test_resample_48k_to_16k_preserves_duration_and_roughly_the_signal(self):
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("numpy not installed in this environment")
+
+        src_rate, dst_rate = 48000, 16000
+        duration_s = 0.5
+        freq_hz = 440
+        t = np.linspace(0, duration_s, int(src_rate * duration_s), endpoint=False)
+        tone = np.sin(2 * np.pi * freq_hz * t).astype(np.float32)
+
+        resampled = resample_linear(tone, src_rate, dst_rate)
+
+        expected_len = int(dst_rate * duration_s)
+        self.assertAlmostEqual(len(resampled), expected_len, delta=1)
+        self.assertLessEqual(float(np.abs(resampled).max()), 1.01)  # no blow-up
+
+    def test_resample_is_a_noop_when_rates_already_match(self):
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("numpy not installed in this environment")
+
+        audio = np.array([0.1, -0.2, 0.3], dtype=np.float32)
+        result = resample_linear(audio, 16000, 16000)
+        np.testing.assert_array_equal(result, audio)
+
+    def test_resample_handles_empty_audio(self):
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("numpy not installed in this environment")
+
+        result = resample_linear(np.array([], dtype=np.float32), 48000, 16000)
+        self.assertEqual(len(result), 0)
 
 
 class StateMachineTests(unittest.TestCase):

@@ -116,6 +116,57 @@ class AudioBackend(ABC):
     def speak(self, text: str) -> None: ...
 
 
+WHISPER_SAMPLERATE = 16000  # what faster-whisper expects a raw array to be
+
+
+def resolve_input_device(sd, name_or_index: str | int | None) -> str | int | None:
+    """A bare name substring isn't enough on a machine with a hardware
+    mixer: confirmed on Marky's PC that "Chat Mic" matches four devices
+    at once (MME, DirectSound, WASAPI, WDM-KS - the same physical input
+    exposed through every Windows audio backend). sounddevice's own
+    name lookup refuses to guess between them. Prefer WASAPI - the
+    modern, low-latency Windows API - when a name is ambiguous; pass
+    ints and None straight through.
+    """
+    if not isinstance(name_or_index, str):
+        return name_or_index
+
+    wanted = name_or_index.lower()
+    matches = [
+        i
+        for i, d in enumerate(sd.query_devices())
+        if wanted in d["name"].lower() and d["max_input_channels"] > 0
+    ]
+    if not matches:
+        raise ValueError(f"no input device matching {name_or_index!r}")
+    if len(matches) == 1:
+        return matches[0]
+
+    hostapis = sd.query_hostapis()
+    wasapi = [i for i in matches if hostapis[sd.query_devices(i)["hostapi"]]["name"] == "Windows WASAPI"]
+    return wasapi[0] if wasapi else matches[0]
+
+
+def resample_linear(audio, src_rate: int, dst_rate: int):
+    """Minimal linear-interpolation resample - no scipy dependency for
+    what's just a speech-recognition input stage, not mastering audio.
+    Confirmed necessary by hand: Marky's GoXLR Mini mic only opens at
+    48kHz (`sounddevice.PortAudioError: Invalid sample rate` at 16kHz),
+    so capture has to happen at the device's real rate and get resampled
+    down afterward, not captured at 16kHz directly like the code
+    previously assumed.
+    """
+    import numpy as np
+
+    if src_rate == dst_rate or len(audio) == 0:
+        return audio
+    duration = len(audio) / src_rate
+    dst_len = int(round(duration * dst_rate))
+    src_x = np.linspace(0, duration, num=len(audio), endpoint=False)
+    dst_x = np.linspace(0, duration, num=dst_len, endpoint=False)
+    return np.interp(dst_x, src_x, audio).astype(np.float32)
+
+
 class RealAudioBackend(AudioBackend):
     """Mic capture (sounddevice) -> faster-whisper STT, and Piper TTS ->
     speaker playback. Heavy imports happen here, lazily, on first real use -
@@ -123,12 +174,33 @@ class RealAudioBackend(AudioBackend):
     on a machine with none of this installed.
     """
 
-    def __init__(self, whisper_model: str = "small.en", piper_voice: str | None = None):
+    def __init__(
+        self,
+        whisper_model: str = "small.en",
+        piper_voice: str | None = None,
+        input_device: str | int | None = None,
+        whisper_device: str = "cpu",
+    ):
         self._whisper_model_name = whisper_model
         self._piper_voice = piper_voice
+        # Confirmed by hand: this machine has an RTX 4070, but faster-whisper
+        # (via ctranslate2) needs the CUDA Toolkit's cuBLAS runtime, not just
+        # the GPU driver - "cublas64_12.dll is not found" at inference time
+        # with device="cuda" (the ctranslate2 default) when only the driver
+        # is installed. CPU works everywhere; set JARVIS_VOICE_WHISPER_DEVICE
+        # to "cuda" once the CUDA Toolkit is actually installed.
+        self._whisper_device = whisper_device
+        # A name substring (e.g. "Chat Mic"), a sounddevice index, or None
+        # for the system default input. None is a real risk on a machine
+        # with a streaming mixer installed: confirmed on Marky's PC that
+        # the default input is the GoXLR's "Broadcast Stream Mix" (a
+        # monitor/output submix), not an actual microphone - set
+        # JARVIS_VOICE_INPUT_DEVICE to the real mic's name there.
+        self._input_device = input_device
         self._whisper = None  # lazy
         self._frames: list = []
         self._stream = None
+        self._capture_rate = WHISPER_SAMPLERATE
 
     def _sounddevice(self):
         import sounddevice as sd  # noqa: F401 (import error is the real signal here)
@@ -140,11 +212,20 @@ class RealAudioBackend(AudioBackend):
         import numpy as np
 
         self._frames = []
+        device = resolve_input_device(sd, self._input_device)
+        device_info = sd.query_devices(device, "input")
+        self._capture_rate = int(device_info["default_samplerate"])
 
         def _on_audio(indata, frames, time_info, status):  # noqa: ARG001
             self._frames.append(indata.copy())
 
-        self._stream = sd.InputStream(samplerate=16000, channels=1, dtype="float32", callback=_on_audio)
+        self._stream = sd.InputStream(
+            device=device,
+            samplerate=self._capture_rate,
+            channels=1,
+            dtype="float32",
+            callback=_on_audio,
+        )
         self._stream.start()
         self._capture_np = np  # stash for stop_capture_and_transcribe
 
@@ -158,11 +239,12 @@ class RealAudioBackend(AudioBackend):
             return ""
 
         audio = self._capture_np.concatenate(self._frames, axis=0).flatten()
+        audio = resample_linear(audio, self._capture_rate, WHISPER_SAMPLERATE)
 
         if self._whisper is None:
             from faster_whisper import WhisperModel
 
-            self._whisper = WhisperModel(self._whisper_model_name)
+            self._whisper = WhisperModel(self._whisper_model_name, device=self._whisper_device)
 
         segments, _info = self._whisper.transcribe(audio, language="en")
         return " ".join(seg.text.strip() for seg in segments).strip()
@@ -330,7 +412,11 @@ def main() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     token = _load_or_create_token(data_dir / "voice_token.txt")
 
-    backend = RealAudioBackend(piper_voice=os.environ.get("JARVIS_PIPER_VOICE"))
+    backend = RealAudioBackend(
+        piper_voice=os.environ.get("JARVIS_PIPER_VOICE"),
+        input_device=os.environ.get("JARVIS_VOICE_INPUT_DEVICE"),
+        whisper_device=os.environ.get("JARVIS_VOICE_WHISPER_DEVICE", "cpu"),
+    )
     service = VoiceService(backend)
     port = int(os.environ.get("JARVIS_VOICE_PORT", "8788"))
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(service, token))
