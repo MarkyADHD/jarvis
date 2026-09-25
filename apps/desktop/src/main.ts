@@ -76,7 +76,11 @@ function createWindow(): void {
     width: 900,
     height: 700,
     webPreferences: {
-      preload: join(__dirname, "preload.js"),
+      // preload.ts compiles to preload.cjs, not preload.js: Electron's
+      // sandboxed preload loader requires CommonJS, so that file is
+      // built separately as CommonJS regardless of the rest of the app
+      // being ESM. See src/preload.cts's own comment for why.
+      preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

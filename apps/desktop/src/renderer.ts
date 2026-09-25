@@ -7,7 +7,10 @@
  * (see preload.ts).
  */
 
-import type { JarvisBridge } from "./preload.js";
+// preload.ts compiles to preload.cjs (Electron's sandboxed preload
+// loader requires CommonJS) - reference that output extension so the
+// type import resolves to its declaration file (preload.d.cts).
+import type { JarvisBridge } from "./preload.cjs";
 
 declare global {
   interface Window {

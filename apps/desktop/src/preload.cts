@@ -6,7 +6,38 @@
  */
 
 import { contextBridge, ipcRenderer } from "electron";
-import type { ChatMessage, ChatStreamDelta, ChatStreamDone, ChatStreamError, SetupStatus } from "@jarvis/contracts";
+
+// This file compiles to CommonJS (.cjs) - Electron's sandboxed preload
+// loader requires that regardless of the rest of the app being ESM (see
+// docs/build-ledger.md for the bug this fixes). @jarvis/contracts is an
+// ESM package, and TypeScript's Node16/NodeNext module resolution
+// refuses to let a CJS file reference an ESM package's types at all
+// (TS1479), even for a type-only, zero-runtime-emit reference - so
+// these mirror the handful of contracts/src/index.ts shapes this file
+// actually needs rather than importing them. Keep in sync if those
+// shapes change; nothing else in this small bridge needs the real
+// import machinery.
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt: string;
+}
+interface ChatStreamDelta {
+  jobId: string;
+  textDelta: string;
+}
+interface ChatStreamDone {
+  jobId: string;
+  message: ChatMessage;
+}
+interface ChatStreamError {
+  jobId: string;
+  message: string;
+}
+interface SetupStatus {
+  claude: { state: "not-configured" | "connecting" | "connected" | "error"; detail?: string };
+}
 
 const api = {
   getSetupStatus: (): Promise<SetupStatus> => ipcRenderer.invoke("setup:get"),
