@@ -70,6 +70,8 @@
       }
       #send { background: var(--accent); color: #06201d; }
       #stop { background: var(--danger); color: #240909; }
+      #talk { background: #2a2c30; color: var(--text); }
+      #talk.recording { background: var(--danger); color: #240909; }
       button:disabled { opacity: 0.4; cursor: default; }
     </style>
   </head>
@@ -78,6 +80,7 @@
     <div id="messages"></div>
     <div id="composer">
       <textarea id="input" rows="2" placeholder="Talk to Jarvis..."></textarea>
+      <button id="talk" title="Hold to talk">🎤 Hold to talk</button>
       <button id="send">Send</button>
       <button id="stop">Stop</button>
     </div>

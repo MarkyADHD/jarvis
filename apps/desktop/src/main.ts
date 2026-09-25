@@ -21,6 +21,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CORE_PORT = Number(process.env.JARVIS_CORE_PORT ?? 8765);
 const CORE_BASE = `http://127.0.0.1:${CORE_PORT}`;
+const VOICE_PORT = Number(process.env.JARVIS_VOICE_PORT ?? 8788);
+const VOICE_BASE = `http://127.0.0.1:${VOICE_PORT}`;
 
 function resolveDataDir(): string {
   if (process.env.JARVIS_DATA_DIR) return process.env.JARVIS_DATA_DIR;
@@ -30,6 +32,8 @@ function resolveDataDir(): string {
 
 let coreProcess: ChildProcess | undefined;
 let coreToken = "";
+let voiceProcess: ChildProcess | undefined;
+let voiceToken = ""; // empty means "not available" - voice IPC handlers degrade to an error instead of throwing
 
 function startCore(): void {
   const corePath = join(__dirname, "..", "..", "..", "services", "core", "dist", "server.js");
@@ -39,6 +43,23 @@ function startCore(): void {
   });
   coreProcess.on("exit", (code) => {
     console.error(`jarvis core exited unexpectedly (code ${code}). Chat will show as disconnected.`);
+  });
+}
+
+// The voice sidecar is optional at this stage (Milestone 2 in progress -
+// see docs/build-ledger.md): if Python or its deps aren't installed yet,
+// the app still works for text chat, it just can't hear or speak. Spawn
+// failures are logged, not thrown, so a missing voice setup never takes
+// the whole desktop app down with it.
+function startVoice(): void {
+  const voicePath = join(__dirname, "..", "..", "..", "services", "voice", "voice_service.py");
+  const pythonBin = process.env.JARVIS_PYTHON_BIN ?? (process.platform === "win32" ? "python" : "python3");
+  voiceProcess = spawn(pythonBin, [voicePath], { env: process.env, stdio: "inherit" });
+  voiceProcess.on("error", (err) => {
+    console.error(`jarvis voice service failed to start (${err.message}). Voice will be unavailable.`);
+  });
+  voiceProcess.on("exit", (code) => {
+    if (code !== 0) console.error(`jarvis voice service exited unexpectedly (code ${code}). Voice will be unavailable.`);
   });
 }
 
@@ -76,6 +97,37 @@ async function coreFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${CORE_BASE}${path}`, {
     ...init,
     headers: { ...init?.headers, "X-Jarvis-Token": coreToken },
+  });
+}
+
+// Same shape as waitForCoreToken, pointed at the voice sidecar's own
+// token file (services/voice/voice_service.py's _load_or_create_token).
+// Shorter timeout and a swallowed failure: voice is optional, unlike
+// core - the app must not hang waiting for a sidecar that may not have
+// its Python deps installed yet.
+async function waitForVoiceToken(timeoutMs = 5_000): Promise<string> {
+  const tokenPath = join(resolveDataDir(), "voice_token.txt");
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (existsSync(tokenPath)) {
+      const token = readFileSync(tokenPath, "utf8").trim();
+      try {
+        await fetch(VOICE_BASE, { signal: AbortSignal.timeout(500) });
+        return token;
+      } catch {
+        // token file written but server not answering yet - keep polling
+      }
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`voice service never answered at ${VOICE_BASE} within ${timeoutMs}ms`);
+}
+
+async function voiceFetch(path: string, init?: RequestInit): Promise<Response> {
+  if (!voiceToken) throw new Error("voice service is not available");
+  return fetch(`${VOICE_BASE}${path}`, {
+    ...init,
+    headers: { ...init?.headers, "X-Jarvis-Token": voiceToken },
   });
 }
 
@@ -136,6 +188,31 @@ function createWindow(): void {
     return { cancelled: true };
   });
 
+  // Voice IPC: thin proxies to the sidecar's own HTTP API (see
+  // services/voice/voice_service.py). The renderer drives the sequence
+  // (start on press, stop on release, feed the transcript into the
+  // existing chat:send flow, speak the reply once it's done) - this
+  // process only forwards requests and surfaces real errors, it never
+  // fakes a transcript or a spoken reply that didn't happen.
+  ipcMain.handle("voice:pttStart", async () => {
+    const res = await voiceFetch("/ptt/start", { method: "POST" });
+    return res.json();
+  });
+
+  ipcMain.handle("voice:pttStop", async () => {
+    const res = await voiceFetch("/ptt/stop", { method: "POST" });
+    return res.json();
+  });
+
+  ipcMain.handle("voice:speak", async (_event, text: string) => {
+    const res = await voiceFetch("/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    return res.json();
+  });
+
   win.loadFile(join(__dirname, "..", "index.html"));
 }
 
@@ -163,10 +240,17 @@ async function pipeSse(res: Response, win: BrowserWindow, jobId: string): Promis
 
 app.whenReady().then(async () => {
   startCore();
-  coreToken = await waitForCoreToken().catch((err) => {
-    console.error(err);
-    return "";
-  });
+  startVoice();
+  [coreToken, voiceToken] = await Promise.all([
+    waitForCoreToken().catch((err) => {
+      console.error(err);
+      return "";
+    }),
+    waitForVoiceToken().catch((err) => {
+      console.error(`voice unavailable: ${err.message}`);
+      return "";
+    }),
+  ]);
   createWindow();
 
   app.on("activate", () => {
@@ -176,9 +260,11 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   coreProcess?.kill();
+  voiceProcess?.kill();
   if (process.platform !== "darwin") app.quit();
 });
 
 app.on("before-quit", () => {
   coreProcess?.kill();
+  voiceProcess?.kill();
 });

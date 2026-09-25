@@ -39,6 +39,12 @@ interface SetupStatus {
   claude: { state: "not-configured" | "connecting" | "connected" | "error"; detail?: string };
 }
 
+interface VoiceStateEvent {
+  state: "dormant" | "listening" | "transcribing" | "thinking" | "speaking" | "interrupted" | "error";
+  reason?: string;
+  at: string;
+}
+
 const api = {
   getSetupStatus: (): Promise<SetupStatus> => ipcRenderer.invoke("setup:get"),
   sendChat: (history: ChatMessage[]): Promise<{ jobId: string }> => ipcRenderer.invoke("chat:send", history),
@@ -50,6 +56,12 @@ const api = {
     ipcRenderer.on("chat:error", (_e, data: ChatStreamError) => cb(data)),
   onChatCancelled: (cb: (d: ChatStreamError) => void) =>
     ipcRenderer.on("chat:cancelled", (_e, data: ChatStreamError) => cb(data)),
+  // Push-to-talk (Milestone 2, docs/build-ledger.md): proxies to
+  // services/voice/voice_service.py via the main process, which holds
+  // that sidecar's token the same way it holds core's.
+  voicePttStart: (): Promise<VoiceStateEvent> => ipcRenderer.invoke("voice:pttStart"),
+  voicePttStop: (): Promise<VoiceStateEvent & { transcript: string }> => ipcRenderer.invoke("voice:pttStop"),
+  voiceSpeak: (text: string): Promise<VoiceStateEvent> => ipcRenderer.invoke("voice:speak", text),
 };
 
 contextBridge.exposeInMainWorld("jarvis", api);
