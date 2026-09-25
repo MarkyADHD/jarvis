@@ -465,3 +465,7 @@ with your own capital, entirely at your own risk. The creator is not
 liable for any financial loss arising from installing, configuring, or
 using it. Only connect a real account if you understand and accept
 that risk, and never with money you can't afford to lose.
+
+## v3 rebuild (preview, no Python)
+
+A new Electron-based Jarvis is being built alongside the Python app. See `docs/next-session.md` to run it (`npm install`, `npm start`) and `docs/migration.md` / `docs/build-ledger.md` for what is ported so far. The Python app remains the working version until cutover.

@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>Jarvis</title>
+<style>
+  body{margin:0;font:15px system-ui;background:#05080d;color:#cfe8ff;display:flex;flex-direction:column;height:100vh}
+  header{padding:10px 16px;border-bottom:1px solid #123;display:flex;gap:12px;align-items:center}
+  header b{color:#4fc3ff;letter-spacing:.2em} #state{font-size:12px;opacity:.8}
+  #log{flex:1;overflow:auto;padding:16px} .m{margin:8px 0;white-space:pre-wrap} .user{color:#8aa} .jarvis{color:#cfe8ff}
+  .err{color:#ff8a80} form{display:flex;gap:8px;padding:12px;border-top:1px solid #123}
+  input{flex:1;background:#0b1320;color:inherit;border:1px solid #1d3550;padding:10px;border-radius:6px}
+  button{background:#0f2a44;color:#cfe8ff;border:1px solid #1d3550;padding:0 16px;border-radius:6px}
+</style></head>
+<body>
+<header><b>JARVIS</b><span id="state">checking…</span></header>
+<div id="log"></div>
+<form id="f"><input id="q" placeholder="Talk to me, boss" autofocus><button>Send</button><button type="button" id="stop">Stop</button></form>
+<script src="renderer.js"></script>
+</body></html>

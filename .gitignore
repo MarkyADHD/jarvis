@@ -82,3 +82,4 @@ Thumbs.db
 .reliability_watchdog_flag.txt
 .auto_briefing_time.txt
 .auto_briefing_last_fired.txt
+node_modules/
