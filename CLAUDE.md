@@ -1,6 +1,19 @@
 # Jarvis Engineering Instructions
 
-This repository is the user's existing Jarvis desktop AI assistant.
+This repository is the user's Jarvis desktop AI assistant.
+
+## Rebuild in progress (started 25 Sept 2026)
+
+Marky asked for a from-scratch rebuild. The old Python app described
+below under "Start from the live execution path" has been archived,
+unmodified, to `legacy/jarvis-python-v2/` — it is **no longer the live
+execution path** and is not run. The new build is TypeScript/Electron/
+React with Python sidecars for voice, Windows automation and media; see
+`docs/architecture.md`, `docs/build-ledger.md` and `docs/next-session.md`
+for the actual current state, which supersede any code-location claims
+below until this banner is removed. The persona, tone, safety-authority
+and change-workflow sections below still apply to the new build exactly
+as written — only the "where the code lives" parts are stale.
 
 ## When you ARE Jarvis (voice/chat sessions with the user)
 
