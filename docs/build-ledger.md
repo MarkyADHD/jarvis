@@ -12,7 +12,7 @@ what to pick up next.
 | Inspect existing workspace | implemented-and-tested | Old app removed entirely per Marky's explicit instruction (recoverable from `main`'s pre-rebuild git history, not present in this tree). |
 | Stack decision recorded | implemented-and-tested | `docs/architecture.md` — TS/Electron/React core, Python sidecars. |
 | New repo scaffold | implemented-and-tested | `apps/`, `services/`, `packages/`, `docs/` created. |
-| Machine/hardware inventory (RTX 4070, i7, audio devices, drives) | blocked | Needs a Remote Control session on Marky's actual Windows PC. Not guessable from this container. |
+| Machine/hardware inventory (RTX 4070, i7, audio devices, drives) | implemented-and-tested | Gathered live via Remote Control on Marky's PC - see `docs/architecture.md`'s "Hardware inventory" section. Six active audio devices including a GoXLR Mini; voice capture will need to target a specific input, not "the default device". |
 
 ## Milestone 1 — Working core
 

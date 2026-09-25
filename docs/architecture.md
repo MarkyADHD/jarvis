@@ -67,6 +67,32 @@ device)` until it's actually run there — normally through Remote
 Control on Marky's own PC (`env_01SHeapDEeNPJ6y1yKY3bTmH`, preapproved),
 not simulated here.
 
+## Hardware inventory (Marky's PC, `env_01SHeapDEeNPJ6y1yKY3bTmH`)
+
+Gathered directly on the machine via Remote Control (not guessed):
+
+- **CPU**: 13th Gen Intel Core i7-13700, 16 cores / 24 threads.
+- **GPU**: NVIDIA GeForce RTX 4070.
+- **RAM**: ~32 GB.
+- **Drives**: `C:` 899 GB (730 GB free), `D:` 30 GB (8 GB free - tight),
+  `E:` 1.9 TB (1.88 TB free) - Jarvis's data dir (`E:\Jarvis\data`) lives
+  here, plenty of room.
+- **OS**: Windows 11 Home, build 10.0.26200, 64-bit.
+- **Audio devices**: Realtek onboard, NVIDIA HDMI/DP (three monitors -
+  Elgato 4K S, MAG 272U X24, Odyssey G40B), a TC-Helicon GoXLR Mini
+  (Chat/System/Game/Music/Sample/Broadcast Stream Mix channels, plus a
+  Chat Mic input) and Steam Streaming mic/speakers (Steam Link/Remote
+  Play virtual devices). This is a real streaming rig, not a plain
+  mic+speakers setup - voice capture (Milestone 2) should target a
+  specific named input (the GoXLR's Chat Mic is the obvious candidate)
+  rather than "the default device", since default playback/recording
+  device isn't safely inferable from WMI alone and this machine has six
+  active audio devices to choose wrong between.
+- **Python**: 3.12.10 at
+  `C:\Users\babym\AppData\Local\Programs\Python\Python312\python.exe`
+  (also on PATH as `python`). The Microsoft Store alias is a dead
+  shortcut, not a real interpreter - don't invoke bare `python3`.
+
 ## Execution model (section 5 of the master prompt)
 
 Two routes share one permission/task system:
