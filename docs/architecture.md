@@ -7,16 +7,18 @@ before writing application code, per the rebuild brief Marky provided
 
 ## Why a rebuild
 
-The old assistant (now archived at `legacy/jarvis-python-v2/`, previously
-the repo root) is a single-process Python app that grew ~100 flat
-`jarvis_*_vN.py` modules with drifted safety word lists, two competing
-memory stores, a disabled maintainer/guardian, and known regression bugs
-(delayed/duplicate/clipped speech, wake-word spam, weak accent
-recognition, broken stop). Marky asked to stop patching it and rebuild
-clean. Nothing from the old code is deleted — it stays in
-`legacy/jarvis-python-v2/` for reference and to recover any working
-pieces (Nanoleaf/Key Light logic, Twitch, Spotify auth, etc.) as adapters
-get rebuilt properly.
+The old assistant (previously the repo root) was a single-process Python
+app that grew ~100 flat `jarvis_*_vN.py` modules with drifted safety word
+lists, two competing memory stores, a disabled maintainer/guardian, and
+known regression bugs (delayed/duplicate/clipped speech, wake-word spam,
+weak accent recognition, broken stop). Marky asked to stop patching it
+and rebuild clean, then explicitly asked to remove it entirely rather
+than keep it archived in the repo. It was briefly kept at
+`legacy/jarvis-python-v2/` and has since been deleted from the working
+tree; it's still recoverable from `main`'s git history before the
+rebuild commit if a specific piece of old logic (Nanoleaf/Key Light,
+Twitch, Spotify auth, etc.) is worth referencing while rebuilding an
+adapter, but nothing in the current tree depends on or references it.
 
 ## Stack decision
 
@@ -77,6 +79,17 @@ Every job gets an ID, provenance, permission grant, state (queued →
 running → succeeded/failed/outcome-unknown, etc.), and result evidence.
 Nothing reports success without checking the actual result.
 
+## File organization: fewer, bigger files
+
+Marky's explicit standing preference, reacting to the old app's ~100 flat
+`jarvis_*_vN.py` files: don't recreate that sprawl. Within each
+package/service/app, group related logic into one reasonably-sized file
+per real concern (e.g. one `app.ts` for the whole HTTP surface, one
+`db.ts` for the whole job store) rather than a new file per function or
+per small feature. The directory-per-component split in the layout below
+is about process/deployment boundaries (what runs where), not an
+invitation to fragment further inside each one.
+
 ## Repo layout
 
 ```
@@ -93,7 +106,7 @@ packages/claude-runtime  Agent SDK adapter — the only place that talks to Clau
 packages/tools       Custom tool implementations exposed to the Claude runtime
 packages/integrations    OBS/Twitch/lights/Stream Deck adapters
 packages/ui          Shared React components (desktop + web)
-legacy/jarvis-python-v2  Archived old app — reference only, not run
+(old Python app removed entirely — see git history on main before the rebuild)
 docs/                This file, build-ledger, next-session, integrations, verification, cost-and-data
 ```
 

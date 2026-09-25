@@ -4,10 +4,11 @@ Marky's personal Windows AI assistant. This is a from-scratch rebuild —
 see `docs/architecture.md` for the stack decision and reasoning, and
 `docs/build-ledger.md` for what's actually implemented versus planned.
 
-The previous Python-based app is archived at `legacy/jarvis-python-v2/`
-for reference. It still describes real, hard-won lessons about the old
-architecture; nothing in it was thrown away, it's just not the app being
-built forward anymore.
+The previous Python-based app has been removed entirely (Marky asked
+for it gone, not just archived). It's still recoverable from this
+repo's git history before the rebuild if a specific piece of old logic
+is ever worth referencing, but nothing in the working tree depends on
+or references it.
 
 ## Status
 

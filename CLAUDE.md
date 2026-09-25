@@ -4,16 +4,20 @@ This repository is the user's Jarvis desktop AI assistant.
 
 ## Rebuild in progress (started 25 Sept 2026)
 
-Marky asked for a from-scratch rebuild. The old Python app described
-below under "Start from the live execution path" has been archived,
-unmodified, to `legacy/jarvis-python-v2/` — it is **no longer the live
-execution path** and is not run. The new build is TypeScript/Electron/
-React with Python sidecars for voice, Windows automation and media; see
-`docs/architecture.md`, `docs/build-ledger.md` and `docs/next-session.md`
-for the actual current state, which supersede any code-location claims
-below until this banner is removed. The persona, tone, safety-authority
-and change-workflow sections below still apply to the new build exactly
-as written — only the "where the code lives" parts are stale.
+Marky asked for a from-scratch rebuild, then explicitly asked to remove
+the old app entirely rather than keep it around. The old Python app
+described below under "Start from the live execution path" is **gone
+from this repo** (it briefly lived at `legacy/jarvis-python-v2/`; that
+was deleted on his instruction). It's still recoverable from git history
+on `main` prior to the rebuild if anything in it is ever needed again,
+but nothing in the working tree references it. The new build is
+TypeScript/Electron/React with Python sidecars for voice, Windows
+automation and media; see `docs/architecture.md`, `docs/build-ledger.md`
+and `docs/next-session.md` for the actual current state, which supersede
+any code-location claims below until this banner is removed. The
+persona, tone, safety-authority and change-workflow sections below still
+apply to the new build exactly as written — only the "where the code
+lives" parts are stale.
 
 ## When you ARE Jarvis (voice/chat sessions with the user)
 
