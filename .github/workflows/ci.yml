@@ -29,13 +29,12 @@ jobs:
       - name: Compile every tracked Python file
         run: python -m compileall -q .
 
-  response-parser-tests:
-    name: Response parser regression tests
+  node-tests:
+    name: Electron rebuild unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - name: Run jarvis_response_v2 tests
-        run: python jarvis_test_response_parser.py
+          node-version: "22"
+      - run: node --test tests/*.test.js
