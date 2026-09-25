@@ -30,7 +30,14 @@ what to pick up next.
 
 **Milestone 1 is done and genuinely proven on real hardware**, not just in this Linux container: a real chat message sent from the actual Windows app gets a real Claude reply, using Marky's existing Claude Code login, no API key anywhere. 15 automated tests pass, typecheck is clean. The only loose end is a clean manual confirmation that Stop cuts off a reply mid-stream (see Cancel/stop control above). Next up: Milestone 2 (voice).
 
-## Milestone 2 — Voice and stop (planned)
+## Milestone 2 — Voice and stop
+
+| Item | Status | Notes |
+|---|---|---|
+| Push-to-talk voice service | implemented-and-tested (state machine + HTTP) / blocked (real capture/STT/TTS) | `services/voice/voice_service.py` — per the master prompt's own order ("push-to-talk first... wake-word after"). Explicit state machine (dormant/listening/transcribing/thinking/speaking/interrupted/error) with illegal-transition checks, a local-token-authed HTTP API (`/ptt/start`, `/ptt/stop`, `/speak`, `/control`, `/state`) mirroring `services/core`'s own auth pattern. 12 tests pass using a fake audio backend, so the whole control loop is proven without hardware. The real backend (`RealAudioBackend`: sounddevice capture, faster-whisper STT, Piper TTS) is written but genuinely unverified — this container has no mic, no speakers, no GPU. **Needs Marky's PC**: install `services/voice/requirements.txt`, download a Piper voice model, confirm a real "hold to talk, release, get a transcript back" round-trip, and a real spoken reply. |
+| Wake word, echo control, interruption, playback streaming/queueing, latency measurement | planned | Deliberately after push-to-talk per the master prompt; not started. |
+| Wiring voice into the desktop chat loop | planned | The voice sidecar is standalone right now; hooking its transcript into `services/core`'s chat API and speaking the reply back is the next step once push-to-talk itself is confirmed on real hardware. |
+
 ## Milestone 3 — PC operator + companion (planned)
 ## Milestone 4 — Stream producer (planned)
 ## Milestone 5 — Clip studio (planned)
