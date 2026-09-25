@@ -102,7 +102,7 @@ services/windows     Python: UI Automation / pywinauto bridge
 services/media       Python: FFmpeg/ffprobe clip-studio jobs
 services/communications  Twilio/LiveKit call adapter (optional, later milestone)
 packages/contracts   Shared TS types: tool schemas, job/task shapes, wire protocol
-packages/claude-runtime  Agent SDK adapter — the only place that talks to Claude
+packages/claude-runtime  The only place that talks to Claude (claude CLI, falls back to an API key)
 packages/tools       Custom tool implementations exposed to the Claude runtime
 packages/integrations    OBS/Twitch/lights/Stream Deck adapters
 packages/ui          Shared React components (desktop + web)
@@ -114,8 +114,13 @@ docs/                This file, build-ledger, next-session, integrations, verifi
 
 None blocking Milestone 1. Recorded defaults in use, changeable later:
 
-- Auth path for Claude runtime (Agent SDK vs CLI) — will be confirmed
-  against current docs during Milestone 1 setup-UI work, since it
-  depends on what Marky's actual account/subscription supports.
+- **Auth path for Claude runtime: decided.** Marky already has Claude
+  Code installed and logged in on his PC and explicitly asked not to
+  need a separate API key. `packages/claude-runtime` defaults to
+  shelling out to the `claude` CLI (reusing that existing login) whenever
+  it's found on PATH, falling back to `ANTHROPIC_API_KEY` only if the
+  CLI isn't present. See that package's own file header for the real,
+  verified `stream-json` event shapes this is built against. Revisit for
+  the real Agent SDK once tool use is actually needed (Milestone 3+).
 - Telephone provider (Twilio vs LiveKit SIP) — deferred to Milestone 6,
   no number purchased or billing activated without explicit sign-off.

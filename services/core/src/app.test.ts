@@ -16,7 +16,11 @@ let baseUrl: string;
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jarvis-core-app-test-"));
   jobs = new JobStore(join(dir, "test.db"));
-  const claude = new ClaudeRuntime({ apiKey: undefined }); // no key: honest not-configured path
+  // Force cliBin to something nonexistent so this stays deterministic
+  // regardless of whether the machine running the tests happens to have
+  // Claude Code installed (this sandbox does; a real deployment target
+  // like Marky's PC will too - see index.test.ts for that path).
+  const claude = new ClaudeRuntime({ apiKey: undefined, cliBin: "definitely-not-a-real-claude-cli-binary" });
   server = createApp({ claude, jobs, authToken: AUTH_TOKEN });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const port = (server.address() as AddressInfo).port;
