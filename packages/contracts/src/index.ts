@@ -128,3 +128,29 @@ export interface ToolContract<Input = unknown, Output = unknown> {
   __inputType?: Input;
   __outputType?: Output;
 }
+
+// ---------------------------------------------------------------------------
+// Voice (master prompt section 6). Shared between services/core and
+// services/voice (Python) via the JSON messages sent over their local
+// connection - this is the agreed shape, not a claim that the voice
+// service exists yet. See docs/build-ledger.md for what's actually built.
+// ---------------------------------------------------------------------------
+
+export type VoiceState =
+  | "dormant"
+  | "listening"
+  | "transcribing"
+  | "thinking"
+  | "speaking"
+  | "interrupted"
+  | "error";
+
+export interface VoiceStateEvent {
+  state: VoiceState;
+  reason?: string;
+  at: string; // ISO 8601
+}
+
+/** "Jarvis stop" / hotkey / "sleep" - always distinct from a normal turn ending. */
+export type VoiceControlCommand = "stop" | "sleep" | "wake";
+

@@ -29,6 +29,16 @@ Milestone 0 and a real first pass at Milestone 1 are done:
 Run `npm install && npm run typecheck && npm test` from repo root to
 reproduce.
 
+## In progress right now
+
+A Remote Control session is running on Marky's actual PC
+(`env_01SHeapDEeNPJ6y1yKY3bTmH`, folder `C:\AI-Agent`) to check out this
+branch, `npm install` for real (Electron's binary can finally download
+there), and confirm whether the desktop shell actually opens and the
+chat loop works. Check the thread / that session's results before
+re-doing this by hand - it may have already answered a bunch of the
+"blocked (needs Windows device)" rows in the build ledger.
+
 ## Immediate next steps
 
 1. **Get this actually running on Marky's PC** via Remote Control:
