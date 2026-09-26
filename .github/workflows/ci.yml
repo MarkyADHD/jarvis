@@ -1,23 +1,7 @@
 name: CI
 
-# Deliberately minimal: this project's real tests need actual hardware
-# and live services (Spotify, Twitch, smart lights, a microphone, a
-# Claude Pro login) that a GitHub-hosted runner simply doesn't have --
-# trying to run those here would just fail for reasons that have
-# nothing to do with whether the change is actually broken. What CI CAN
-# usefully catch before a release ships: a syntax error slipping through
-# in the archived legacy app (confirmed happens -- every fix used to be
-# manually compile-checked by hand, one file at a time, which doesn't
-# scale and is easy to forget a file on).
-#
-# The response-parser-tests job that used to live here called
-# jarvis_test_response_parser.py, which was deleted as dead cruft back
-# in commit bf6421a without this workflow being updated -- it's been
-# failing on every push/PR since, unrelated to whatever the actual
-# change was. Removed rather than pointing it at a test file that no
-# longer exists. jarvis_response_v2.py itself is now archived at
-# legacy/jarvis-python-v2/ along with the rest of the pre-rebuild app;
-# it still gets syntax-checked by compile-check below.
+# Jarvis v3 (Electron/Node). Unit tests only: the live parts (Claude login, microphone, Spotify,
+# Twitch, lights, FFmpeg exports) need real hardware and accounts a hosted runner doesn't have.
 
 on:
   push:
@@ -26,13 +10,15 @@ on:
     branches: [main]
 
 jobs:
-  compile-check:
-    name: Python syntax check
+  test:
+    name: Node unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - name: Compile every tracked Python file
-        run: python -m compileall -q .
+          node-version: "22"
+      - name: Syntax-check every source file
+        run: for f in $(git ls-files 'src/**/*.js' 'tests/*.js'); do node --check "$f"; done
+      - name: Run tests (no Electron download needed)
+        run: node --test tests/*.test.js

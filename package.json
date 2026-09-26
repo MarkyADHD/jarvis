@@ -1,21 +1,71 @@
 {
   "name": "jarvis",
+  "version": "3.0.0-alpha.1",
   "private": true,
-  "version": "0.1.0",
-  "description": "Jarvis v3 - personal assistant. See docs/architecture.md.",
-  "workspaces": [
-    "packages/*",
-    "services/*",
-    "apps/*"
-  ],
+  "description": "Jarvis desktop assistant (Electron rebuild, no Python)",
+  "main": "src/main/main.js",
   "scripts": {
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "core:dev": "npm run dev -w @jarvis/core"
+    "start": "electron .",
+    "test": "node --test tests/*.test.js",
+    "postinstall": "node node_modules/electron/install.js",
+    "dist": "electron-builder --win nsis"
   },
   "devDependencies": {
-    "typescript": "5.6.3",
-    "vitest": "5.0.2",
-    "@types/node": "22.20.4"
+    "electron": "^38.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1"
+  },
+  "author": "MarkyADHD",
+  "build": {
+    "appId": "com.markyadhd.jarvis",
+    "productName": "Jarvis",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**",
+      "package.json",
+      "!src/**/*.test.js"
+    ],
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/**",
+      "node_modules/sharp/**",
+      "src/tools/**"
+    ],
+    "extraResources": [
+      {
+        "from": "piper_runtime",
+        "to": "piper_runtime"
+      },
+      {
+        "from": "voices",
+        "to": "voices",
+        "filter": [
+          "jarvis-high.onnx*"
+        ]
+      },
+      {
+        "from": "jarvis_icon.ico",
+        "to": "jarvis_icon.ico"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "build/icon.png"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "license": "DISCLAIMER.txt",
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "shortcutName": "Jarvis",
+      "createDesktopShortcut": true
+    }
   }
 }

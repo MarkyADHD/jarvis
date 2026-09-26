@@ -1,0 +1,305 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' file:">
+<title>Jarvis</title>
+<style>
+:root{
+  --bg:#010509; --cyan:#35d6ff; --cyan2:#7fe7ff; --cyan-dim:#16688a; --faint:rgba(53,214,255,.10);
+  --blue:#2a9fe0; --amber:#ffa928; --gold:#ffd23f; --red:#ff4d5e; --text:#cdefff; --muted:#5a879e;
+  --line:rgba(53,214,255,.25); --glass:rgba(3,16,26,.62);
+  --mono:Consolas,"Cascadia Mono",monospace; --disp:Bahnschrift,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg)}
+body{color:var(--text);font:14px var(--disp);letter-spacing:.02em;
+  display:grid;grid-template-columns:minmax(260px,21%) 1fr minmax(280px,22%);grid-template-rows:64px 1fr 220px;
+  grid-template-areas:"top top top" "left core right" "left chat right";gap:14px;padding:14px 16px 16px}
+#bg,#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+#bg{z-index:-2} #fx{z-index:50}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:49;
+  background:radial-gradient(ellipse at center,transparent 62%,rgba(0,0,0,.45)),
+  repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px)}
+
+/* ---------- panels ---------- */
+.panel{position:relative;background:linear-gradient(180deg,rgba(8,34,52,.55),var(--glass));border:1px solid var(--line);
+  clip-path:polygon(16px 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%,0 16px);
+  padding:14px 16px;backdrop-filter:blur(8px);
+  opacity:0;transform:translateY(14px) scale(.98);filter:brightness(2) blur(2px)}
+.on .panel{animation:holo .9s cubic-bezier(.2,.8,.2,1) forwards;animation-delay:var(--d,0s)}
+@keyframes holo{0%{opacity:0;transform:translateY(14px) scale(.98);filter:brightness(3) blur(3px)}
+  40%{opacity:.6}55%{opacity:.25}70%{opacity:.9}100%{opacity:1;transform:none;filter:none}}
+.panel::before,.panel::after{content:"";position:absolute;width:26px;height:26px;border:2px solid var(--cyan);pointer-events:none;filter:drop-shadow(0 0 4px var(--cyan))}
+.panel::before{top:-1px;right:-1px;border-left:0;border-bottom:0}
+.panel::after{bottom:-1px;left:-1px;border-right:0;border-top:0}
+.panel .scan{position:absolute;left:0;right:0;height:40%;top:-40%;pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(53,214,255,.07),transparent);animation:scan 6s linear infinite;animation-delay:var(--d,0s)}
+@keyframes scan{to{top:100%}}
+.ptitle{font:600 11px var(--mono);letter-spacing:.3em;color:var(--cyan);text-transform:uppercase;
+  display:flex;align-items:center;gap:9px;margin-bottom:12px}
+.ptitle::before{content:"";width:7px;height:7px;background:var(--cyan);box-shadow:0 0 10px var(--cyan);animation:blink 2.4s steps(1) infinite}
+@keyframes blink{50%{opacity:.25}}
+.ptitle em{font-style:normal;color:var(--muted);letter-spacing:.15em}
+.ptitle span{margin-left:auto;color:var(--muted);letter-spacing:.12em;font-weight:400}
+.ptitle::after{content:"";flex:0 0 40px;height:1px;background:linear-gradient(90deg,var(--cyan),transparent);order:3}
+
+/* ---------- top ---------- */
+#top{grid-area:top;display:flex;align-items:center;gap:26px;padding:0 22px;position:relative;opacity:0}
+.on #top{animation:fade .8s .2s forwards} @keyframes fade{to{opacity:1}}
+#top::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan) 20%,var(--cyan) 80%,transparent);box-shadow:0 0 8px var(--cyan)}
+.brand{font:700 22px var(--disp);letter-spacing:.6em;color:#eafcff;text-shadow:0 0 14px var(--cyan),0 0 30px rgba(53,214,255,.4)}
+.brand small{display:block;font:10px var(--mono);letter-spacing:.35em;color:var(--muted);text-shadow:none;margin-top:2px}
+.chip{white-space:nowrap;flex:none;font:11px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px;
+  padding:6px 12px;border:1px solid rgba(53,214,255,.18);background:rgba(53,214,255,.04)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.dot.on{background:var(--cyan);box-shadow:0 0 10px var(--cyan);animation:blink 1.6s steps(1) infinite} .dot.warn{background:var(--amber);box-shadow:0 0 10px var(--amber)}
+#clockWrap{margin-left:auto;display:flex;align-items:center;gap:14px}
+#clockRing{width:46px;height:46px}
+#clock{font:300 30px var(--disp);letter-spacing:.12em;color:#eafcff;text-shadow:0 0 12px rgba(53,214,255,.6)}
+#date{font:10px var(--mono);color:var(--muted);letter-spacing:.28em;text-transform:uppercase;text-align:right}
+
+/* ---------- left ---------- */
+#left,#right{display:flex;flex-direction:column;gap:14px;min-height:0}
+#left{grid-area:left} #right{grid-area:right}
+.gauges{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.gauge{position:relative;aspect-ratio:1}
+.gauge canvas{position:absolute;inset:0;width:100%;height:100%}
+.gauge .v{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+.gauge b{font:300 28px var(--disp);color:#eafcff;text-shadow:0 0 10px rgba(53,214,255,.6)}
+.gauge small{font:9px var(--mono);letter-spacing:.28em;color:var(--muted)}
+#coresC,#spark,#radar,#diskC{width:100%;display:block}
+#coresC{height:54px;margin-top:6px} #spark{height:46px;margin-top:8px}
+.row{display:flex;justify-content:space-between;gap:10px;font:11.5px var(--mono);padding:6px 0;border-bottom:1px dashed rgba(53,214,255,.13)}
+.row span:first-child{color:var(--muted);letter-spacing:.16em;flex:none}
+.row span:last-child{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#diskC{height:74px}
+.grow{flex:1;min-height:0;display:flex;flex-direction:column}
+#hex{flex:1;min-height:40px;overflow:hidden;font:10.5px/1.5 var(--mono);color:rgba(127,231,255,.35);word-break:break-all}
+
+/* ---------- core ---------- */
+#core{grid-area:core;position:relative;min-height:0;overflow:hidden;cursor:pointer}
+#reactor{position:absolute;inset:0;width:100%;height:100%}
+#stateLbl{position:absolute;bottom:6px;left:0;right:0;text-align:center;font:12px var(--mono);letter-spacing:.6em;color:var(--cyan);
+  text-transform:uppercase;text-shadow:0 0 8px var(--cyan)}
+#stateLbl::before,#stateLbl::after{content:"";display:inline-block;width:60px;height:1px;background:var(--cyan);vertical-align:middle;margin:0 16px;opacity:.6}
+
+/* ---------- right ---------- */
+#radar{aspect-ratio:1;max-height:230px;margin:0 auto}
+.np{display:flex;align-items:center;gap:14px}
+.eq{display:flex;gap:3px;align-items:flex-end;height:28px;flex:none}
+.eq i{width:4px;height:4px;background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+.eq.on i{animation:eq .9s ease-in-out infinite}.eq.on i:nth-child(2){animation-delay:-.3s}.eq.on i:nth-child(3){animation-delay:-.6s}.eq.on i:nth-child(4){animation-delay:-.15s}.eq.on i:nth-child(5){animation-delay:-.45s}
+@keyframes eq{0%,100%{height:4px}50%{height:28px}}
+.npt{min-width:0}.npt b{display:block;font:600 14px var(--disp);color:#eafcff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.npt small{display:block;font:10.5px var(--mono);color:var(--muted);letter-spacing:.12em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#radar{max-height:190px}
+.qrow{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-top:10px}.qrow button{height:30px;padding:0;font:14px var(--disp);letter-spacing:0;clip-path:none}
+.chip[hidden]{display:none}
+#mems{overflow-y:auto;overflow-x:hidden;flex:1;padding-right:4px}
+.mem{position:relative;border-left:2px solid var(--cyan-dim);padding:7px 10px 7px 12px;margin-bottom:8px;font-size:12.5px;line-height:1.4;
+  background:linear-gradient(90deg,var(--faint),transparent);opacity:0;animation:slidein .5s forwards}
+@keyframes slidein{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
+.mem:hover{border-left-color:var(--cyan);background:linear-gradient(90deg,rgba(53,214,255,.2),transparent)}
+.mem i{display:flex;justify-content:space-between;font:9.5px var(--mono);font-style:normal;color:var(--amber);letter-spacing:.2em;text-transform:uppercase;margin-bottom:3px}
+.imp{display:inline-flex;gap:2px}.imp u{width:4px;height:8px;background:rgba(255,169,40,.2);text-decoration:none}.imp u.f{background:var(--amber);box-shadow:0 0 4px var(--amber)}
+
+/* ---------- chat ---------- */
+#chat{grid-area:chat;display:flex;flex-direction:column;min-height:0;padding-bottom:12px}
+#log{flex:1;overflow-y:auto;overflow-x:hidden;padding-right:6px;font-size:14px;line-height:1.5;mask-image:linear-gradient(180deg,transparent,#000 22px)}
+.m{margin:0 0 10px;white-space:pre-wrap;animation:slidein .35s forwards;opacity:0}
+.m .h{display:flex;gap:10px;font:10px var(--mono);letter-spacing:.3em;margin-bottom:2px}
+.m .h time{color:var(--muted);letter-spacing:.1em}
+.m.user{color:#9fc4d6} .m.user .h b{color:var(--muted);font-weight:400}
+.m.jarvis{color:#dff6ff;text-shadow:0 0 6px rgba(53,214,255,.25)} .m.jarvis .h b{color:var(--cyan);font-weight:400}
+.m.tool{color:var(--gold)} .m.tool .h b{color:var(--gold)} .m.err{color:#ff9a82} .m.err .h b{color:var(--amber);font-weight:400}
+.caret{display:inline-block;width:8px;height:15px;background:var(--cyan);vertical-align:-2px;margin-left:2px;animation:blink .8s steps(1) infinite;box-shadow:0 0 8px var(--cyan)}
+form{display:flex;gap:10px;margin-top:8px;align-items:stretch}
+.inwrap{flex:1;position:relative}
+.inwrap::before{content:">";position:absolute;left:12px;top:11px;font:600 15px var(--mono);color:var(--cyan);text-shadow:0 0 8px var(--cyan)}
+#q{width:100%;resize:none;height:44px;background:rgba(0,10,18,.75);color:var(--text);border:1px solid var(--line);
+  font:14px var(--disp);padding:12px 14px 12px 30px;outline:none;clip-path:polygon(12px 0,100% 0,100% 100%,0 100%,0 12px);transition:.2s}
+#q:focus{border-color:var(--cyan);box-shadow:inset 0 0 24px rgba(53,214,255,.18)}
+button{font:600 12px var(--mono);letter-spacing:.28em;text-transform:uppercase;padding:0 24px;cursor:pointer;transition:.15s;
+  background:rgba(53,214,255,.12);color:var(--cyan);border:1px solid var(--cyan);clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%)}
+button:hover{background:rgba(53,214,255,.3);color:#fff;text-shadow:0 0 8px var(--cyan)}
+#mic.on{background:var(--cyan);color:#001018;box-shadow:0 0 18px var(--cyan)}
+#stop{color:var(--amber);border-color:var(--amber);background:rgba(255,169,40,.08)} #stop:hover{background:rgba(255,169,40,.25)}
+::-webkit-scrollbar{width:5px} ::-webkit-scrollbar-thumb{background:var(--cyan-dim)}
+
+/* ---------- boot ---------- */
+#boot{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:var(--bg);transition:opacity .8s}
+#boot.gone{opacity:0;pointer-events:none}
+#bootLog{position:absolute;left:36px;bottom:32px;font:12px/1.7 var(--mono);color:var(--cyan2);letter-spacing:.08em;text-shadow:0 0 6px rgba(53,214,255,.5)}
+#bootLog .ok{color:var(--gold)}
+#bootTitle{font:700 44px var(--disp);letter-spacing:.8em;color:#eafcff;text-shadow:0 0 20px var(--cyan),0 0 60px var(--cyan);margin-left:.8em}
+#bootBar{width:420px;height:2px;background:rgba(53,214,255,.15);margin:22px auto 0;position:relative;overflow:hidden}
+#bootBar i{position:absolute;inset:0;width:0;background:var(--cyan);box-shadow:0 0 12px var(--cyan);transition:width .3s}
+#bootSub{font:11px var(--mono);letter-spacing:.5em;color:var(--muted);text-align:center;margin-top:14px}
+.modal,#setModal{position:fixed;inset:0;z-index:80;display:grid;place-items:center;background:rgba(0,4,8,.72);backdrop-filter:blur(4px)}
+.modal[hidden],#setModal[hidden]{display:none}
+.clipp{width:min(1500px,96vw);height:min(900px,92vh);display:flex;flex-direction:column;opacity:1;transform:none;filter:none;animation:holo .5s forwards}
+.cgrid{flex:1;min-height:0;display:grid;grid-template-columns:1fr 360px;gap:18px}
+.cleft{display:flex;flex-direction:column;min-height:0;gap:10px}.cright{display:flex;flex-direction:column;gap:8px;min-height:0}
+.stage{position:relative;flex:1;min-height:0;background:#000;border:1px solid var(--line);overflow:hidden}
+#cVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#cFrame{position:absolute;border:2px solid var(--cyan);box-shadow:0 0 0 9999px rgba(0,0,0,.55),0 0 14px var(--cyan);pointer-events:none;display:none}
+#cCam{position:absolute;border:2px dashed var(--amber);background:rgba(255,169,40,.12);cursor:move;display:none}
+#cCam::after{content:"FACECAM";position:absolute;left:4px;top:2px;font:9px var(--mono);color:var(--amber);letter-spacing:.2em}
+.empty[hidden]{display:none}.empty{position:absolute;inset:0;display:grid;place-content:center;gap:10px;text-align:center}.empty small{font:11px var(--mono);color:var(--muted);letter-spacing:.2em}
+.tl{position:relative;height:34px;background:repeating-linear-gradient(90deg,rgba(53,214,255,.12) 0 1px,transparent 1px 40px),rgba(0,10,18,.8);border:1px solid var(--line);cursor:pointer}
+#cSel{position:absolute;top:0;bottom:0;background:rgba(53,214,255,.22);border-left:2px solid var(--gold);border-right:2px solid var(--gold)}
+#cHead{position:absolute;top:-4px;bottom:-4px;width:2px;background:#fff;box-shadow:0 0 8px var(--cyan)}
+.crow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.crow button{height:34px;padding:0 14px}
+.tc{font:13px var(--mono);color:#eafcff;letter-spacing:.08em}.tc.dim{color:var(--muted);font-size:11px}
+.lbl{font:600 11px var(--mono);letter-spacing:.3em;color:var(--cyan);text-transform:uppercase;margin-top:6px;display:flex;justify-content:space-between}
+.chk{font:10px var(--mono);letter-spacing:.1em;color:var(--muted)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.seg button{height:38px;padding:0 6px;font-size:10px;letter-spacing:.12em}
+.seg button.on{background:var(--cyan);color:#001018}
+.hint{font:10.5px var(--mono);color:var(--muted);letter-spacing:.08em}
+.empty input{background:rgba(0,10,18,.8);color:var(--text);border:1px solid var(--line);padding:9px 10px;font:13px var(--disp);outline:none;min-width:320px}
+.tin{flex:1;min-width:0;background:rgba(0,10,18,.8);color:var(--text);border:1px solid var(--line);padding:8px 10px;font:13px var(--disp);outline:none}
+.mk{position:absolute;top:0;bottom:0;width:3px;background:var(--gold);box-shadow:0 0 8px var(--gold);cursor:pointer}
+#cMoments{max-height:190px;overflow-y:auto;overflow-x:hidden}
+.mom{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;padding:6px 8px;margin-bottom:4px;border-left:2px solid var(--gold);background:linear-gradient(90deg,rgba(255,210,63,.12),transparent);cursor:pointer}
+.mom:hover{background:linear-gradient(90deg,rgba(255,210,63,.25),transparent)}.mom b{font:600 16px var(--disp);color:var(--gold)}
+.mom span{font:11px var(--mono);color:var(--text);line-height:1.35}.mom em{font:10px var(--mono);font-style:normal;color:var(--muted)}
+#cCaps{flex:1;min-height:80px;overflow-y:auto;overflow-x:hidden;border:1px solid var(--line);background:rgba(0,10,18,.6);padding:6px}
+.cap{display:grid;grid-template-columns:62px 62px 1fr 22px;gap:4px;margin-bottom:4px}
+.cap input{background:transparent;border:1px solid rgba(53,214,255,.2);color:var(--text);font:12px var(--mono);padding:4px}
+.cap input.t{color:var(--muted)} .cap button{padding:0;height:auto;font-size:11px;clip-path:none}
+.bar{height:6px;background:rgba(53,214,255,.12);position:relative}.bar i{position:absolute;inset:0;width:0;background:var(--cyan);box-shadow:0 0 10px var(--cyan);transition:width .2s}
+.setp{max-height:90vh;overflow-y:auto;width:min(760px,94vw);opacity:1;transform:none;filter:none;animation:holo .5s forwards}
+.srow{display:grid;grid-template-columns:170px 1fr auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px dashed rgba(53,214,255,.13)}
+.srow label{font:11px var(--mono);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+.srow small{font:10.5px var(--mono);color:var(--muted);letter-spacing:.08em}
+.srow input{background:rgba(0,10,18,.8);color:var(--text);border:1px solid var(--line);padding:9px 10px;font:13px var(--disp);outline:none}
+.srow input:focus{border-color:var(--cyan)}
+.srow button{height:34px;padding:0 16px}
+body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)} body.private .chip:has(#netChip),body.private #host{visibility:hidden}
+@media (max-width:1500px){#top{gap:12px}.chip{padding:6px 9px;letter-spacing:.1em}.chip:has(#netChip){display:none}.brand small{display:none}}
+@media (max-width:1300px){.chip:has(#memChip){display:none}#clock{font-size:24px}}
+@media (max-width:1150px){body{grid-template-columns:230px 1fr 250px}}
+</style></head>
+<body>
+<canvas id="bg"></canvas>
+<canvas id="fx"></canvas>
+
+<div id="boot"><div><div id="bootTitle">J.A.R.V.I.S.</div><div id="bootBar"><i></i></div><div id="bootSub">JUST A RATHER VERY INTELLIGENT SYSTEM</div></div><div id="bootLog"></div></div>
+
+<header id="top">
+  <div class="brand">J.A.R.V.I.S.<small>MARK III · STARK INTERFACE</small></div>
+  <div class="chip"><i class="dot" id="linkDot"></i><span id="link">LINKING</span></div>
+  <div class="chip"><i class="dot on"></i><span id="memChip">MEMORY —</span></div>
+  <div class="chip" id="voiceChip" style="cursor:pointer" title="Toggle voice"><i class="dot" id="voiceDot"></i><span id="voiceLbl">VOICE —</span></div>
+  <div class="chip" id="hfChip" style="cursor:pointer" title="Hands-free: say &quot;Jarvis ...&quot;"><i class="dot" id="hfDot"></i><span id="hfLbl">HANDS-FREE OFF</span></div>
+  <div class="chip"><i class="dot on"></i><span id="netChip">NET —</span></div>
+  <div class="chip" id="liveChip" hidden title=""><i class="dot" style="background:#ff4d5e;box-shadow:0 0 10px #ff4d5e"></i><span>LIVE</span></div>
+  <div class="chip" id="clipChip" style="cursor:pointer" title="Clip Studio"><i class="dot on"></i><span>CLIPS</span></div>
+  <div class="chip" id="setChip" style="cursor:pointer" title="Settings"><i class="dot on"></i><span>SETTINGS</span></div>
+  <div id="clockWrap"><div><div id="clock">--:--:--</div><div id="date"></div></div><canvas id="clockRing"></canvas></div>
+</header>
+
+<section id="left">
+  <div class="panel" style="--d:.35s"><div class="scan"></div>
+    <div class="ptitle">Core Telemetry<span id="host"></span></div>
+    <div class="gauges">
+      <div class="gauge"><canvas id="gCpu"></canvas><div class="v"><b id="cpuV">0</b><small>CPU %</small></div></div>
+      <div class="gauge"><canvas id="gMem"></canvas><div class="v"><b id="memV">0</b><small>RAM %</small></div></div>
+    </div>
+    <canvas id="coresC"></canvas>
+    <canvas id="spark"></canvas>
+  </div>
+  <div class="panel" style="--d:.5s"><div class="scan"></div>
+    <div class="ptitle">Storage Array</div>
+    <canvas id="diskC"></canvas>
+  </div>
+  <div class="panel grow" style="--d:.65s"><div class="scan"></div>
+    <div class="ptitle">Systems</div>
+    <div class="row"><span>UPTIME</span><span id="up">—</span></div>
+    <div class="row"><span>PROCESSOR</span><span id="model">—</span></div>
+    <div class="row"><span>RAM</span><span id="ram">—</span></div>
+    <div class="row"><span>BRAIN</span><span id="brain">—</span></div>
+    <div class="row"><span>SESSION</span><span id="sess">IDLE</span></div>
+    <div id="hex"></div>
+  </div>
+</section>
+
+<section id="core"><canvas id="reactor"></canvas><div id="stateLbl">Standing by</div></section>
+
+<section id="right">
+  <div class="panel" style="--d:.45s"><div class="scan"></div>
+    <div class="ptitle">Threat Radar<span>CORE LOAD</span></div>
+    <canvas id="radar"></canvas>
+  </div>
+  <div class="panel" style="--d:.52s" id="npPanel"><div class="scan"></div>
+    <div class="ptitle">Now Playing<span id="npApp">—</span></div>
+    <div class="np"><div class="eq" id="npEq"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="npt"><b id="npTitle">Nothing playing</b><small id="npArtist"></small></div></div>
+    <div class="qrow"><button type="button" data-q="media previous" title="Previous">&#x23EE;</button><button type="button" data-q="media play" title="Play / pause">&#x23EF;</button><button type="button" data-q="media next" title="Next">&#x23ED;</button>
+      <button type="button" data-q="volume down" title="Volume down">&#x2212;</button><button type="button" data-q="volume up" title="Volume up">+</button>
+      <button type="button" data-q="lights on" title="Lights on">&#x2600;</button><button type="button" data-q="lights off" title="Lights off">&#x263E;</button></div>
+  </div>
+  <div class="panel grow" style="--d:.6s"><div class="scan"></div>
+    <div class="ptitle">Memory Core<span id="memCount"></span></div>
+    <div id="mems"></div>
+  </div>
+</section>
+
+<section id="chat" class="panel" style="--d:.8s"><div class="scan"></div>
+  <div class="ptitle">Comms Channel<em>ENTER send · CTRL+SHIFT+SPACE talk · ESC abort</em></div>
+  <div id="log"></div>
+  <form id="f"><div class="inwrap"><textarea id="q" placeholder="Talk to me, boss"></textarea></div><button type="button" id="mic" title="Talk (Ctrl+Shift+Space)">Mic</button><button>Send</button><button type="button" id="stop">Stop</button></form>
+</section>
+<div id="clipModal" class="modal" hidden><div class="panel clipp">
+  <div class="ptitle">Clip Studio<span id="cFile">no recording loaded</span></div>
+  <div class="cgrid">
+    <div class="cleft">
+      <div class="stage" id="cStage"><video id="cVideo" preload="metadata"></video><div id="cFrame"></div><div id="cCam"></div>
+        <div class="empty" id="cEmpty"><button type="button" id="cPick">Load recording</button><small>MP4, MKV, MOV, WEBM</small>
+          <div class="crow"><input id="cUrl" placeholder="or paste a Twitch / YouTube link"><button type="button" id="cGet">Fetch</button></div>
+          <small>Long VOD? Add a range, e.g. 1:02:10-1:05:00</small><input id="cRangeIn" placeholder="optional time range"></div></div>
+      <div class="tl" id="cTl"><div id="cSel"></div><div id="cHead"></div></div>
+      <div class="crow"><button type="button" id="cPlay">Play</button><button type="button" id="cIn">Set In</button><button type="button" id="cOut">Set Out</button>
+        <span class="tc" id="cTime">00:00.0</span><span class="tc dim" id="cRange">in 00:00.0 · out 00:00.0 · 0.0s</span><button type="button" id="cPick2">Load another</button></div>
+    </div>
+    <div class="cright">
+      <div class="lbl">Best moments</div>
+      <div class="crow"><button type="button" id="cFind">Find best moments</button></div>
+      <div id="cMoments"></div>
+      <div class="lbl">Layout · 9:16</div>
+      <div class="seg" id="cLayouts"><button type="button" data-l="crop">Centre crop</button><button type="button" data-l="blur" class="on">Blur fill</button><button type="button" data-l="split">Facecam split</button></div>
+      <small class="hint" id="cCamHint" hidden>Drag the orange box onto your facecam.</small>
+      <div class="lbl">Captions <label class="chk"><input type="checkbox" id="cBurn" checked> burn in</label></div>
+      <div class="crow"><button type="button" id="cGen">Generate from speech</button><button type="button" id="cAdd">Add line</button></div>
+      <div id="cCaps"></div>
+      <div class="lbl">Thumbnail · 1280x720</div>
+      <div class="crow"><input id="cThumbTitle" class="tin" placeholder="title, e.g. CLUTCH 1V4"><button type="button" id="cThumb">Make from this frame</button></div>
+      <div class="lbl">Export</div>
+      <div class="crow"><button type="button" id="cExport">Export clip</button><button type="button" id="cReveal" hidden>Show in folder</button></div>
+      <div class="bar"><i id="cBar"></i></div><small class="hint" id="cMsg">Saves to Desktop \ Jarvis Clips</small>
+    </div>
+  </div>
+</div></div>
+<div id="setModal" hidden><div class="panel setp">
+  <div class="ptitle">Settings<span>ESC closes</span></div>
+  <div class="srow"><label>Voice</label><button type="button" id="sVoice"></button><small id="sEngine"></small></div>
+  <div class="srow"><label>Hands-free</label><button type="button" id="sHf"></button><small>say "Jarvis ..."</small></div>
+  <div class="srow"><label>Push-to-talk</label><button type="button" id="sPtt"></button><input id="sPttKey" placeholder="Home" title="Click, then press a key"><small>hold to talk, release to send</small></div>
+  <div class="srow"><label>Home city</label><input id="sCity" placeholder="e.g. Manchester"><small>weather and briefings</small></div>
+  <div class="srow"><label>ElevenLabs voice ID</label><input id="sVoiceId" placeholder="voice id"></div>
+  <div class="srow"><label>ElevenLabs API key</label><input id="sKey" type="password" autocomplete="off" placeholder="paste to set or replace"><small id="sKeyState"></small></div>
+  <div class="srow"><label></label><button type="button" id="sSave">Save</button><button type="button" id="sClearKey">Remove key</button><small id="sMsg"></small></div>
+  <div class="srow"><label>Spotify client ID</label><input id="sSpId" placeholder="from developer.spotify.com"><button type="button" id="sSpConn">Connect</button></div>
+  <div class="srow"><label></label><small id="sSpState"></small></div>
+  <div class="srow"><label>Twitch client ID</label><input id="sTwId" placeholder="from dev.twitch.tv/console"></div>
+  <div class="srow"><label>Twitch client secret</label><input id="sTwSecret" type="password" autocomplete="off" placeholder="paste to set or replace"><button type="button" id="sTwConn">Connect</button></div>
+  <div class="srow"><label></label><small id="sTwState"></small></div>
+  <div class="srow"><label>Nanoleaf IP</label><input id="sNlIp" placeholder="e.g. 192.168.0.50"><button type="button" id="sNlPair">Pair</button></div>
+  <div class="srow"><label></label><small id="sNlState"></small></div>
+  <div class="srow"><label>Discord keybinds</label><input id="sDcMute" placeholder="mute e.g. ctrl+shift+m"><input id="sDcDeaf" placeholder="deafen e.g. ctrl+shift+d"></div>
+  <div class="srow"><label></label><input id="sDcLeave" placeholder="leave call e.g. ctrl+shift+l"><small>set the same in Discord > Keybinds</small></div>
+  <div class="srow"><label>Shortcuts</label><small>Ctrl+Shift+Space talk · Enter send · Esc stop</small></div>
+</div></div>
+<script src="hud.js"></script>
+<script src="clip.js"></script>
+</body></html>

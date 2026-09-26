@@ -1,23 +1,10 @@
-# Dependencies
-node_modules/
-
-# Build output
-dist/
-*.tsbuildinfo
-
-# Local runtime data (SQLite db, auth token) - never commit this
-.data/
-
-# Secrets - never commit these; see docs/architecture.md on Windows
-# Credential Manager / DPAPI for the real storage plan
-.env
-.env.local
-*.pem
-*.key
-
-# Editor/OS cruft
-.DS_Store
-.vscode/
 *.log
-__pycache__/
-*.pyc
+.env*
+voices/
+piper_runtime/
+node_modules/
+dist/
+build/*
+!build/icon.png
+backups/
+temp_screenshots/
