@@ -6,6 +6,7 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
+    "postinstall": "node node_modules/electron/install.js",
     "test": "node --test tests/*.test.js"
   },
   "devDependencies": {

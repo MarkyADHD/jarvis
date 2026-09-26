@@ -26,7 +26,7 @@ app.on('second-instance', show);
 app.whenReady().then(() => {
   db = store.create(path.join(app.getPath('userData'), 'data'));
   // Legacy Python memory locations (read-only import).
-  db.importLegacy(['E:/JarvisMemory/jarvis_long_memory_v2.jsonl', 'C:/AI-Agent/JarvisMemory/jarvis_long_memory_v2.jsonl']);
+  db.importLegacy(['E:/JarvisMemory/jarvis_long_memory_v2.jsonl', 'C:/AI-Agent/JarvisMemory/jarvis_long_memory_v2.jsonl', 'E:/JarvisMemory/jarvis_memory.jsonl']);
 
   let reply = '';
   claude.on('delta', t => { reply += t; win?.webContents.send('delta', t); });
