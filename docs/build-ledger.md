@@ -4,6 +4,7 @@ States: implemented-and-tested, implemented-but-unverified, blocked, planned. Mo
 
 | Requirement | State | Evidence |
 |---|---|---|
+| Command-centre UI: voice core, systems, active work, shortcuts, transcript, stream-privacy blur, spoken replies (OS voice), London clock | implemented-but-unverified | Screenshots with stub data; not yet run with live Claude on Windows |
 | Electron shell, one window, tray, single instance | implemented-but-unverified | Not launched on Windows yet (built in a Linux cloud container) |
 | Claude via existing `claude` login, warm stream-json session, persona | implemented-and-tested | Live request from the container streamed "Yo, boss, good to hear from you." |
 | Streaming text to UI, Stop (button, Esc, tray) with resume | implemented-but-unverified | Parser unit test (mocked transcript); cancel kills process tree, next message resumes session |
