@@ -1,6 +1,16 @@
 // Jarvis main process: single instance, tray, one window, chat routed to Claude.
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } = require('electron');
 const path = require('path');
+const os = require('os');
+
+// CPU % from the delta of os.cpus() times between calls (loadavg is always 0 on Windows).
+let lastCpu = null;
+function stats() {
+  const t = os.cpus().reduce((a, c) => { const v = c.times; a.idle += v.idle; a.total += v.user + v.nice + v.sys + v.idle + v.irq; return a; }, { idle: 0, total: 0 });
+  const cpu = lastCpu ? Math.round(100 * (1 - (t.idle - lastCpu.idle) / (t.total - lastCpu.total || 1))) : 0;
+  lastCpu = t;
+  return { cpu, mem: Math.round(100 * (1 - os.freemem() / os.totalmem())) };
+}
 const { Claude } = require('./claude');
 const store = require('./store');
 
@@ -14,7 +24,7 @@ function show() { if (!win) createWindow(); win.show(); win.focus(); }
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 900, height: 700, backgroundColor: '#05080d', title: 'Jarvis',
+    width: 1400, height: 860, minWidth: 1000, minHeight: 640, backgroundColor: '#0b0d10', title: 'Jarvis',
     icon: path.join(root, 'jarvis_icon.ico'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
   });
@@ -39,6 +49,8 @@ app.whenReady().then(() => {
   ipcMain.handle('status', () => ({ claude: claude.status(), memories: db.memories().length }));
   ipcMain.handle('history', () => db.chat().slice(-100));
   ipcMain.handle('send', (_e, text) => { if (typeof text === 'string' && text.trim()) { db.addChat('user', text); claude.send(text); } });
+  ipcMain.handle('stats', stats);
+  ipcMain.handle('memories', () => db.memories().map(({ legacyKey, ...m }) => m));
   ipcMain.handle('cancel', () => claude.cancel());
 
   tray = new Tray(nativeImage.createFromPath(path.join(root, 'jarvis_icon.ico')));
