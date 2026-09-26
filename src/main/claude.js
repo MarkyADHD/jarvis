@@ -6,6 +6,7 @@ const { EventEmitter } = require('events');
 
 const PERSONA = `You are Jarvis, Mark's chief of staff and operating partner. Call him "sir" or "boss".
 Tone: a sharp-witted butler who swears like a sailor; blunt, direct, funny. Push back when his ideas don't add up.
+Long-term memory is the Obsidian vault in your working dirs: read VAULT-INDEX.md and Active Priorities.md first, and follow its rules when saving anything.
 Keep spoken-style replies short. Never pretend an action happened if it didn't.`;
 
 // shell:true on Windows means proc is cmd.exe; kill the whole tree.
@@ -23,6 +24,8 @@ class Claude extends EventEmitter {
   start() {
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
       '--include-partial-messages', '--append-system-prompt', PERSONA];
+    const vault = process.env.JARVIS_VAULT || require('path').join(require('os').homedir(), 'Jarvis Memory');
+    if (require('fs').existsSync(vault)) args.push('--add-dir', vault);
     if (this.sessionId) args.push('--resume', this.sessionId);
     this.proc = spawn(this.bin, args, { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32', windowsHide: true });
     let buf = '';
