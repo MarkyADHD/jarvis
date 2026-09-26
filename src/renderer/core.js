@@ -117,6 +117,19 @@
       for (let i = 0; i < 36; i++) { const a = i / 36 * TAU; c.fillStyle = cy(.15); c.fillRect(Math.cos(a) * R * .47 - 2, Math.sin(a) * R * .47 - 2, 4, 4); }
     });
 
+    // radar sweep across the inner disc
+    const sw = t * 1.6 % TAU, sg = c.createConicGradient ? c.createConicGradient(sw - .9, 0, 0) : null;
+    if (sg) {
+      sg.addColorStop(0, 'rgba(63,214,255,0)'); sg.addColorStop(.14, `rgba(63,214,255,${.12 + e * .12})`); sg.addColorStop(.145, 'rgba(63,214,255,0)');
+      c.fillStyle = sg; c.beginPath(); c.arc(0, 0, R * .55, 0, TAU); c.fill();
+    }
+    // curved micro text riding the outer ring
+    spin(-t * .08, () => {
+      const msg = ' JUST A RATHER VERY INTELLIGENT SYSTEM  //  CORE ' + (e > .3 ? 'ACTIVE' : 'STANDBY') + '  //  MARKYADHD  //', r = R * .945;
+      c.font = `500 ${Math.round(R * .028)}px "Bahnschrift","Segoe UI",sans-serif`; c.fillStyle = cy(.55); c.textAlign = 'center';
+      let a = rad(100);
+      for (const ch of msg) { c.save(); c.rotate(a); c.translate(0, -r); c.fillText(ch, 0, 0); c.restore(); a += (c.measureText(ch).width + R * .004) / r; }
+    });
     c.restore();
     // wordmark
     c.globalAlpha = L(6); c.save(); c.rotate((1 - L(6)) * 1.5);

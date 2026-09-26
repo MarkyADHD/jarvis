@@ -62,7 +62,9 @@
   .convo .cap{padding:0 20px}
   #log{flex:1;overflow:auto;padding:12px 20px 20px;display:flex;flex-direction:column;gap:12px;scrollbar-width:thin;scrollbar-color:#233 transparent}
   .m{white-space:pre-wrap;padding:10px 14px;border-radius:14px;max-width:92%}
-  .user{align-self:flex-end;background:rgba(255,255,255,.06)} .jarvis{background:rgba(63,214,255,.07);border:1px solid rgba(63,214,255,.14)}
+  .m{position:relative} .m time{display:block;font-size:10px;letter-spacing:.15em;color:var(--dim);margin-bottom:3px}
+  .user{align-self:flex-end;background:rgba(255,255,255,.05);border-right:2px solid var(--amber);border-radius:14px 4px 4px 14px}
+  .jarvis{background:linear-gradient(90deg,rgba(63,214,255,.1),rgba(63,214,255,.03));border-left:2px solid var(--teal);border-radius:4px 14px 14px 4px;box-shadow:inset 0 0 20px rgba(63,214,255,.04)}
   .err{color:var(--warn);font-size:12px}
   .cap em{font-style:normal;color:var(--teal);margin-right:10px}
   .gauges{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
@@ -96,6 +98,7 @@
   <span class="chip" id="link"><i></i><span>Checking brain</span></span>
   <button class="chip" id="voiceBtn" aria-pressed="true"><i></i><span>Voice on</span></button>
   <button class="chip" id="streamBtn" aria-pressed="false" title="Blurs private panels for stream capture"><i></i><span>Stream mode off</span></button>
+  <span class="chip" id="uptime"><i></i><span>Uptime 00:00:00</span></span>
   <div class="time"><b id="clock">--:--</b><small id="date"></small></div>
 </header>
 <nav aria-label="Main">

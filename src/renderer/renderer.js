@@ -28,7 +28,12 @@ const setMode = m => {
 let lastAsk = '';
 
 // ---- Chat
-const add = (cls, text) => { const d = document.createElement('div'); d.className = 'm ' + cls; d.textContent = text; log.append(d); log.scrollTop = 1e9; return d; };
+const add = (cls, text, at = new Date()) => {
+  const d = document.createElement('div'); d.className = 'm ' + cls;
+  if (cls !== 'err') d.append(Object.assign(document.createElement('time'), { textContent: (cls === 'user' ? 'YOU' : 'JARVIS') + ' · ' + new Date(at).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' }) }));
+  const body = document.createElement('span'); body.textContent = text; d.append(body); d.body = body;
+  log.append(d); log.scrollTop = 1e9; return d;
+};
 const caption = text => { $('caption').textContent = text; };
 
 jarvis.status().then(s => {
@@ -37,15 +42,15 @@ jarvis.status().then(s => {
   $('conn').textContent = ok ? `Connected · ${s.claude.version}` : s.claude.error;
   $('memCount').textContent = s.memories;
 });
-jarvis.history().then(h => h.forEach(m => add(m.role, m.text)));
+jarvis.history().then(h => h.forEach(m => add(m.role, m.text, m.at)));
 jarvis.onDelta(x => {
   if (mode !== 'responding') setMode('responding');
-  live ??= add('jarvis', ''); live.textContent += x; log.scrollTop = 1e9; caption(live.textContent.slice(-160));
+  live ??= add('jarvis', ''); live.body.textContent += x; log.scrollTop = 1e9; caption(live.body.textContent.slice(-160));
 });
 jarvis.onDone(r => {
   if (!live && r.text) add('jarvis', r.text);
   if (r.error) add('err', r.error === 'cancelled' ? 'Stopped.' : r.error);
-  const said = live?.textContent || r.text; live = null;
+  const said = live?.body.textContent || r.text; live = null;
   if (said && !r.error) { caption(said.split(/(?<=[.!?])\s/)[0]); speak(said); } else setMode('idle');
 });
 
@@ -88,6 +93,9 @@ const tick = async () => {
   $('cpu').textContent = s.cpu + '%'; $('cpuArc').style.strokeDasharray = `${s.cpu * 1.98} 264`;
   $('ram').textContent = s.mem + '%'; $('ramArc').style.strokeDasharray = `${s.mem * 1.98} 264`;
 };
+const started = Date.now();
+setInterval(() => { const s = (Date.now() - started) / 1000 | 0; $('uptime').lastChild.textContent = 'Uptime ' + [s / 3600, s / 60 % 60, s % 60].map(n => String(n | 0).padStart(2, '0')).join(':'); }, 1000);
+$('uptime').classList.add('ok');
 tick(); setInterval(tick, 2000);
 
 // ---- Ambient background: slow drifting motes and a faint hex lattice.
