@@ -118,6 +118,7 @@ class Speech {
   constructor(root, dataDir) { this.eleven = new Eleven(root, dataDir); this.piper = new Voice(root); this.gen = 0; }
   engine() { return this.eleven.ready() ? 'elevenlabs' : this.piper.available() ? 'piper' : 'none'; }
   async speak(text) {
+    text = String(text).replace(/\s*[—–]\s*/g, ', ');
     const gen = this.gen;
     let buf = null, engine = 'elevenlabs';
     if (this.eleven.ready()) { try { buf = await this.eleven.speak(text); } catch (e) { buf = null; console.warn('[jarvis] ElevenLabs failed, using local voice:', e.message); this.onError?.(e.message); } }

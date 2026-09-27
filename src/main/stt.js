@@ -3,7 +3,7 @@
 const path = require('path');
 const os = require('os');
 
-const MODEL = process.env.JARVIS_STT_MODEL || 'Xenova/whisper-base.en';   // ~0.6s per utterance warm on a modern CPU
+const MODEL = process.env.JARVIS_STT_MODEL || 'Xenova/whisper-small.en';   // small handles accents (British) far better than base; ~1-2s warm on CPU
 let asrP = null;
 
 function load() {

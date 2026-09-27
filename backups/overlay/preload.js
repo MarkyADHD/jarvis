@@ -21,9 +21,6 @@ contextBridge.exposeInMainWorld('jarvis', {
     pick: () => ipcRenderer.invoke('clips:pick'),
     caption: o => ipcRenderer.invoke('clips:caption', o),
     export: o => ipcRenderer.invoke('clips:export', o),
-    facecam: o => ipcRenderer.invoke('clips:facecam', o),
-    layouts: () => ipcRenderer.invoke('layouts:get'),
-    saveLayouts: l => ipcRenderer.invoke('layouts:save', l),
     reveal: f => ipcRenderer.invoke('clips:reveal', f),
     moments: f => ipcRenderer.invoke('clips:moments', f),
     thumb: o => ipcRenderer.invoke('clips:thumb', o),
@@ -38,7 +35,5 @@ contextBridge.exposeInMainWorld('jarvis', {
   onAnim: f => ipcRenderer.on('anim', (_e, a) => f(a)),
   onPttHold: f => ipcRenderer.on('ptt-hold', () => f()),
   onDelta: f => ipcRenderer.on('delta', (_e, t) => f(t)),
-  core: c => ipcRenderer.send('core', c),
-  onCore: f => ipcRenderer.on('core', (_e, c) => f(c)),
   onDone: f => ipcRenderer.on('done', (_e, r) => f(r)),
 });

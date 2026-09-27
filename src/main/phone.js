@@ -1,72 +1,56 @@
-// Phone access: a tiny chat page for talking to Jarvis from a phone over Tailscale or the LAN.
-// Port of the old Python jarvis_remote_chat.py (text only). Never port-forward this port:
-// requests from public addresses are refused, and every API call needs the random token.
+// Phone access: serves the real HUD (src/renderer) to devices on Marky's tailnet, with remote.js standing in
+// for preload.js. No token (his call, 2026-09-27): the gate is Tailscale itself. Only Tailscale addresses
+// (100.64.0.0/10, fd7a:115c:a1e0::/48) or `tailscale serve` (loopback + its Tailscale-User-Login header) get in;
+// home LAN and anything else is refused. Never port-forward this port.
+// ponytail: a local process could forge the serve header; add a token back if that ever matters.
 const http = require('http');
 const fs = require('fs');
-const crypto = require('crypto');
+const path = require('path');
 
 const PORT = 8792;
+const RENDERER = path.join(__dirname, '..', 'renderer');
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
-// Loopback, RFC1918 LAN, Tailscale's CGNAT range 100.64.0.0/10, IPv6 ULA (Tailscale fd7a:...).
-function privateAddr(ip = '') {
+function allowed(ip = '', headers = {}) {
   ip = ip.replace(/^::ffff:/, '');
-  if (ip === '::1' || /^127\./.test(ip) || /^10\./.test(ip) || /^192\.168\./.test(ip)) return true;
-  let m = ip.match(/^172\.(\d+)\./); if (m) return +m[1] >= 16 && +m[1] <= 31;
-  m = ip.match(/^100\.(\d+)\./); if (m) return +m[1] >= 64 && +m[1] <= 127;
-  return /^f[cd]/i.test(ip);
+  const m = ip.match(/^100\.(\d+)\./);
+  if (m) return +m[1] >= 64 && +m[1] <= 127;
+  if (/^fd7a:115c:a1e0:/i.test(ip)) return true;
+  return (ip === '127.0.0.1' || ip === '::1') && !!headers['tailscale-user-login'];
 }
 
-function tokenOk(given, token) {
-  const a = Buffer.from(String(given || '')), b = Buffer.from(token);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-function loadToken(file) {
-  try { const t = fs.readFileSync(file, 'utf8').trim(); if (t) return t; } catch {}
-  const t = crypto.randomBytes(24).toString('base64url');
-  fs.writeFileSync(file, t, { mode: 0o600 });
-  return t;
-}
-
-const PAGE = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Jarvis</title><style>
-body{margin:0;font:16px system-ui;background:#05080d;color:#cfe8ff;display:flex;flex-direction:column;height:100vh}
-#log{flex:1;overflow:auto;padding:12px}.m{margin:8px 0;padding:10px 12px;border-radius:10px;white-space:pre-wrap}
-.u{background:#123;margin-left:20%}.j{background:#0b1a24;border:1px solid #1d4a66;margin-right:10%}
-form{display:flex;gap:8px;padding:10px;border-top:1px solid #1d4a66}input{flex:1;font:inherit;padding:10px;border-radius:8px;border:1px solid #1d4a66;background:#0b1a24;color:inherit}
-button{font:inherit;padding:10px 16px;border-radius:8px;border:0;background:#1d6fa5;color:#fff}</style></head><body>
-<div id="log"></div><form id="f"><input id="t" autocomplete="off" placeholder="Talk to Jarvis"><button>Send</button></form>
-<script>
-let tok; try{tok=localStorage.jt}catch{}
-if(!tok){tok=(prompt('Jarvis access token (Jarvis Phone Access.txt on the PC desktop):')||'').trim();try{localStorage.jt=tok}catch{}}
-const log=document.getElementById('log'),t=document.getElementById('t');
-function add(c,s){const d=document.createElement('div');d.className='m '+c;d.textContent=s;log.appendChild(d);log.scrollTop=1e9;return d}
-document.getElementById('f').onsubmit=async e=>{e.preventDefault();const s=t.value.trim();if(!s)return;t.value='';add('u',s);const d=add('j','…');
- try{const r=await fetch('/ask',{method:'POST',headers:{'content-type':'application/json','x-jarvis-token':tok},body:JSON.stringify({text:s})});
-  if(r.status==401){try{delete localStorage.jt}catch{};d.textContent='Wrong token. Reload to re-enter it.';return}
-  const j=await r.json();d.textContent=j.reply||j.error||'(no reply)'}catch(err){d.textContent='(error) '+err}};
-</script></body></html>`;
-
-// ask(text) -> Promise<string>.
-function start({ tokenFile, ask, port = PORT, log = () => {} }) {
-  const token = loadToken(tokenFile);
+// call(channel, args) -> Promise (the HUD's ipcMain handlers). Returns { srv, broadcast(channel, payload) }.
+function start({ call, port = PORT, log = () => {} }) {
+  const streams = new Set();
   const srv = http.createServer((req, res) => {
-    const send = (code, body, type = 'application/json') => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }); res.end(typeof body === 'string' ? body : JSON.stringify(body)); };
-    if (!privateAddr(req.socket.remoteAddress)) return send(403, { error: 'forbidden' });
-    if (req.method === 'GET' && req.url === '/') return send(200, PAGE, 'text/html; charset=utf-8');
-    if (req.method !== 'POST' || req.url !== '/ask') return send(404, { error: 'not found' });
-    if (!tokenOk(req.headers['x-jarvis-token'], token)) return send(401, { error: 'bad token' });
-    let body = '';
-    req.on('data', c => { body += c; if (body.length > 20000) req.destroy(); });
-    req.on('end', async () => {
-      let text; try { text = String(JSON.parse(body).text || '').trim(); } catch {}
-      if (!text) return send(400, { error: 'empty' });
-      try { send(200, { reply: await ask(text) }); } catch (e) { send(500, { error: e.message }); }
-    });
+    const send = (code, body, type = 'application/json') => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body ?? null)); };
+    if (!allowed(req.socket.remoteAddress, req.headers)) return send(403, { error: 'forbidden' });
+    const url = req.url.split('?')[0];
+    if (url === '/events') {
+      res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' });
+      res.write('\n'); streams.add(res); req.on('close', () => streams.delete(res)); return;
+    }
+    if (url === '/api') {
+      if (req.method !== 'POST') return send(405, { error: 'POST only' });
+      const chunks = []; let n = 0;
+      req.on('data', c => { n += c.length; if (n > 50e6) req.destroy(); else chunks.push(c); });
+      req.on('end', async () => {
+        let msg; try { msg = JSON.parse(Buffer.concat(chunks)); } catch {}
+        if (!msg || typeof msg.ch !== 'string') return send(400, { error: 'bad request' });
+        try { send(200, await call(msg.ch, Array.isArray(msg.args) ? msg.args : [])); } catch (e) { send(500, { error: e.message }); }
+      });
+      return;
+    }
+    const name = url === '/' ? 'hud.html' : path.basename(url);   // basename: no path traversal
+    let body; try { body = fs.readFileSync(path.join(RENDERER, name)); } catch { return send(404, 'not found', 'text/plain'); }
+    if (name === 'hud.html') body = String(body).replace('<script src="hud.js">', '<script src="remote.js"></script><script src="hud.js">')
+      .replace('<head>', '<head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-mobile-web-app-capable" content="yes">');
+    send(200, body, TYPES[path.extname(name)] || 'application/octet-stream');
   });
   srv.on('error', e => log(`phone: ${e.message}`));
   srv.listen(port, '0.0.0.0', () => log(`phone access on port ${port}`));
-  return { srv, token };
+  const broadcast = (ch, a) => { if (!streams.size) return; const line = JSON.stringify({ ch, a }) + '\n'; for (const s of streams) s.write(line); };
+  return { srv, broadcast };
 }
 
-module.exports = { start, privateAddr, tokenOk, PORT };
+module.exports = { start, allowed, PORT };

@@ -153,11 +153,7 @@ button:hover{background:rgba(53,214,255,.3);color:#fff;text-shadow:0 0 8px var(-
 .tc{font:13px var(--mono);color:#eafcff;letter-spacing:.08em}.tc.dim{color:var(--muted);font-size:11px}
 .lbl{font:600 11px var(--mono);letter-spacing:.3em;color:var(--cyan);text-transform:uppercase;margin-top:6px;display:flex;justify-content:space-between}
 .chk{font:10px var(--mono);letter-spacing:.1em;color:var(--muted)}
-#cCustom{display:flex;flex-direction:column;gap:8px}#cCustom[hidden]{display:none}.lwrap{display:flex;gap:10px}
-#cPrevWrap{position:relative;width:180px;height:320px;flex:none;border:1px solid var(--line)}#cPrev{display:block;width:180px;height:320px}
-.lctl{display:flex;flex-direction:column;gap:6px}.lctl button{height:30px;padding:0 10px;font-size:10px}.lctl label{font:11px var(--mono);color:var(--muted);display:flex;gap:6px;align-items:center}
-.lbox{position:absolute;border:2px solid;background:rgba(255,255,255,.06);cursor:move;font:9px var(--mono);color:#fff;padding:1px 3px;display:none;box-sizing:border-box}.lbox.sel{background:rgba(255,255,255,.16);border-style:dashed}
-.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.seg button{height:38px;padding:0 6px;font-size:10px;letter-spacing:.12em}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.seg button{height:38px;padding:0 6px;font-size:10px;letter-spacing:.12em}
 .seg button.on{background:var(--cyan);color:#001018}
 .hint{font:10.5px var(--mono);color:var(--muted);letter-spacing:.08em}
 .empty input{background:rgba(0,10,18,.8);color:var(--text);border:1px solid var(--line);padding:9px 10px;font:13px var(--disp);outline:none;min-width:320px}
@@ -183,15 +179,6 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
 @media (max-width:1500px){#top{gap:12px}.chip{padding:6px 9px;letter-spacing:.1em}.chip:has(#netChip){display:none}.brand small{display:none}}
 @media (max-width:1300px){.chip:has(#memChip){display:none}#clock{font-size:24px}}
 @media (max-width:1150px){body{grid-template-columns:230px 1fr 250px}}
-/* Phone (served by src/main/phone.js): one centred column, core + chat first, panels below, page scrolls. */
-@media (max-width:760px){
-  html,body{height:auto;overflow-x:hidden;overflow-y:auto}
-  body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 42vh 60vh auto auto;
-    grid-template-areas:"top" "core" "chat" "left" "right";gap:10px;padding:10px;max-width:560px;margin:0 auto;min-height:100vh}
-  #bootTitle{font-size:22px;letter-spacing:.4em}#bootBar{width:70vw}#bootSub{font-size:8px;letter-spacing:.25em}
-  #chat .ptitle{order:-2}#f{order:-1;margin-bottom:8px;flex-wrap:wrap}#f button{flex:1}#f .inwrap{order:1;flex-basis:100%}
-  #top{flex-wrap:wrap;gap:10px 16px;padding:8px 12px;justify-content:center}
-}
 </style></head>
 <body>
 <canvas id="bg"></canvas>
@@ -280,18 +267,9 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
       <div class="crow"><button type="button" id="cFind">Find best moments</button></div>
       <div id="cMoments"></div>
       <div class="lbl">Layout · 9:16</div>
-      <div class="seg" id="cLayouts"><button type="button" data-l="crop">Centre crop</button><button type="button" data-l="blur" class="on">Blur fill</button><button type="button" data-l="split">Facecam split</button><button type="button" data-l="custom">Custom</button></div>
+      <div class="seg" id="cLayouts"><button type="button" data-l="crop">Centre crop</button><button type="button" data-l="blur" class="on">Blur fill</button><button type="button" data-l="split">Facecam split</button></div>
       <small class="hint" id="cCamHint" hidden>Drag the orange box onto your facecam.</small>
-      <div id="cCustom" hidden>
-        <div class="crow"><select id="cLaySel"></select><input id="cLayName" class="tin" placeholder="layout name"><button type="button" id="cLaySave">Save</button><button type="button" id="cLayRm">Delete</button></div>
-        <div class="lwrap"><div id="cPrevWrap"><canvas id="cPrev" width="180" height="320"></canvas></div>
-          <div class="lctl"><button type="button" id="cLayAdd">+ Panel</button><button type="button" id="cLayCam">+ Facecam</button><button type="button" id="cLayDel">Remove panel</button><button type="button" id="cLayUp">Bring forward</button>
-            <label>Background <select id="cLayBg"><option value="blur">Blurred video</option><option value="black">Black</option></select></label>
-            <label>Captions <select id="cLayCap"><option value="0.2">Top</option><option value="0.5">Middle</option><option value="0.73">Lower</option><option value="0.88">Bottom</option></select></label>
-            <label class="chk"><input type="checkbox" id="cLayDef"> Use for auto clips</label>
-            <small class="hint">Drag the numbered boxes on the video to pick what's shown, and on the preview to place it. CAM boxes find your webcam by themselves.</small></div></div>
-      </div>
-      <div class="lbl">Captions <label class="chk"><input type="checkbox" id="cBurn" checked> burn in</label> <select id="cStyle" title="Caption style"><option value="bold">Bold pop</option><option value="pop">One word</option><option value="highlight">Highlight box</option><option value="boxed">Boxed</option><option value="classic">Classic</option></select></div>
+      <div class="lbl">Captions <label class="chk"><input type="checkbox" id="cBurn" checked> burn in</label></div>
       <div class="crow"><button type="button" id="cGen">Generate from speech</button><button type="button" id="cAdd">Add line</button></div>
       <div id="cCaps"></div>
       <div class="lbl">Thumbnail · 1280x720</div>
@@ -306,7 +284,6 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
   <div class="ptitle">Settings<span>ESC closes</span></div>
   <div class="srow"><label>Voice</label><button type="button" id="sVoice"></button><small id="sEngine"></small></div>
   <div class="srow"><label>Hands-free</label><button type="button" id="sHf"></button><small>say "Jarvis ..."</small></div>
-  <div class="srow"><label>Push-to-talk</label><button type="button" id="sPtt"></button><input id="sPttKey" placeholder="Home" title="Click, then press a key"><small>hold to talk, release to send</small></div>
   <div class="srow"><label>Home city</label><input id="sCity" placeholder="e.g. Manchester"><small>weather and briefings</small></div>
   <div class="srow"><label>ElevenLabs voice ID</label><input id="sVoiceId" placeholder="voice id"></div>
   <div class="srow"><label>ElevenLabs API key</label><input id="sKey" type="password" autocomplete="off" placeholder="paste to set or replace"><small id="sKeyState"></small></div>
@@ -324,5 +301,4 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
 </div></div>
 <script src="hud.js"></script>
 <script src="clip.js"></script>
-<script src="layouts.js"></script>
 </body></html>

@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 
 const W = 1080, H = 1920;
-const LAYOUTS = ['crop', 'blur', 'split'];
+const LAYOUTS = ['crop', 'blur', 'split', 'custom'];
 // StreamLadder-style captions: word-synced, the word being spoken pops. ASS colours are &HBBGGRR.
 // words = max words on screen; hi = active-word colour (null = no highlight); box = coloured box behind the active word.
 const CAPTION_STYLES = {
@@ -67,14 +67,20 @@ function probe(file) {
   }));
 }
 
+// Split's top panel height: the webcam's own shape (when detected) so it fills edge to edge; even for yuv420p.
+const camPanelH = f => Math.round(Math.min(H * 0.45, Math.max(H * 0.25, f?.aspect ? W / f.aspect : H * 0.34)) / 2) * 2;
+
 // facecam: { x, y, w, h } as fractions (0..1) of the source frame.
-function filterFor(layout, facecam) {
-  if (layout === 'crop') return `[0:v]crop=ih*9/16:ih,scale=${W}:${H},setsar=1[v]`;
+function filterFor(layout, facecam, custom) {
+  if (layout === 'custom') return customFilter(custom);
+  // crop: 9:16 slice of the frame, centred on facecam.cx (0..1) when given (full-screen cam scenes), else the middle.
+  if (layout === 'crop') return `[0:v]crop=ih*9/16:ih:${facecam?.cx != null ? `'max(0,min(iw-ih*9/16,iw*${(+facecam.cx).toFixed(4)}-ih*9/32))'` : '(iw-ih*9/16)/2'}:0,scale=${W}:${H},setsar=1[v]`;
   if (layout === 'blur') return `[0:v]split=2[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=30:3,eq=brightness=-0.08[bg];` +
     `[b]scale=${W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]`;
   if (layout === 'split') {
     const f = facecam || { x: 0.7, y: 0.02, w: 0.28, h: 0.3 }, n = v => Math.max(0, Math.min(1, +v || 0)).toFixed(4);
-    const camH = Math.round(H * 0.34 / 2) * 2, gameH = H - camH;   // even heights: H.264/yuv420p needs them
+    // Top panel takes the webcam's own shape (when detected) so it fills edge to edge; even heights for yuv420p.
+    const camH = camPanelH(f), gameH = H - camH;
     return `[0:v]split=2[c][g];` +
       `[c]crop=iw*${n(f.w)}:ih*${n(f.h)}:iw*${n(f.x)}:ih*${n(f.y)},scale=${W}:${camH}:force_original_aspect_ratio=increase,crop=${W}:${camH}[cam];` +
       `[g]crop=ih*${W}/${gameH}:ih,scale=${W}:${gameH}[game];[cam][game]vstack,setsar=1[v]`;
@@ -82,14 +88,38 @@ function filterFor(layout, facecam) {
   throw new Error(`unknown layout ${layout}`);
 }
 
+// Custom layouts (StreamLadder-style): { bg: 'blur'|'black', panels: [{ src: {x,y,w,h}, dst: {x,y,w,h}, auto? }] },
+// src = part of the source frame, dst = where it goes on the 9:16 canvas, all fractions 0..1. Later panels draw on top.
+// auto: 'facecam' re-detects that panel's source per clip (see resolveCustom).
+function customFilter(c) {
+  const ps = (c?.panels || []).filter(p => p.src && p.dst);
+  if (!ps.length) throw new Error('That layout has no panels.');
+  const n = v => Math.max(0, Math.min(1, +v || 0)).toFixed(4), ev = v => Math.max(2, Math.round(v / 2) * 2);
+  const bg = c.bg === 'black' ? `color=c=black:s=${W}x${H},format=yuv420p[bg0];[b]nullsink`
+    : `[b]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=30:3,eq=brightness=-0.08[bg0]`;
+  let g = `[0:v]split=${ps.length + 1}[b]${ps.map((_, i) => `[p${i}]`).join('')};${bg}`;
+  ps.forEach((p, i) => {
+    const w = ev(p.dst.w * W), h = ev(p.dst.h * H), x = Math.round(p.dst.x * W), y = Math.round(p.dst.y * H);
+    g += `;[p${i}]crop=iw*${n(p.src.w)}:ih*${n(p.src.h)}:iw*${n(p.src.x)}:ih*${n(p.src.y)},scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}[q${i}]` +
+      `;[bg${i}][q${i}]overlay=${x}:${y}:shortest=1${i === ps.length - 1 ? ',setsar=1[v]' : `[bg${i + 1}]`}`;
+  });
+  return g;
+}
+// Fills auto-facecam panels with this clip's detected webcam (keeps the saved box if nothing's found).
+async function resolveCustom(custom, input, start, end) {
+  if (!custom?.panels?.some(p => p.auto === 'facecam')) return custom;
+  const cam = await findFacecam(input, start, end).catch(() => null);
+  return !cam || cam.full ? custom : { ...custom, panels: custom.panels.map(p => p.auto === 'facecam' ? { ...p, src: { x: cam.x, y: cam.y, w: cam.w, h: cam.h } } : p) };
+}
+
 // Filter-graph path escaping for the subtitles filter (Windows drive colon, quotes, backslashes).
 const filterPath = p => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 
-function buildArgs({ input, output, start = 0, end, layout = 'blur', facecam, subs, fps = 30 }) {
+function buildArgs({ input, output, start = 0, end, layout = 'blur', facecam, custom, subs, fps = 30 }) {
   if (!LAYOUTS.includes(layout)) throw new Error(`layout must be one of ${LAYOUTS.join(', ')}`);
   const s = Math.max(0, +start || 0), e = +end;
   if (!(e > s)) throw new Error('Out point must be after the in point.');
-  let fc = filterFor(layout, facecam);
+  let fc = filterFor(layout, facecam, custom);
   if (subs) fc = fc.replace(/\[v\]$/, `[vs];[vs]subtitles='${filterPath(subs)}'[v]`);
   return ['-y', '-hide_banner', '-ss', s.toFixed(3), '-to', e.toFixed(3), '-i', input,
     '-filter_complex', fc, '-map', '[v]', '-map', '0:a?',
@@ -160,6 +190,7 @@ function outDir() {
 // Runs the export; onProgress(0..1). Resolves to the output path.
 async function exportClip(opts, onProgress = () => {}) {
   opts = { ...opts, fps: opts.fps ?? (await probe(opts.input).catch(() => ({}))).fps };   // 60fps sources stay 60
+  if (opts.layout === 'custom') opts.custom = await resolveCustom(opts.custom, opts.input, opts.start, opts.end);
   const base = path.basename(opts.input).replace(/\.[^.]+$/, '').replace(/[^\w\- ]+/g, '').slice(0, 60) || 'clip';
   const stamp = new Date().toISOString().slice(0, 23).replace(/[T:.]/g, '-');
   const output = path.join(outDir(), `${base}_${opts.layout}_${stamp}.mp4`);
@@ -167,7 +198,7 @@ async function exportClip(opts, onProgress = () => {}) {
   if (opts.captions?.length) {
     subs = path.join(os.tmpdir(), `jarvis_caps_${Date.now()}_${process.hrtime()[1]}.ass`);
     // Captions sit just under the facecam seam on split, lower third otherwise.
-    fs.writeFileSync(subs, toAss(opts.captions, opts.captionStyle, opts.layout === 'split' ? 1080 : 520));
+    fs.writeFileSync(subs, toAss(opts.captions, opts.captionStyle, opts.layout === 'split' ? H - camPanelH(opts.facecam) - 150 : opts.layout === 'custom' ? Math.round(H * (1 - (opts.custom?.captionY ?? 0.73))) : 520));
   }
   const args = buildArgs({ ...opts, output, subs }), dur = opts.end - opts.start;
   return new Promise((ok, fail) => {
@@ -329,21 +360,52 @@ function camAround(b, srcW = 1920, srcH = 1080) {
 // Samples 3 frames of [start,end]; resolves to a facecam box or null (no steady face = no facecam in this shot).
 async function findFacecam(input, start = 0, end) {
   const { RawImage } = await import('@huggingface/transformers');
-  const { width, height, duration } = await probe(input), e = end ?? duration, det = await faceDetector(), frames = [];
+  const { width, height, duration } = await probe(input), e = end ?? duration, det = await faceDetector(), frames = [], grays = [];
+  const fw = 640, fh = Math.round(640 * height / width / 2) * 2;
   for (const k of [0.2, 0.5, 0.8]) {
-    const png = path.join(os.tmpdir(), `jarvis_face_${process.hrtime()[1]}.png`);
-    await new Promise(ok => execFile('ffmpeg', ['-v', 'error', '-y', '-ss', String(start + (e - start) * k), '-i', input, '-frames:v', '1', '-vf', 'scale=640:-2', png], { windowsHide: true }, ok));
-    try { frames.push(await det(await RawImage.read(png), ['a human face'], { threshold: 0.08, percentage: true })); } catch {}
-    fs.unlink(png, () => {});
+    const rgb = await new Promise(ok => execFile('ffmpeg', ['-v', 'error', '-ss', String(start + (e - start) * k), '-i', input, '-frames:v', '1', '-vf', `scale=${fw}:${fh}`,
+      '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1'], { windowsHide: true, encoding: 'buffer', maxBuffer: 1e7 }, (err, out) => ok(err ? null : out)));
+    if (rgb?.length !== fw * fh * 3) continue;
+    const g = new Uint8Array(fw * fh); for (let i = 0; i < g.length; i++) g[i] = (rgb[i * 3] * 77 + rgb[i * 3 + 1] * 150 + rgb[i * 3 + 2] * 29) >> 8;
+    grays.push(g);
+    try { frames.push(await det(new RawImage(new Uint8ClampedArray(rgb), fw, fh, 3), ['a human face'], { threshold: 0.08, percentage: true })); } catch {}
   }
   const face = steadyFace(frames);
-  return face ? camAround(face, width, height) : null;
+  if (!face) return null;
+  // A big face = the whole shot is his camera (just chatting): no game to split with, so a 9:16 crop on his face.
+  if (face.ymax - face.ymin > 0.2) return { full: true, cx: +((face.xmin + face.xmax) / 2).toFixed(4) };
+  const r = camRect(grays, fw, fh, face);
+  const ok = r.w > (face.xmax - face.xmin) * 1.5 && r.h > (face.ymax - face.ymin) * 1.5;
+  return ok ? { ...r, aspect: +(r.w * width / (r.h * height)).toFixed(3) } : camAround(face, width, height);
+}
+
+// The webcam overlay's own rectangle around the face: the strongest straight edge on each side that stays
+// put across frames (min gradient over frames, so moving game edges drop out). A side with no edge = the cam
+// runs to the frame edge. frames: grayscale Uint8Arrays, W x H. Returns fractions { x, y, w, h }.
+function camRect(frames, W, H, face) {
+  const E = (x, y, dx, dy) => { let m = 255; for (const f of frames) m = Math.min(m, Math.abs(f[(y + dy) * W + x + dx] - f[(y - dy) * W + x - dx])); return m; };
+  const fx0 = Math.round(face.xmin * W), fx1 = Math.round(face.xmax * W), fy0 = Math.round(face.ymin * H), fy1 = Math.round(face.ymax * H);
+  const fw = fx1 - fx0, fh = fy1 - fy0;
+  const line = (pos, a0, a1, vert) => { let s = 0, n = 0; for (let a = Math.max(1, a0); a < Math.min(vert ? H - 1 : W - 1, a1); a++, n++) s += vert ? E(pos, a, 1, 0) : E(a, pos, 0, 1); return n ? s / n : 0; };
+  const pick = (from, to, lim, score) => {             // strongest edge from the face outwards; the frame edge counts as a medium one
+    const step = from < to ? 1 : -1; let best = null, max = 17;
+    for (let p = from; p !== to + step; p += step) { const v = p <= 0 || p >= lim ? 30 : score(p); if (v > max) { max = v; best = p; } }
+    return best;
+  };
+  const L = pick(fx0 - 2, Math.max(0, fx0 - fw * 4), W - 1, x => line(x, fy0, fy1, true)) ?? 0;
+  const R = pick(fx1 + 2, Math.min(W - 1, fx1 + fw * 4), W - 1, x => line(x, fy0, fy1, true)) ?? W;
+  const T = pick(fy0 - 2, Math.max(0, fy0 - fh * 3), H - 1, y => line(y, L + 2, R - 2, false)) ?? 0;
+  let B = pick(fy1 + 2, Math.min(H - 1, fy1 + fh * 4), H - 1, y => line(y, L + 2, R - 2, false)) ?? H;
+  if (B >= H - 1) B = H;
+  const r = { x: L / W, y: T / H, w: ((R >= W - 1 ? W : R) - L) / W, h: (B - T) / H };
+  if (r.w * W / (r.h * H) < 0.85) r.h = Math.max(fy1 / H - r.y + 0.02, r.w * W / 1.78 / H);   // taller than any webcam: something below it (chat) fused on
+  return r;
 }
 
 // Split around the detected face; no steady face means no facecam in this shot, so full-frame blur instead.
 // Detection failing outright (model download etc.) falls back to the saved box.
 async function autoLayout(input, start, end, saved) {
-  try { const cam = await findFacecam(input, start, end); return cam ? { layout: 'split', facecam: cam } : { layout: 'blur' }; }
+  try { const cam = await findFacecam(input, start, end); return !cam ? { layout: 'blur' } : cam.full ? { layout: 'crop', facecam: cam } : { layout: 'split', facecam: cam }; }
   catch { return { layout: 'split', facecam: saved }; }
 }
 
@@ -361,7 +423,7 @@ function describe(said) {
 }
 
 // Up to `count` 9:16 clips (split facecam layout, burned subtitles) from a VOD link. asr optional (null = no subs).
-async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', facecam, captionStyle = 'bold', onProgress = () => {} } = {}) {
+async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', facecam, custom, captionStyle = 'bold', onProgress = () => {} } = {}) {
   const bin = ytDlp(); if (!bin) throw new Error('yt-dlp is not installed.');
   const info = JSON.parse(await ytJson(bin, ['--no-playlist', '-J', '--', url]));
   const duration = +info.duration;
@@ -390,7 +452,7 @@ async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', f
       const { duration: d } = await probe(file);
       const captions = asr ? await caption(file, 0, d, asr).catch(() => []) : [];
       const said = captions.map(c => c.text).join(' ');
-      const shot = layout === 'split' ? await autoLayout(file, 0, d, facecam) : { layout, facecam };
+      const shot = layout === 'split' ? await autoLayout(file, 0, d, facecam) : { layout, facecam, custom };
       const tmp = await exportClip({ input: file, start: 0, end: d, ...shot, captions, captionStyle });
       fs.unlink(file, () => {});
       // Virality 0-100: how hard chat/audio spiked vs the best moment, plus hype words in what was said.
@@ -411,4 +473,4 @@ async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', f
   return { how, dir, clips: [...made.map(m => m.file), ...failed] };
 }
 
-module.exports = { autoVod, chatMoments, findMoments, spikes, cueScore, download, ytDlp, probe, buildArgs, toSrt, splitCaptions, caption, exportClip, outDir, LAYOUTS, CAPTION_STYLES, toAss, wordTimes, groupWords, describe, findFacecam, autoLayout, steadyFace, camAround };
+module.exports = { autoVod, chatMoments, findMoments, spikes, cueScore, download, ytDlp, probe, buildArgs, toSrt, splitCaptions, caption, exportClip, outDir, LAYOUTS, CAPTION_STYLES, toAss, wordTimes, groupWords, describe, findFacecam, autoLayout, steadyFace, camAround, camRect, customFilter };

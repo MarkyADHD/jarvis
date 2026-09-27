@@ -59,6 +59,24 @@ function whenMs(spec, now = new Date()) {
   return ms;
 }
 
+// "mon-sat" | "mon,wed,fri" | "daily" | "weekdays" | "weekends" -> array of Date.getDay() values, or null.
+const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+function parseDays(spec) {
+  spec = spec.toLowerCase();
+  if (spec === 'daily' || spec === 'everyday') return [0, 1, 2, 3, 4, 5, 6];
+  if (spec === 'weekdays') return [1, 2, 3, 4, 5];
+  if (spec === 'weekends') return [0, 6];
+  const range = /^([a-z]{3,})-([a-z]{3,})$/.exec(spec);
+  if (range) {
+    const a = DAY_NAMES.findIndex(d => range[1].startsWith(d)), b = DAY_NAMES.findIndex(d => range[2].startsWith(d));
+    if (a < 0 || b < 0) return null;
+    const days = []; for (let i = a; ; i = (i + 1) % 7) { days.push(i); if (i === b) break; }
+    return days;
+  }
+  const list = spec.split(',').map(s => DAY_NAMES.findIndex(d => s.startsWith(d)));
+  return list.every(i => i >= 0) ? list : null;
+}
+
 function steamGames() {
   let root = 'C:/Program Files (x86)/Steam';
   try { root = execFileSync('reg', ['query', 'HKCU\\Software\\Valve\\Steam', '/v', 'SteamPath'], { windowsHide: true }).toString().match(/SteamPath\s+REG_SZ\s+(.+)/)[1].trim(); } catch {}
@@ -83,9 +101,15 @@ async function geocode(place) {
   const p = g.results?.[0]; if (!p) throw new Error(`can't find a place called "${place}"`);
   return { name: [p.name, p.admin1, p.country].filter(Boolean).join(', '), lat: p.latitude, lon: p.longitude, tz: p.timezone };
 }
+// No city given or set: locate by public IP (city-level, no key). ponytail: IP-level accuracy; Windows Location API if street-level ever matters.
+async function here() {
+  const g = await getJson('https://ipwho.is/');
+  if (!g.success) return geocode('London');
+  return { name: [g.city, g.region, g.country].filter(Boolean).join(', '), lat: g.latitude, lon: g.longitude, tz: g.timezone?.id };
+}
 const WMO = { 0: 'clear', 1: 'mostly clear', 2: 'partly cloudy', 3: 'overcast', 45: 'fog', 48: 'fog', 51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle', 61: 'light rain', 63: 'rain', 65: 'heavy rain', 71: 'light snow', 73: 'snow', 75: 'heavy snow', 80: 'showers', 81: 'showers', 82: 'violent showers', 95: 'thunderstorm', 96: 'thunderstorm with hail', 99: 'thunderstorm with hail' };
 async function weather(place) {
-  const p = await geocode(place || process.env.JARVIS_CITY || 'London');
+  const p = (place || process.env.JARVIS_CITY) ? await geocode(place || process.env.JARVIS_CITY) : await here();
   const w = await getJson(`https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&forecast_days=2&timezone=auto`);
   const c = w.current, d = w.daily;
   return `${p.name}: now ${Math.round(c.temperature_2m)}Â°C (feels ${Math.round(c.apparent_temperature)}Â°C), ${WMO[c.weather_code] || 'code ' + c.weather_code}, wind ${Math.round(c.wind_speed_10m)} km/h, humidity ${c.relative_humidity_2m}%. ` +
@@ -104,6 +128,23 @@ async function define(word) {
   const strip = h => String(h).replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').trim();
   const senses = (d?.en || []).flatMap(p => p.definitions.filter(x => x.definition).slice(0, 2).map(x => `${p.partOfSpeech.toLowerCase()}: ${strip(x.definition)}`));
   return senses.length ? senses.slice(0, 3).join('\n') : `no definition found for "${word}"`;
+}
+// Headlines from BBC RSS (no key). topic: world, uk, business, technology, science, entertainment, sport (sport has its own feed).
+async function news(topic) {
+  const t = (topic || '').toLowerCase().trim();
+  const url = t === 'sport' ? 'https://feeds.bbci.co.uk/sport/rss.xml' : `https://feeds.bbci.co.uk/news/${t ? t.replace(/[^a-z_]/g, '') + '/' : ''}rss.xml`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new Error(`no news feed for "${t}"`);
+  const titles = [...(await r.text()).matchAll(/<item>[\s\S]*?<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/g)].map(m => m[1].trim());
+  return titles.length ? titles.slice(0, 8).map((x, i) => `${i + 1}. ${x}`).join('\n') : 'no headlines right now';
+}
+// Currency via frankfurter.dev (ECB rates, no key): "100 gbp usd" / "50 usd to eur".
+async function convert(raw) {
+  const m = /^([\d.,]+)\s*([a-z]{3})\s+(?:to\s+|in\s+)?([a-z]{3})$/i.exec(raw.trim());
+  if (!m) throw new Error('convert <amount> <from> <to>, e.g. convert 100 gbp usd');
+  const [, amt, from, to] = m, a = +amt.replace(/,/g, '');
+  const j = await getJson(`https://api.frankfurter.dev/v1/latest?base=${from.toUpperCase()}&symbols=${to.toUpperCase()}`);
+  const rate = j.rates?.[to.toUpperCase()]; if (!rate) throw new Error(`no rate for ${from}/${to}`);
+  return `${a} ${from.toUpperCase()} = ${(a * rate).toFixed(2)} ${to.toUpperCase()} (ECB rate ${j.date})`;
 }
 async function iss() {
   const p = await getJson('https://api.wheretheiss.at/v1/satellites/25544');
@@ -172,8 +213,20 @@ function run(action, arg = '') {
       throw new Error('note: add <text> | list | clear');
     }
     case 'remind': {
+      const parts = raw.split(' ');
+      const days = parts.length > 2 ? parseDays(parts[0]) : null;
+      if (days) {
+        const t = /^(\d{1,2}):(\d{2})\s*(am|pm)?$/i.exec(parts[1] || ''), text = parts.slice(2).join(' ').trim();
+        if (!t || !text) throw new Error('remind: <days: mon-sat|daily|weekdays|weekends> <HH:MM|H:MMam/pm> <text>');
+        let h = +t[1]; if (t[3]) { h %= 12; if (/pm/i.test(t[3])) h += 12; }
+        const now = new Date(), base = new Date(now); base.setHours(h, +t[2], 0, 0);
+        let at = null;
+        for (let add = 0; add <= 7; add++) { const d = new Date(base.getTime() + add * 86400000); if (days.includes(d.getDay()) && d > now) { at = d; break; } }
+        fs.appendFileSync(file('reminders.jsonl'), JSON.stringify({ id: Date.now().toString(36), at: at.toISOString(), text, repeatDays: days }) + '\n');
+        return `recurring reminder set for ${at.toLocaleString()} (repeats ${parts[0]})`;
+      }
       const [spec = '', ...rest] = raw.split(' '); const text = rest.join(' ').trim(); const ms = whenMs(spec.toLowerCase());
-      if (ms == null || !text) throw new Error('remind: <10m|2h|1h30m|HH:MM> <text>');
+      if (ms == null || !text) throw new Error('remind: <10m|2h|1h30m|HH:MM> <text>  |  remind <mon-sat|daily|weekdays|weekends> <HH:MM|H:MMam/pm> <text>');
       const at = new Date(Date.now() + ms);
       fs.appendFileSync(file('reminders.jsonl'), JSON.stringify({ id: Date.now().toString(36), at: at.toISOString(), text }) + '\n');
       return `reminder set for ${at.toLocaleString()}`;
@@ -277,11 +330,11 @@ function run(action, arg = '') {
         .then(out => `clip saved: ${out}`);
     }
     case 'clipthat': return require('../main/bridge').call(DATA, 'clips.live', []);   // live: Twitch clip -> vertical captioned short
-    case 'vod': {                         // vod <link|latest> [count<=25] [bold|pop|highlight|boxed|classic captions]: auto-clip a whole VOD (chat/audio picks moments, only those get downloaded)
-      const br = require('../main/bridge'), [what = 'latest', ...rest] = arg.split(/\s+/);
+    case 'vod': {                         // vod <link|latest> [count<=25] [bold|pop|highlight|boxed|classic captions] [layout <saved layout name>]: auto-clip a whole VOD (chat/audio picks moments, only those get downloaded)
+      const br = require('../main/bridge'), lay = /\blayout\s+(.+)$/i.exec(arg)?.[1].trim(), [what = 'latest', ...rest] = arg.replace(/\blayout\s+.+$/i, '').trim().split(/\s+/);
       const n = rest.find(w => /^\d+$/.test(w)), style = rest.map(w => w.toLowerCase()).find(w => w in require('../main/clips').CAPTION_STYLES);
       const link = /^https?:/i.test(what) ? Promise.resolve(what) : br.call(DATA, 'twitch.vod', []).then(v => (/(https:\/\/\S+)/.exec(v) || [])[1]);
-      return link.then(url => { if (!url) throw new Error('vod <link|latest> [count]: no VOD link found'); return br.call(DATA, 'clips.vod', [url, n, style]); });
+      return link.then(url => { if (!url) throw new Error('vod <link|latest> [count]: no VOD link found'); return br.call(DATA, 'clips.vod', [url, n, style, lay]); });
     }
     case 'thumbnail': {                   // thumbnail "<title>" [latest|"<file>"] [at <seconds>]   |   thumbnail ai "<scene prompt>" "<title>"
       const thumbs = require('../main/thumbs'), clips = require('../main/clips');
@@ -324,6 +377,8 @@ function run(action, arg = '') {
     case 'time': return worldTime(raw);
     case 'define': if (!raw) throw new Error('define <word>'); return define(raw.split(' ')[0]);
     case 'iss': return iss();
+    case 'news': return news(raw);
+    case 'convert': return convert(raw);
     case 'map': {
       if (!raw) throw new Error('map <place or "a to b">');
       const [from, to] = raw.split(/\s+to\s+/i);
@@ -345,11 +400,18 @@ function run(action, arg = '') {
     case 'hands': return hands(raw);      // barehands board (Jared Rhodenizer, AGPL-3.0, vendored in barehands/)
     case 'lock':
       spawn('rundll32.exe', ['user32.dll,LockWorkStation'], { detached: true, stdio: 'ignore' }).unref(); return 'locking the PC';
+    case 'health': return (async () => {
+      const claudeOk = new (require('../main/claude').Claude)().status();
+      const app = await require('../main/bridge').call(DATA, 'health').catch(e => ({ error: e.message }));
+      if (app.error) return `Jarvis app: unreachable (${app.error}). Everything else can't be checked without it.`;
+      const line = (name, ok) => `${name}: ${ok ? 'OK' : 'not connected'}`;
+      return [claudeOk.connected ? 'Claude CLI: OK' : `Claude CLI: ${claudeOk.error}`, line('Spotify', app.spotify), line('Twitch', app.twitch), line('Nanoleaf', app.nanoleaf), `Voice engine: ${app.voice}`].join('\n');
+    })();
     case 'info':
       return JSON.stringify({ host: os.hostname(), cpu: os.cpus()[0]?.model.trim(), cores: os.cpus().length,
         ramGB: +(os.totalmem() / 2 ** 30).toFixed(1), freeGB: +(os.freemem() / 2 ** 30).toFixed(1), uptimeH: +(os.uptime() / 3600).toFixed(1) });
     default:
-      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, lock, info');
+      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, health, lock, info');
   }
 }
 

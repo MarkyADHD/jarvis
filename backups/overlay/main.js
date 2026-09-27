@@ -5,7 +5,6 @@ const path = require('path');
 const os = require('os');
 const { Claude } = require('./claude');
 const store = require('./store');
-const vault = require('./vault');
 const { Speech, Sentencer } = require('./voice');
 const stt = require('./stt');
 const clips = require('./clips');
@@ -25,10 +24,6 @@ const root = path.join(__dirname, '..', '..');
 const res = app.isPackaged ? process.resourcesPath : root;
 let win, tray, db;
 const claude = new Claude();
-// Phone access (src/main/phone.js) calls the same handlers the HUD uses, so remember them as they're registered.
-const handlers = {}; const ipcHandle = ipcMain.handle.bind(ipcMain);
-ipcMain.handle = (ch, f) => { handlers[ch] = f; return ipcHandle(ch, f); };
-let phone;
 
 function show() { if (!win) createWindow(); win.show(); win.focus(); }
 
@@ -38,8 +33,6 @@ function createWindow() {
     icon: path.join(res, 'build', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
-  const wcSend = win.webContents.send.bind(win.webContents);
-  win.webContents.send = (ch, a) => { wcSend(ch, a); phone?.broadcast(ch, a); };   // mirror HUD events to phones
   win.loadFile(path.join(root, 'src', 'renderer', 'hud.html'), { search: [process.argv.includes('--demo') && 'demo', process.argv.includes('--private') && 'private', process.argv.includes('--clipdemo') && 'clipdemo'].filter(Boolean).join('&') });
   win.webContents.on('console-message', (e) => { if (e.level === 'error' || e.level === 3) console.error('[renderer]', e.message, e.sourceId ? `(${path.basename(e.sourceId)}:${e.lineNumber})` : ''); });
   win.webContents.on('render-process-gone', (_e, d) => console.error('[renderer] gone:', d.reason, d.exitCode));
@@ -50,31 +43,7 @@ function createWindow() {
   win.on('close', e => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
   // Gaming: tell the HUD to stop animating when hidden/minimised and slow down when unfocused (throttling itself stays off, see black-HUD note).
   for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['blur', 'slow'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', win.isMinimized() || !win.isVisible() ? 'off' : s));
-  win.on('focus', () => showOverlay(null));
 }
-
-// Voice overlay: the reactor, bottom-centre, while he talks / Jarvis speaks and the HUD is in the background.
-// Click-through, never focusable, no taskbar entry; only renders while shown.
-let overlay, overlayHide;
-function showOverlay(c) {
-  const bg = !win || !win.isVisible() || win.isMinimized() || !win.isFocused();
-  clearTimeout(overlayHide);
-  const hide = () => { if (overlay?.isVisible()) { overlay.webContents.send('core', null); overlay.hide(); } };
-  if (!bg) return hide();
-  if (!c) { overlayHide = setTimeout(hide, 2500); return; }   // grace period: gaps between sentences / transcribe -> reply
-
-  if (!overlay) {
-    const { screen } = require('electron'), a = screen.getPrimaryDisplay().workArea, S = 220;
-    overlay = new BrowserWindow({ width: S, height: S, x: Math.round(a.x + (a.width - S) / 2), y: a.y + a.height - S - 8,
-      transparent: true, frame: false, resizable: false, movable: false, focusable: false, skipTaskbar: true, hasShadow: false, show: false,
-      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true } });
-    overlay.setAlwaysOnTop(true, 'screen-saver'); overlay.setIgnoreMouseEvents(true);
-    overlay.loadFile(path.join(root, 'src', 'renderer', 'overlay.html'));
-  }
-  if (!overlay.isVisible()) overlay.showInactive();
-  overlay.webContents.send('core', c);
-}
-ipcMain.on('core', (_e, c) => showOverlay(c && ['listening', 'thinking', 'speaking'].includes(c.mode) ? { mode: c.mode, energy: +c.energy || 0 } : null));
 
 app.on('second-instance', show);
 app.whenReady().then(() => {
@@ -88,8 +57,6 @@ app.whenReady().then(() => {
   }
   // Legacy Python memory locations (read-only import).
   db.importLegacy(['E:/JarvisMemory/jarvis_memory.jsonl', 'E:/JarvisMemory/jarvis_long_memory_v2.jsonl', 'C:/AI-Agent/JarvisMemory/jarvis_long_memory_v2.jsonl']);
-  // Memories now live in the markdown vault; move memories.jsonl over once (backed up first).
-  vault.migrate(path.join(app.getPath('userData'), 'data', 'memories.jsonl'));
 
   // Voice: each finished sentence is synthesised immediately (in parallel) and sent to the
   // renderer strictly in order, so first audio starts while Claude is still writing.
@@ -118,17 +85,6 @@ app.whenReady().then(() => {
         new Notification({ title: 'Jarvis reminder', body: r.text }).show();
         say(`Reminder, sir: ${r.text}`);
         win?.webContents.send('reminder', r);
-        if (r.repeatDays) {
-          // Fires again next matching weekday: swap this occurrence out for a fresh id/time so
-          // the permanent `fired` mark (meant for one-shot reminders) doesn't suppress it forever.
-          let next = null;
-          for (let add = 1; add <= 7; add++) { const d = new Date(new Date(r.at).getTime() + add * 86400000); if (r.repeatDays.includes(d.getDay())) { next = d; break; } }
-          if (next) {
-            let rs = []; try { rs = fs.readFileSync(remFile, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
-            rs = rs.filter(x => x.id !== r.id).concat([{ ...r, id: Date.now().toString(36), at: next.toISOString() }]);
-            fs.writeFileSync(remFile, rs.map(x => JSON.stringify(x)).join('\n') + '\n');
-          }
-        }
       }, Math.max(0, ms)));
     }
   };
@@ -138,7 +94,8 @@ app.whenReady().then(() => {
   app.on('will-quit', () => speech.stop());
 
   // Long-term memory goes into the system prompt, most important first.
-  claude.context = vault.boot();
+  claude.context = db.memories().filter(m => m.text).sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0))
+    .slice(0, 40).map(m => `- ${m.text}`).join('\n');
   // Pick the conversation back up across restarts (like backtalk's resume_last_session).
   const sessFile = path.join(app.getPath('userData'), 'data', 'claude-session.txt');
   try { claude.sessionId = fs.readFileSync(sessFile, 'utf8').trim() || null; } catch {}
@@ -169,13 +126,20 @@ app.whenReady().then(() => {
     win?.webContents.send('done', { ...r, text });
   });
 
-  // Phone access: the full HUD over Tailscale (see phone.js for the gate).
-  phone = require('./phone').start({ log: console.log, call: (ch, args) => {
-    if (!handlers[ch]) throw new Error('unknown: ' + ch);
-    return handlers[ch]({ sender: null }, ...args);
-  } });
+  // Phone access (Tailscale/LAN only, token-gated). Token also goes on the desktop so the phone can be paired.
+  const phone = require('./phone').start({
+    tokenFile: path.join(app.getPath('userData'), 'data', 'phone-token.txt'), log: console.log,
+    ask: text => new Promise((resolve, reject) => {
+      if (claude.busy) return reject(new Error('Jarvis is busy, try again in a moment'));
+      db.addChat('user', text);
+      claude.once('done', r => r.error ? reject(new Error(r.error)) : resolve(r.text || db.chat().slice(-1)[0]?.text || ''));
+      claude.send(text);
+    }),
+  });
+  const ips = Object.values(os.networkInterfaces()).flat().filter(x => x.family === 'IPv4' && !x.internal).map(x => `http://${x.address}:8792`);
+  try { fs.writeFileSync(path.join(app.getPath('desktop'), 'Jarvis Phone Access.txt'), `Open on your phone (Tailscale or home Wi-Fi):\n${ips.join('\n')}\n\nToken: ${phone.token}\n`); } catch {}
 
-  ipcMain.handle('status', () => ({ claude: claude.status(), memories: vault.all().length }));
+  ipcMain.handle('status', () => ({ claude: claude.status(), memories: db.memories().length }));
   let prev = cpuTimes();
   ipcMain.handle('stats', () => {
     const now = cpuTimes(), busy = now.busy - prev.busy, total = now.total - prev.total;
@@ -186,7 +150,7 @@ app.whenReady().then(() => {
       model: os.cpus()[0]?.model.trim(), os: `${os.type()} ${os.release()}`,
       net: Object.entries(os.networkInterfaces()).flatMap(([n, a]) => a.filter(x => x.family === 'IPv4' && !x.internal).map(x => ({ name: n, ip: x.address }))) };
   });
-  ipcMain.handle('memories', () => vault.all().slice(-50).reverse().map(m => ({ text: m.text, kind: m.kind, importance: m.importance })));
+  ipcMain.handle('memories', () => db.memories().slice(-50).reverse().map(m => ({ text: m.text, kind: m.kind, importance: m.importance })));
   ipcMain.handle('history', () => db.chat().slice(-100));
   ipcMain.handle('send', (_e, text) => { if (typeof text === 'string' && text.trim()) { db.addChat('user', text); ring('thinking'); claude.send(text); } });
   ipcMain.handle('cancel', () => { claude.cancel(); speech.cancel(); sentences.reset(); });
@@ -209,47 +173,17 @@ app.whenReady().then(() => {
   ipcMain.handle('connect:nanoleaf', async () => { try { return { msg: await nanoleaf.pair() }; } catch (e) { return { error: e.message }; } });
   // Whole-VOD autopilot runs in the background; the result arrives as a notification.
   let vodBusy = false;
-  // Custom layouts (Clip Studio's layout editor): { default: name|null, layouts: [{ name, bg, captionY, panels }] }.
-  const layoutFile = path.join(dataDir, 'layouts.json');
-  const readLayouts = () => { try { return JSON.parse(fs.readFileSync(layoutFile, 'utf8')); } catch { return { default: null, layouts: [] }; } };
-  ipcMain.handle('layouts:get', () => readLayouts());
-  ipcMain.handle('layouts:save', (_e, l) => { fs.writeFileSync(layoutFile, JSON.stringify({ default: l?.default || null, layouts: Array.isArray(l?.layouts) ? l.layouts : [] }, null, 1)); return readLayouts(); });
-  // Named layout, else his default one; null = the built-in auto facecam split.
-  const pickLayout = name => { const l = readLayouts(), want = String(name || l.default || '').toLowerCase().trim();
-    const c = want && l.layouts.find(x => x.name.toLowerCase() === want); return c ? { layout: 'custom', custom: c } : null; };
-  const clipVod = (url, count, style, layoutName) => {
-    const lay = pickLayout(layoutName);
-    if (layoutName && !lay) return `No saved layout called "${layoutName}", sir. Saved: ${readLayouts().layouts.map(x => x.name).join(', ') || 'none yet'}.`;
+  const clipVod = (url, count) => {
     if (vodBusy) return 'Already clipping a VOD, sir.';
     vodBusy = true;
     stt.load().catch(() => null)                                  // no Whisper model = clips without subtitles
-      .then(asr => clips.autoVod(url, asr, { count: Math.min(25, +count || 25), facecam: readSet().facecam, captionStyle: style || 'bold', ...lay,
+      .then(asr => clips.autoVod(url, asr, { count: Math.min(25, +count || 25), facecam: readSet().facecam,
         onProgress: (p, s) => win?.webContents.send('clips:status', { p, s }) }))
       .then(r => { const ok = r.clips.filter(c => !c.startsWith('FAILED')).length;
-        new Notification({ title: 'Jarvis VOD clips', body: `${ok} of ${r.clips.length} clips ranked by virality, with titles and hashtags in clips.txt (picked by ${r.how}).` }).show(); shell.openPath(r.dir); },
+        new Notification({ title: 'Jarvis VOD clips', body: `${ok} of ${r.clips.length} clips saved to Jarvis Clips (picked by ${r.how}).` }).show(); },
         e => new Notification({ title: 'Jarvis VOD clips', body: 'VOD clipping failed: ' + e.message }).show())
       .finally(() => { vodBusy = false; });
     return 'Clipping the VOD in the background, up to 25 clips into Desktop\\Jarvis Clips. A notification lands when done.';
-  };
-  // "Clip that" while live: Twitch clip of the last ~30s -> vertical, word-synced captions, into Jarvis Clips.
-  const clipThat = async () => {
-    const made = await twitch.clip();                                       // throws if Twitch isn't connected / offline
-    const link = /(https:\/\/clips\.twitch\.tv\/\S+)/.exec(made)[1];
-    (async () => {
-      let file;
-      for (let i = 0; i < 8 && !file; i++) {                                // Twitch needs ~15-30s to process a new clip
-        await new Promise(r => setTimeout(r, 8000));
-        file = await clips.download(link).catch(() => null);
-      }
-      if (!file) throw new Error('Twitch never finished processing the clip: ' + link);
-      const { duration } = await clips.probe(file);
-      const captions = await clips.caption(file, 0, duration, await stt.load().catch(() => null)).catch(() => []);
-      const out = await clips.exportClip({ input: file, start: 0, end: duration, ...(pickLayout() || await clips.autoLayout(file, 0, duration, readSet().facecam)), captions, captionStyle: 'bold' });
-      fs.unlink(file, () => {});
-      new Notification({ title: 'Jarvis clip', body: 'Clipped and made vertical: ' + path.basename(out) }).show();
-      shell.showItemInFolder(out);
-    })().catch(e => new Notification({ title: 'Jarvis clip', body: 'Clip that failed: ' + e.message }).show());
-    return `Clipped it on Twitch (${link}). The vertical, captioned version lands in Jarvis Clips in about a minute.`;
   };
   // barehands (Jared Rhodenizer, AGPL-3.0, in barehands/): its own window, only when asked for.
   // The Python board server runs only while that window is open.
@@ -277,11 +211,7 @@ app.whenReady().then(() => {
     'spotify.like': () => spotify.like(), 'spotify.shuffle': on => spotify.shuffle(on),
     'twitch.status': () => twitch.status(), 'twitch.clip': () => twitch.clip(), 'twitch.ad': s => twitch.ad(s),
     'twitch.title': t => twitch.title(t), 'twitch.category': c => twitch.category(c), 'twitch.vod': () => twitch.lastVod(),
-    'clips.vod': (url, n, style, lay) => clipVod(url, n, style, lay), 'clips.live': () => clipThat(),
-    // releaseSingleInstanceLock() first: relaunch() spawns the new process immediately, and without this
-    // it loses the single-instance-lock race against the still-alive old one and quits itself silently.
-    'app.restart': () => { setTimeout(() => { app.isQuitting = true; app.releaseSingleInstanceLock(); app.relaunch(); app.exit(0); }, 200); return 'restarting'; },
-    'health': () => ({ spotify: spotify.connected(), twitch: twitch.connected(), nanoleaf: nanoleaf.connected(), voice: speech.engine() }),
+    'clips.vod': (url, n) => clipVod(url, n),
   });
   // HUD quick controls: only these tool actions can be triggered from the UI.
   const QUICK = { media: /^(play|pause|next|previous)$/, volume: /^(up|down|mute)$/, lights: /^(on|off|status)$/ };
@@ -337,7 +267,6 @@ app.whenReady().then(() => {
   ipcMain.handle('clips:caption', async (_e, { file, start, end }) => {
     try { return { captions: await clips.caption(file, start, end, await stt.load()) }; } catch (e) { return { error: e.message }; }
   });
-  ipcMain.handle('clips:facecam', async (_e, { file, start, end }) => { try { return { cam: await clips.findFacecam(file, start, end) }; } catch (e) { return { error: e.message }; } });
   ipcMain.handle('clips:export', async (_e, opts) => {
     try { return { output: await clips.exportClip(opts, p => win?.webContents.send('clips:progress', p)) }; } catch (e) { return { error: e.message }; }
   });

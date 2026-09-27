@@ -84,3 +84,21 @@ test('facecam detection keeps the face that stays put, not a moving game charact
   assert.ok(c.x <= 0.12 && c.x + c.w >= 0.16 && c.y <= 0.10 && c.y + c.h >= 0.17);       // face inside the crop
   assert.ok(Math.abs(c.w * 1920 / (c.h * 1080) - 1080 / 652) < 0.01);                    // panel-shaped
 });
+
+test('webcam rectangle is found from its static border, not the face', () => {
+  const { camRect } = require('../src/main/clips');
+  const W = 200, H = 120, f = new Uint8Array(W * H).fill(40);
+  for (let y = 20; y < 80; y++) for (let x = 120; x < 180; x++) f[y * W + x] = 200;   // bright cam box x120-180, y20-80
+  const r = camRect([f, f], W, H, { xmin: 0.72, xmax: 0.78, ymin: 0.35, ymax: 0.5 });
+  assert.ok(Math.abs(r.x * W - 120) <= 2 && Math.abs((r.x + r.w) * W - 180) <= 2, JSON.stringify(r));
+  assert.ok(Math.abs(r.y * H - 20) <= 2 && Math.abs((r.y + r.h) * H - 80) <= 2, JSON.stringify(r));
+});
+
+test('custom layouts build one crop+overlay per panel on a 1080x1920 canvas', () => {
+  const { customFilter, buildArgs } = require('../src/main/clips');
+  const fc = customFilter({ bg: 'black', panels: [{ src: { x: 0, y: 0, w: 0.25, h: 0.3 }, dst: { x: 0, y: 0, w: 1, h: 0.35 } }, { src: { x: 0.2, y: 0, w: 0.6, h: 1 }, dst: { x: 0, y: 0.35, w: 1, h: 0.65 } }] });
+  assert.match(fc, /split=3/); assert.match(fc, /color=c=black:s=1080x1920/);
+  assert.match(fc, /scale=1080:672.*overlay=0:0:shortest=1\[bg1\]/); assert.match(fc, /overlay=0:672:shortest=1,setsar=1\[v\]$/);
+  assert.throws(() => customFilter({ panels: [] }), /no panels/);
+  assert.ok(buildArgs({ input: 'a', output: 'b', start: 0, end: 2, layout: 'custom', custom: { panels: [{ src: { x: 0, y: 0, w: 1, h: 1 }, dst: { x: 0, y: 0, w: 1, h: 1 } }] } }).length);
+});
