@@ -5,6 +5,7 @@ const path = require('path');
 const os = require('os');
 const { Claude } = require('./claude');
 const store = require('./store');
+const vault = require('./vault');
 const { Speech, Sentencer } = require('./voice');
 const stt = require('./stt');
 const clips = require('./clips');
@@ -81,6 +82,8 @@ app.whenReady().then(() => {
   }
   // Legacy Python memory locations (read-only import).
   db.importLegacy(['E:/JarvisMemory/jarvis_memory.jsonl', 'E:/JarvisMemory/jarvis_long_memory_v2.jsonl', 'C:/AI-Agent/JarvisMemory/jarvis_long_memory_v2.jsonl']);
+  // Memories now live in the markdown vault; move memories.jsonl over once (backed up first).
+  vault.migrate(path.join(app.getPath('userData'), 'data', 'memories.jsonl'));
 
   // Voice: each finished sentence is synthesised immediately (in parallel) and sent to the
   // renderer strictly in order, so first audio starts while Claude is still writing.
@@ -118,8 +121,7 @@ app.whenReady().then(() => {
   app.on('will-quit', () => speech.stop());
 
   // Long-term memory goes into the system prompt, most important first.
-  claude.context = db.memories().filter(m => m.text).sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0))
-    .slice(0, 40).map(m => `- ${m.text}`).join('\n');
+  claude.context = vault.boot();
   // Pick the conversation back up across restarts (like backtalk's resume_last_session).
   const sessFile = path.join(app.getPath('userData'), 'data', 'claude-session.txt');
   try { claude.sessionId = fs.readFileSync(sessFile, 'utf8').trim() || null; } catch {}
@@ -163,7 +165,7 @@ app.whenReady().then(() => {
   const ips = Object.values(os.networkInterfaces()).flat().filter(x => x.family === 'IPv4' && !x.internal).map(x => `http://${x.address}:8792`);
   try { fs.writeFileSync(path.join(app.getPath('desktop'), 'Jarvis Phone Access.txt'), `Open on your phone (Tailscale or home Wi-Fi):\n${ips.join('\n')}\n\nToken: ${phone.token}\n`); } catch {}
 
-  ipcMain.handle('status', () => ({ claude: claude.status(), memories: db.memories().length }));
+  ipcMain.handle('status', () => ({ claude: claude.status(), memories: vault.all().length }));
   let prev = cpuTimes();
   ipcMain.handle('stats', () => {
     const now = cpuTimes(), busy = now.busy - prev.busy, total = now.total - prev.total;
@@ -174,7 +176,7 @@ app.whenReady().then(() => {
       model: os.cpus()[0]?.model.trim(), os: `${os.type()} ${os.release()}`,
       net: Object.entries(os.networkInterfaces()).flatMap(([n, a]) => a.filter(x => x.family === 'IPv4' && !x.internal).map(x => ({ name: n, ip: x.address }))) };
   });
-  ipcMain.handle('memories', () => db.memories().slice(-50).reverse().map(m => ({ text: m.text, kind: m.kind, importance: m.importance })));
+  ipcMain.handle('memories', () => vault.all().slice(-50).reverse().map(m => ({ text: m.text, kind: m.kind, importance: m.importance })));
   ipcMain.handle('history', () => db.chat().slice(-100));
   ipcMain.handle('send', (_e, text) => { if (typeof text === 'string' && text.trim()) { db.addChat('user', text); ring('thinking'); claude.send(text); } });
   ipcMain.handle('cancel', () => { claude.cancel(); speech.cancel(); sentences.reset(); });

@@ -209,11 +209,13 @@ function run(action, arg = '') {
     case 'remember': {                    // adds to the app's memory core (shown in the HUD, fed to Claude on next start)
       const m = /^(?:\[(\w+)\]\s*)?(?:(\d{1,2})\s+)?(.+)$/s.exec(raw);
       if (!m || m[3].trim().length < 3) throw new Error('remember [kind] [importance 1-10] <fact>');
-      const norm = t => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-      if (readJsonl('memories.jsonl').some(x => norm(x.text || '') === norm(m[3]))) return 'already remembered';
-      const rec = { created_at: new Date().toISOString(), kind: m[1] || 'fact', importance: Math.min(10, +m[2] || 6), text: m[3].trim(), source: 'jarvis' };
-      fs.appendFileSync(file('memories.jsonl'), JSON.stringify(rec) + '\n');
-      return `remembered (${rec.kind}, importance ${rec.importance})`;
+      const kind = (m[1] || 'fact').toLowerCase(), imp = Math.min(10, +m[2] || 6);
+      if (!require('../main/vault').add(kind, imp, m[3].trim())) return 'already remembered';
+      return `remembered in the vault (${kind}, importance ${imp})`;
+    }
+    case 'recall': {                      // pull a vault note by name, or every memory matching the words
+      if (!raw) throw new Error('recall <note name | words>');
+      return require('../main/vault').recall(raw);
     }
     case 'game': {                        // installed Steam games from local manifests; launch via steam://
       const games = steamGames(), [sub, ...rest] = raw.split(' '), name = rest.join(' ').toLowerCase();

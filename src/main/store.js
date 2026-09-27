@@ -15,7 +15,7 @@ function create(dir) {
   return {
     chat: () => read(chatFile),
     addChat: (role, text) => { const r = { role, text, at: new Date().toISOString() }; append(chatFile, r); return r; },
-    memories: () => read(memFile),
+    memories: () => read(memFile),   // pre-vault records only; live memories are in vault.js
     // Copy old Python memory records once. Non-destructive: source is only read,
     // original timestamps/provenance kept, re-running skips already-imported lines.
     importLegacy(sources) {

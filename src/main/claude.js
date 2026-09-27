@@ -24,6 +24,7 @@ You can control this Windows PC with exactly one command (run it with the Bash t
   node src/tools/pc.js screen   (then Read temp_screenshots/jarvis_screen.png to see his screen)
   node src/tools/pc.js game list | game launch <name>     (his installed Steam games)
   node src/tools/pc.js remember [kind] [importance 1-10] <fact>   (save something worth remembering about him)
+  node src/tools/pc.js recall <note name | words>   (look it up in your memory vault before saying you don't know)
   node src/tools/pc.js briefing [city]    (time, weather, reminders, now playing, PC health in one go)
   node src/tools/pc.js weather [city] | time [city] | define <word> | iss | map <place | a to b>
   node src/tools/pc.js window list | window focus <name> | window minimize-all

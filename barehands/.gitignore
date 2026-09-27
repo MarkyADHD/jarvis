@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+# the ring's live runtime files (see state/README.md)
+state/state
+state/mood.json
+state/wave.json
+# your personal config, created at setup: never tracked, never touched by updates
+barehands.json
