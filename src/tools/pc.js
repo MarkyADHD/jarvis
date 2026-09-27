@@ -121,6 +121,27 @@ function combo(spec) {
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });
 }
 
+// barehands: hand-tracked glass board (github.com/jaredrhod/barehands), run as its own local server.
+//   hands [start|close] -> the app opens/closes its board window (server runs only while it's open)
+//   hands state    -> what's on the board      hands {"a":"add_card",...} -> stage something
+const BH_URL = 'http://127.0.0.1:8794';
+async function hands(raw) {
+  if (raw.startsWith('{')) {
+    const r = await fetch(BH_URL + '/cmd', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw, signal: AbortSignal.timeout(5000) }).catch(() => null);
+    if (!r) throw new Error('board is not running (pc.js hands start)');
+    return r.ok ? 'on the board' : `board refused it (${r.status})`;
+  }
+  if (raw === 'state') {
+    const s = await fetch(BH_URL + '/state', { signal: AbortSignal.timeout(3000) }).then(r => r.json(), () => null);
+    if (!s) return 'the board is dark (not running)';
+    const items = (s.items || []).filter(i => !['widget', 'orb'].includes(i.type));
+    return items.length ? items.map(i => `${i.type} "${i.title || i.src || ''}"${i.g ? ' (in his hand)' : ''}`).join('\n') : 'board is empty';
+  }
+  if (raw === 'close') return require('../main/bridge').call(DATA, 'hands.close', []);
+  if (raw && raw !== 'start') throw new Error('hands [start] | close | state | <json command>');
+  return require('../main/bridge').call(DATA, 'hands.open', [], 10000);   // the app opens its own board window
+}
+
 function run(action, arg = '') {
   const raw = String(arg).trim();
   arg = String(arg).trim().toLowerCase();
@@ -216,7 +237,8 @@ function run(action, arg = '') {
       if (sub === 'sleep') { spawn('rundll32.exe', ['powrprof.dll,SetSuspendState', '0,1,0'], { detached: true, stdio: 'ignore' }).unref(); return 'sleeping'; }
       if (sub === 'shutdown' || sub === 'restart') { execFileSync('shutdown', [sub === 'shutdown' ? '/s' : '/r', '/t', String(secs), '/c', 'Jarvis: ' + sub], { windowsHide: true }); return `${sub} in ${secs}s (say "cancel shutdown" to stop)`; }
       if (sub === 'cancel') { try { execFileSync('shutdown', ['/a'], { windowsHide: true }); return 'shutdown cancelled'; } catch { return 'nothing to cancel'; } }
-      throw new Error('power: sleep | shutdown [minutes] | restart [minutes] | cancel');
+      if (sub === 'restart-app') { const br = require('../main/bridge'); return br.call(DATA, 'app.restart'); }   // relaunches Jarvis itself, not the PC
+      throw new Error('power: sleep | shutdown [minutes] | restart [minutes] | restart-app | cancel');
     }
     case 'clipboard': {
       const [sub, ...rest] = raw.split(' ');
@@ -251,6 +273,11 @@ function run(action, arg = '') {
       }
       return clips.probe(file).then(p => clips.exportClip({ input: file, start: Math.max(0, p.duration - secs), end: p.duration, layout }))
         .then(out => `clip saved: ${out}`);
+    }
+    case 'vod': {                         // vod <link|latest> [count<=25]: auto-clip a whole VOD (chat/audio picks moments, only those get downloaded)
+      const br = require('../main/bridge'), [what = 'latest', n] = arg.split(/\s+/);
+      const link = /^https?:/i.test(what) ? Promise.resolve(what) : br.call(DATA, 'twitch.vod', []).then(v => (/(https:\/\/\S+)/.exec(v) || [])[1]);
+      return link.then(url => { if (!url) throw new Error('vod <link|latest> [count]: no VOD link found'); return br.call(DATA, 'clips.vod', [url, n]); });
     }
     case 'thumbnail': {                   // thumbnail "<title>" [latest|"<file>"] [at <seconds>]   |   thumbnail ai "<scene prompt>" "<title>"
       const thumbs = require('../main/thumbs'), clips = require('../main/clips');
@@ -311,13 +338,14 @@ function run(action, arg = '') {
         br.call(DATA, 'nanoleaf', [a], 8000).then(r => r, e => 'Nanoleaf: ' + e.message)];
       return Promise.all(jobs).then(r => r.join('\n'));
     }
+    case 'hands': return hands(raw);      // barehands board (Jared Rhodenizer, AGPL-3.0, vendored in barehands/)
     case 'lock':
       spawn('rundll32.exe', ['user32.dll,LockWorkStation'], { detached: true, stdio: 'ignore' }).unref(); return 'locking the PC';
     case 'info':
       return JSON.stringify({ host: os.hostname(), cpu: os.cpus()[0]?.model.trim(), cores: os.cpus().length,
         ramGB: +(os.totalmem() / 2 ** 30).toFixed(1), freeGB: +(os.freemem() / 2 ** 30).toFixed(1), uptimeH: +(os.uptime() / 3600).toFixed(1) });
     default:
-      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, map, window, clipboard, power, clip, thumbnail, twitch, discord, lock, info');
+      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, map, window, clipboard, power, clip, vod, thumbnail, twitch, discord, hands, lock, info');
   }
 }
 

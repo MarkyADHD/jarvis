@@ -186,7 +186,7 @@ function download(url, { section, onProgress = () => {} } = {}) {
   const bin = ytDlp(); if (!bin) return Promise.reject(new Error('yt-dlp is not installed.'));
   const dir = path.join(outDir(), 'sources'); fs.mkdirSync(dir, { recursive: true });
   const args = ['--no-playlist', '--newline', '-f', 'bv*[height<=1080]+ba/b[height<=1080]/b', '--merge-output-format', 'mp4',
-    '-o', path.join(dir, '%(title).80B [%(id)s].%(ext)s'), '--print', 'after_move:filepath'];
+    '-o', path.join(dir, `%(title).80B [%(id)s]${section ? ' @%(section_start)d' : ''}.%(ext)s`), '--print', 'after_move:filepath'];
   if (url.startsWith('file://')) args.push('--enable-file-urls');
   if (section) args.push('--download-sections', `*${Math.max(0, +section.start || 0)}-${+section.end}`, '--force-keyframes-at-cuts');
   args.push('--', url);
@@ -204,4 +204,68 @@ function download(url, { section, onProgress = () => {} } = {}) {
   });
 }
 
-module.exports = { findMoments, spikes, cueScore, download, ytDlp, probe, buildArgs, toSrt, splitCaptions, caption, exportClip, outDir, LAYOUTS };
+// ---------- whole Twitch VOD on autopilot: pick moments without downloading it, fetch only those ----------
+const GQL_CLIENT = 'kimne78kx3ncx6brgo4mv6wki5h1ko';   // Twitch's public web client id (not a secret)
+function ytJson(bin, args) {
+  return new Promise((ok, fail) => execFile(bin, args, { windowsHide: true, maxBuffer: 64e6 }, (e, out) => e ? fail(new Error('yt-dlp: ' + String(e.message).split('\n').pop())) : ok(out.trim())));
+}
+// Chat replay offsets (seconds) of one page of comments starting near t.
+async function chatPage(videoID, t) {
+  const r = await fetch('https://gql.twitch.tv/gql', { method: 'POST', headers: { 'Client-Id': GQL_CLIENT }, body: JSON.stringify({
+    operationName: 'VideoCommentsByOffsetOrCursor', variables: { videoID, contentOffsetSeconds: t },
+    extensions: { persistedQuery: { version: 1, sha256Hash: 'b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a' } } }) });
+  return ((await r.json()).data?.video?.comments?.edges || []).map(e => e.node.contentOffsetSeconds).filter(o => o >= t);
+}
+// Chat spikes: sample every `step`s, score = local chat rate vs the VOD's median; peak = densest 10s of chat.
+// ponytail: sampled pages (~60 msgs each), not the full chat log; page through with cursors if resolution matters.
+async function chatMoments(videoID, duration, { step = 60, count = 25, onProgress = () => {} } = {}) {
+  const ts = []; for (let t = 0; t < duration - 20; t += step) ts.push(t);
+  const rows = [];
+  for (let i = 0; i < ts.length; i += 8) {
+    onProgress(i / ts.length, 'reading chat replay');
+    rows.push(...await Promise.all(ts.slice(i, i + 8).map(async t => {
+      const o = await chatPage(videoID, t).catch(() => []);
+      let peak = t, best = 0;
+      for (const a of o) { const n = o.filter(b => b >= a && b < a + 10).length; if (n > best) { best = n; peak = a; } }
+      return { t, peak, rate: o.length / Math.max(10, (o[o.length - 1] ?? t) - t), n: o.length };
+    })));
+  }
+  if (rows.reduce((a, r) => a + r.n, 0) < 50) return [];         // no real chat: caller falls back to audio
+  const med = rows.map(r => r.rate).sort((a, b) => a - b)[rows.length >> 1] || 0.01;
+  return rows.map(r => ({ t: r.peak, score: r.rate / med })).filter(r => r.score > 1.3).sort((a, b) => b.score - a.score).slice(0, count);
+}
+// Up to `count` 9:16 clips (split facecam layout, burned subtitles) from a VOD link. asr optional (null = no subs).
+async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', facecam, onProgress = () => {} } = {}) {
+  const bin = ytDlp(); if (!bin) throw new Error('yt-dlp is not installed.');
+  const info = JSON.parse(await ytJson(bin, ['--no-playlist', '-J', '--', url]));
+  const duration = +info.duration;
+  let peaks = /twitch\.tv/i.test(url) ? await chatMoments(String(info.id).replace(/^v/, ''), duration, { count, onProgress }) : [];
+  let how = 'chat';
+  if (!peaks.length) {                                           // no chat: loudness of the audio-only stream (~70 MB/hr, not the video)
+    how = 'audio'; onProgress(0.1, 'measuring loudness');
+    const f = (info.formats || []).find(x => x.vcodec === 'none' && x.acodec !== 'none');
+    const audio = f?.url || (await ytJson(bin, ['--no-playlist', '-f', 'ba/b', '-g', '--', url])).split('\n')[0];
+    peaks = spikes(await loudness(audio), { top: count, minGap: clipLen + 10 }).map(p => ({ t: p.t, score: p.score }));
+  }
+  // Chat reacts a few seconds after the moment; audio peaks land on it.
+  const lead = how === 'chat' ? clipLen - 5 : 20, wins = [];
+  for (const p of peaks) {
+    const start = Math.max(0, Math.min(p.t - lead, duration - clipLen));
+    if (wins.every(w => Math.abs(w.start - start) >= clipLen)) wins.push({ start, end: Math.min(duration, start + clipLen) });
+  }
+  const out = [];
+  for (const [i, w] of wins.entries()) {
+    onProgress(i / wins.length, `clip ${i + 1} of ${wins.length}`);
+    try {
+      const file = await download(url, { section: { start: Math.floor(w.start), end: Math.ceil(w.end) } });
+      const { duration: d } = await probe(file);
+      const captions = asr ? await caption(file, 0, d, asr).catch(() => []) : [];
+      out.push(await exportClip({ input: file, start: 0, end: d, layout, facecam, captions }));
+      fs.unlink(file, () => {});
+    } catch (e) { out.push('FAILED ' + e.message); }
+  }
+  onProgress(1, 'done');
+  return { how, clips: out };
+}
+
+module.exports = { autoVod, chatMoments, findMoments, spikes, cueScore, download, ytDlp, probe, buildArgs, toSrt, splitCaptions, caption, exportClip, outDir, LAYOUTS };

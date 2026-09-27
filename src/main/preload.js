@@ -35,5 +35,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   onAnim: f => ipcRenderer.on('anim', (_e, a) => f(a)),
   onPttHold: f => ipcRenderer.on('ptt-hold', () => f()),
   onDelta: f => ipcRenderer.on('delta', (_e, t) => f(t)),
+  core: c => ipcRenderer.send('core', c),
+  onCore: f => ipcRenderer.on('core', (_e, c) => f(c)),
   onDone: f => ipcRenderer.on('done', (_e, r) => f(r)),
 });

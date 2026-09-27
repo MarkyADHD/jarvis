@@ -47,6 +47,10 @@ build, or just use ElevenLabs. `npm test` runs the unit tests; `npm run dist` bu
 Connect Spotify, Twitch, ElevenLabs and Discord keybinds from **Settings** in the top bar. Your keys, memory
 and settings live in `%APPDATA%\jarvis`, outside the app folder, and are encrypted with Windows DPAPI.
 
+## Barehands (hand-tracked board)
+
+Say "open the board" and Jarvis starts **[barehands](https://github.com/jaredrhod/barehands)** by **Jared Rhodenizer** (@jaredrhod): move glass cards, notes, images and 3D models around your webcam feed with your bare hands. Jarvis can put things on the board for you (`pc.js hands`), and its ring shows when Jarvis is thinking. It lives unmodified in `barehands/` as a separate program under its own license, **AGPL-3.0-or-later** (see `barehands/LICENSE`); the rest of Jarvis stays MIT. Needs Python 3 and Chrome with a webcam.
+
 ## Credits & Support
 
 Created by **MarkyADHD**. Tested by **TreeLoc**, right alongside him -- a huge amount of what works today

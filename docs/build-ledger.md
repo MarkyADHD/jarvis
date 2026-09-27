@@ -57,3 +57,33 @@ Settings > Push-to-talk: On/Off toggle plus a rebindable key (default Home, clic
 
 ## Gaming mode (2026-09-26)
 HUD canvas stops drawing when hidden/minimised and drops to 10 fps when unfocused (main sends `anim` on hide/minimize/blur/show/restore/focus). backgroundThrottling stays off. Tested: node --check, npm test.
+
+## VOD autopilot (2026-09-27)
+Bug: the HUD's link box pulled the *whole* VOD when no range was given (multi-hour Twitch VODs failed/stalled), and voice had no VOD path. Now `clips.autoVod(url)` picks moments without downloading the VOD: Twitch chat replay density spikes (public GQL, sampled every 60s), falling back to loudness of the audio-only stream. Only each 30s window is fetched (`yt-dlp --download-sections`, unique filename per section), then Whisper subs + split facecam layout (`settings.facecam` if set), up to 25 clips into Desktop\Jarvis Clips. Entry points: `pc.js vod <link|latest> [count]` (bridge `clips.vod`, background + notification) and the HUD link box for twitch.tv/videos links with no range. Tested: node --check, npm test (11 pass), live run on a 2.7h Twitch VOD: 25 chat moments found, 2 clips exported with subtitles in ~55s. Bridge path not live-tested (needs app restart).
+
+## Phone access (2026-09-27)
+`src/main/phone.js`: chat page on port 8792 (port of Python `jarvis_remote_chat.py`, text only). Refuses non-private
+source addresses (allows loopback, LAN, Tailscale 100.64/10 and ULA); `/ask` needs the random token from
+`%APPDATA%\jarvis\data\phone-token.txt`, also written with the PC's URLs to `Desktop\Jarvis Phone Access.txt`.
+Replies come from the same Claude session as the HUD; busy -> error. Tested: `tests/phone.test.js` (address filter, 401 on bad token, ask round-trip).
+Never port-forward 8792.
+
+## 2026-09-27: barehands board
+
+Vendored github.com/jaredrhod/barehands (Jared Rhodenizer, AGPL-3.0, unmodified) in `barehands/` with `barehands.json` naming the ring Jarvis. `pc.js hands [start|state|<json>]` starts the Python server + opens Chrome, reads the board, and POSTs /cmd. main.js writes `barehands/state/state` (thinking on send/tool, idle on done). Tested: node --check, npm test 13/13, live server: state read, add_card accepted, non-allowlisted command refused (400), stage.html 200. Not packaged into the installer yet (dev/source runs only).
+
+Follow-up same day: board now opens in its own Jarvis window (tray 'Hands board', or `pc.js hands start|close` via the bridge); the Python server runs only while that window is open and is killed on close/quit. `barehands/stage.html` recoloured to the HUD palette and fonts (69 colour swaps, header note added, AGPL kept; original saved as `stage.orig.html`). Tested: node --check, npm test 13/13, stage serves and boots in the recoloured theme (camera path not testable headless).
+
+## 2026-09-27 -- Voice overlay
+- `src/renderer/overlay.html` + `overlay.js`: small (220px) transparent window, bottom-centre of the primary display, that
+  draws the HUD's reactor (`src/renderer/core.js`, a verbatim copy of hud.js's reactor code) while he's talking
+  (listening) or Jarvis is speaking AND the HUD is hidden, minimised or unfocused. Always-on-top ('screen-saver'),
+  `setIgnoreMouseEvents(true)`, `focusable:false`, `skipTaskbar`, shown with `showInactive()` so games keep focus.
+  It only renders while shown; hidden = no rAF loop.
+- hud.js sends `{mode, energy}` over `jarvis.core` at 30 Hz only while listening/speaking; main relays it. The voice
+  meter moved from rAF to a 33 ms timer so it keeps working while the HUD is hidden.
+- Tested: node --check, npm test (13/13), scratch Electron harness rendered the overlay transparent and unfocused.
+- Ceiling: core.js duplicates hud.js's reactor (refactoring hud.js to load core.js was blocked); keep them in step.
+
+## 2026-09-27 -- Double-spoken replies fixed
+- `src/main/claude.js`: the silent "stale resumed session" retry now only fires if no text has streamed yet (it used to re-send the message after a reply was already spoken, so Jarvis said it twice). Output from a killed Claude process (cancel/retry) is ignored. The overlay window was checked and never triggers TTS. `node --check` + `npm test` (13/13) pass; needs an app restart.

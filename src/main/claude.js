@@ -20,6 +20,7 @@ You can control this Windows PC with exactly one command (run it with the Bash t
   node src/tools/pc.js discord mute | deafen | leave | server <1-9>   (presses his Discord keybinds)
   node src/tools/pc.js note add <text> | note list | note clear
   node src/tools/pc.js remind <10m|2h|1h30m|HH:MM> <text>   and   node src/tools/pc.js reminders
+  node src/tools/pc.js hands start | hands close | hands state | hands '{"a":"present","title":"...","body":"..."}'   (barehands glass board in its own window, he moves things with his hands on webcam; only open it when he asks; also add_card, add_img, yank, clear)
   node src/tools/pc.js screen   (then Read temp_screenshots/jarvis_screen.png to see his screen)
   node src/tools/pc.js game list | game launch <name>     (his installed Steam games)
   node src/tools/pc.js remember [kind] [importance 1-10] <fact>   (save something worth remembering about him)
@@ -28,6 +29,8 @@ You can control this Windows PC with exactly one command (run it with the Bash t
   node src/tools/pc.js window list | window focus <name> | window minimize-all
   node src/tools/pc.js clipboard get | clipboard set <text>
   node src/tools/pc.js power sleep | power shutdown [minutes] | power restart [minutes] | power cancel   (ALWAYS confirm with him before shutdown/restart)
+  node src/tools/pc.js power restart-app   (relaunches the Jarvis app itself, not the PC)
+  node src/tools/pc.js vod <link|latest> [count<=25]   (auto-clips a whole Twitch/YouTube VOD into up to 25 subtitled split-facecam shorts in the background; "latest" = his last broadcast)
   node src/tools/pc.js clip [latest|"<file>"] [seconds=30] [crop|blur|split]   (last N seconds of his newest recording -> 9:16 short in Desktop\Jarvis Clips; for trims/captions tell him to open CLIPS in the HUD)
   node src/tools/pc.js thumbnail "<title>" [latest|"<file>"] [at <seconds>]   (1280x720 PNG from his loudest moment by default)
   node src/tools/pc.js thumbnail ai "<scene prompt>" "<title>"               (AI background instead of a video frame)
@@ -67,7 +70,9 @@ class Claude extends EventEmitter {
     if (this.sessionId) args.push('--resume', this.sessionId);
     this.proc = spawn(this.bin, args.map(q), { cwd: this.cwd || ROOT, stdio: ['pipe', 'pipe', 'pipe'], shell: this.shell, windowsHide: true });
     let buf = '';
+    const self = this.proc;
     this.proc.stdout.on('data', d => {
+      if (this.proc !== self) return;   // killed process (cancel/retry) still flushing: never replay its text
       buf += d; let i;
       while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); this.handle(line); }
     });
@@ -87,11 +92,11 @@ class Claude extends EventEmitter {
   handle(line) {
     let m; try { m = JSON.parse(line); } catch { return; }
     if (m.session_id) this.sessionId = m.session_id;
-    if (m.type === 'stream_event' && m.event?.delta?.type === 'text_delta') this.emit('delta', m.event.delta.text);
+    if (m.type === 'stream_event' && m.event?.delta?.type === 'text_delta') { this.streamed = true; this.emit('delta', m.event.delta.text); }
     if (m.type === 'assistant') for (const c of m.message?.content || []) if (c.type === 'tool_use') this.emit('tool', { name: c.name, input: c.input });
     if (m.type === 'result') {
       // A resumed session that no longer exists fails on its first turn: start fresh and retry once, silently.
-      if (m.is_error && this.resumed && this.lastText != null) {
+      if (m.is_error && this.resumed && this.lastText != null && !this.streamed) {   // never after text was already spoken
         const t = this.lastText; this.lastText = null; this.sessionId = null; this.resumed = false;
         const p = this.proc; this.proc = null; this.busy = false; if (p) killTree(p);
         return this.send(t);
@@ -104,7 +109,7 @@ class Claude extends EventEmitter {
   send(text) {
     if (!this.proc) { this.resumed = !!this.sessionId; this.start(); }
     this.lastText = this.resumed ? text : null;
-    this.busy = true;
+    this.busy = true; this.streamed = false;
     this.proc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: text } }) + '\n');
   }
 

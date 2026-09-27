@@ -43,7 +43,27 @@ function createWindow() {
   win.on('close', e => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
   // Gaming: tell the HUD to stop animating when hidden/minimised and slow down when unfocused (throttling itself stays off, see black-HUD note).
   for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['blur', 'slow'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', win.isMinimized() || !win.isVisible() ? 'off' : s));
+  win.on('focus', () => showOverlay(null));
 }
+
+// Voice overlay: the reactor, bottom-centre, while he talks / Jarvis speaks and the HUD is in the background.
+// Click-through, never focusable, no taskbar entry; only renders while shown.
+let overlay;
+function showOverlay(c) {
+  const bg = !win || !win.isVisible() || win.isMinimized() || !win.isFocused();
+  if (!c || !bg) { if (overlay?.isVisible()) { overlay.webContents.send('core', null); overlay.hide(); } return; }
+  if (!overlay) {
+    const { screen } = require('electron'), a = screen.getPrimaryDisplay().workArea, S = 220;
+    overlay = new BrowserWindow({ width: S, height: S, x: Math.round(a.x + (a.width - S) / 2), y: a.y + a.height - S - 8,
+      transparent: true, frame: false, resizable: false, movable: false, focusable: false, skipTaskbar: true, hasShadow: false, show: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true } });
+    overlay.setAlwaysOnTop(true, 'screen-saver'); overlay.setIgnoreMouseEvents(true);
+    overlay.loadFile(path.join(root, 'src', 'renderer', 'overlay.html'));
+  }
+  if (!overlay.isVisible()) overlay.showInactive();
+  overlay.webContents.send('core', c);
+}
+ipcMain.on('core', (_e, c) => showOverlay(c && ['listening', 'thinking', 'speaking'].includes(c.mode) ? { mode: c.mode, energy: +c.energy || 0 } : null));
 
 app.on('second-instance', show);
 app.whenReady().then(() => {
@@ -113,15 +133,31 @@ app.whenReady().then(() => {
       win?.webContents.send('nowplaying', np);
     });
   }, 8000);
-  claude.on('tool', t => win?.webContents.send('tool', t));
+  // barehands ring mirrors Jarvis (thinking while working, idle when done); harmless if the board isn't running.
+  const ring = s => fs.writeFile(path.join(root, 'barehands', 'state', 'state'), s, () => {});
+  claude.on('tool', t => { ring('thinking'); win?.webContents.send('tool', t); });
   let reply = '';
   claude.on('delta', t => { reply += t; sentences.push(t); win?.webContents.send('delta', t); });
   claude.on('done', r => {
+    ring('idle');
     if (r.error) sentences.reset(); else sentences.flush();
     const text = reply || r.text; reply = '';
     if (text) db.addChat('jarvis', text);
     win?.webContents.send('done', { ...r, text });
   });
+
+  // Phone access (Tailscale/LAN only, token-gated). Token also goes on the desktop so the phone can be paired.
+  const phone = require('./phone').start({
+    tokenFile: path.join(app.getPath('userData'), 'data', 'phone-token.txt'), log: console.log,
+    ask: text => new Promise((resolve, reject) => {
+      if (claude.busy) return reject(new Error('Jarvis is busy, try again in a moment'));
+      db.addChat('user', text);
+      claude.once('done', r => r.error ? reject(new Error(r.error)) : resolve(r.text || db.chat().slice(-1)[0]?.text || ''));
+      claude.send(text);
+    }),
+  });
+  const ips = Object.values(os.networkInterfaces()).flat().filter(x => x.family === 'IPv4' && !x.internal).map(x => `http://${x.address}:8792`);
+  try { fs.writeFileSync(path.join(app.getPath('desktop'), 'Jarvis Phone Access.txt'), `Open on your phone (Tailscale or home Wi-Fi):\n${ips.join('\n')}\n\nToken: ${phone.token}\n`); } catch {}
 
   ipcMain.handle('status', () => ({ claude: claude.status(), memories: db.memories().length }));
   let prev = cpuTimes();
@@ -136,7 +172,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('memories', () => db.memories().slice(-50).reverse().map(m => ({ text: m.text, kind: m.kind, importance: m.importance })));
   ipcMain.handle('history', () => db.chat().slice(-100));
-  ipcMain.handle('send', (_e, text) => { if (typeof text === 'string' && text.trim()) { db.addChat('user', text); claude.send(text); } });
+  ipcMain.handle('send', (_e, text) => { if (typeof text === 'string' && text.trim()) { db.addChat('user', text); ring('thinking'); claude.send(text); } });
   ipcMain.handle('cancel', () => { claude.cancel(); speech.cancel(); sentences.reset(); });
   // Settings (non-secret, settings.json) + ElevenLabs key encrypted with Windows DPAPI via safeStorage (elevenlabs.key).
   const dataDir = path.join(app.getPath('userData'), 'data');
@@ -155,12 +191,48 @@ app.whenReady().then(() => {
   const twitch = new Twitch(dataDir, () => ({ id: readSet().twitchClientId || '', secret: loadSecret(twSecretFile)?.secret || '' }));
   const nanoleaf = new Nanoleaf(dataDir, () => (readSet().nanoleafIp || '').trim());
   ipcMain.handle('connect:nanoleaf', async () => { try { return { msg: await nanoleaf.pair() }; } catch (e) { return { error: e.message }; } });
+  // Whole-VOD autopilot runs in the background; the result arrives as a notification.
+  let vodBusy = false;
+  const clipVod = (url, count) => {
+    if (vodBusy) return 'Already clipping a VOD, sir.';
+    vodBusy = true;
+    stt.load().catch(() => null)                                  // no Whisper model = clips without subtitles
+      .then(asr => clips.autoVod(url, asr, { count: Math.min(25, +count || 25), facecam: readSet().facecam,
+        onProgress: (p, s) => win?.webContents.send('clips:status', { p, s }) }))
+      .then(r => { const ok = r.clips.filter(c => !c.startsWith('FAILED')).length;
+        new Notification({ title: 'Jarvis VOD clips', body: `${ok} of ${r.clips.length} clips saved to Jarvis Clips (picked by ${r.how}).` }).show(); },
+        e => new Notification({ title: 'Jarvis VOD clips', body: 'VOD clipping failed: ' + e.message }).show())
+      .finally(() => { vodBusy = false; });
+    return 'Clipping the VOD in the background, up to 25 clips into Desktop\\Jarvis Clips. A notification lands when done.';
+  };
+  // barehands (Jared Rhodenizer, AGPL-3.0, in barehands/): its own window, only when asked for.
+  // The Python board server runs only while that window is open.
+  let handsWin = null, handsSrv = null;
+  const openHands = async () => {
+    if (handsWin) { handsWin.show(); handsWin.focus(); return 'the board is already open'; }
+    const up = () => fetch('http://127.0.0.1:8794/config', { signal: AbortSignal.timeout(1000) }).then(r => r.ok, () => false);
+    if (!(await up())) {
+      handsSrv = require('child_process').spawn('python', ['server.py'], { cwd: path.join(root, 'barehands'), windowsHide: true, stdio: 'ignore' });
+      handsSrv.on('error', () => { handsSrv = null; });
+      for (let i = 0; i < 24 && !(await up()); i++) await new Promise(r => setTimeout(r, 250));
+      if (!(await up())) { handsSrv?.kill(); handsSrv = null; throw new Error('the board server did not start (needs Python 3)'); }
+    }
+    handsWin = new BrowserWindow({ width: 1280, height: 800, title: 'Jarvis Hands', backgroundColor: '#010509', autoHideMenuBar: true, icon: path.join(res, 'jarvis_icon.ico') });
+    handsWin.loadURL('http://127.0.0.1:8794/stage.html');
+    handsWin.on('closed', () => { handsWin = null; handsSrv?.kill(); handsSrv = null; });
+    return 'board open, sir: wave at the camera';
+  };
+  app.on('will-quit', () => handsSrv?.kill());
+  ipcMain.handle('hands', async () => { try { return { msg: await openHands() }; } catch (e) { return { error: e.message }; } });
   bridge.serve(dataDir, {
+    'hands.open': () => openHands(), 'hands.close': () => { handsWin?.close(); return 'board closed'; },
     'nanoleaf': a => nanoleaf.run(a),
     'spotify.play': (q, kind) => spotify.play(q, kind), 'spotify.queue': q => spotify.queue(q), 'spotify.now': () => spotify.now(),
     'spotify.like': () => spotify.like(), 'spotify.shuffle': on => spotify.shuffle(on),
     'twitch.status': () => twitch.status(), 'twitch.clip': () => twitch.clip(), 'twitch.ad': s => twitch.ad(s),
     'twitch.title': t => twitch.title(t), 'twitch.category': c => twitch.category(c), 'twitch.vod': () => twitch.lastVod(),
+    'clips.vod': (url, n) => clipVod(url, n),
+    'app.restart': () => { setTimeout(() => { app.isQuitting = true; app.relaunch(); app.exit(0); }, 200); return 'restarting'; },
   });
   // HUD quick controls: only these tool actions can be triggered from the UI.
   const QUICK = { media: /^(play|pause|next|previous)$/, volume: /^(up|down|mute)$/, lights: /^(on|off|status)$/ };
@@ -224,6 +296,7 @@ app.whenReady().then(() => {
     catch (e) { return { error: e.message }; }
   });
   ipcMain.handle('clips:download', async (_e, { url, section }) => {
+    if (!section && /twitch\.tv\/videos\//i.test(url)) return { error: clipVod(String(url).trim()) };   // whole VOD: never download it all
     try {
       const file = await clips.download(String(url || '').trim(), { section, onProgress: p => win?.webContents.send('clips:status', { p, s: 'downloading' }) });
       return { file, url: require('url').pathToFileURL(file).href, ...(await clips.probe(file)) };
@@ -261,6 +334,7 @@ app.whenReady().then(() => {
     { label: 'Stop', click: () => { claude.cancel(); win?.webContents.send('ui', 'stop'); } },
     { type: 'separator' },
     { label: 'Talk (Ctrl+Shift+Space)', click: () => { show(); win.webContents.send('ptt'); } },
+    { label: 'Hands board', click: () => openHands().catch(e => win?.webContents.send('notice', e.message)) },
     { label: 'Toggle voice', click: () => win?.webContents.send('ui', 'voice') },
     { label: 'Toggle hands-free', click: () => win?.webContents.send('ui', 'handsfree') },
     { type: 'separator' },

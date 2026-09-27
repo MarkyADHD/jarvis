@@ -18,6 +18,14 @@ function setMode(m, label) {
   S.mode = m; $('stateLbl').textContent = label; $('sess').textContent = m.toUpperCase();
   if (m !== 'idle') S.glitch = 0.4;
 }
+// Feed the voice overlay (main decides whether it shows): mode + live level while listening/speaking.
+let coreLive = false;
+setInterval(() => {
+  if (anim === 'off') S.energy *= 0.8;   // drawReactor normally decays it, but it isn't running while hidden
+  const on = S.mode !== 'idle';   // listening -> thinking -> speaking, stays up until he's done
+  if (on || coreLive) jarvis.core(on ? { mode: S.mode, energy: S.energy } : null);
+  coreLive = on;
+}, 33);
 addEventListener('mousemove', e => { S.mx = e.clientX / innerWidth - 0.5; S.my = e.clientY / innerHeight - 0.5; });
 
 // ---------- canvas helpers ----------
@@ -559,7 +567,7 @@ const Voice = (() => {
         let sum = 0; for (const v of data) sum += (v - 128) ** 2;
         S.energy = Math.max(S.energy, Math.min(1.4, Math.sqrt(sum / data.length) / 22));
       }
-      requestAnimationFrame(meter);
+      setTimeout(meter, 33);   // timer, not rAF: keeps metering for the voice overlay while the HUD is hidden
     })();
   }
   async function pump() {
