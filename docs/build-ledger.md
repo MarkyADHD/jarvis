@@ -87,3 +87,28 @@ Follow-up same day: board now opens in its own Jarvis window (tray 'Hands board'
 
 ## 2026-09-27 -- Double-spoken replies fixed
 - `src/main/claude.js`: the silent "stale resumed session" retry now only fires if no text has streamed yet (it used to re-send the message after a reply was already spoken, so Jarvis said it twice). Output from a killed Claude process (cancel/retry) is ignored. The overlay window was checked and never triggers TTS. `node --check` + `npm test` (13/13) pass; needs an app restart.
+
+## 2026-09-27 -- StreamLadder-style caption styles
+- `clips.js` CAPTION_STYLES: classic (6 words), bold (big yellow, 3 words, VOD default), pop (one word at a time), boxed (translucent box). Captions are re-split per style at export.
+- `pc.js vod <link|latest> [count] [style]`; `clips.vod` bridge passes the style through.
+- Tested: exported a 4s split-layout test clip in all four styles with FFmpeg, eyeballed frames for pop and boxed; `npm test` 13/13.
+
+## 2026-09-27 - Memory vault (ai-memory-vault style)
+- New `src/main/vault.js`: memories are markdown notes in `E:\JarvisMemory\Vault` (override with JARVIS_VAULT), one note per kind, bullets `- [importance] text`. Obsidian can open it, not required.
+- Boot context = `Index.md` + top 40 bullets + list of other notes. `pc.js recall <note|words>` pulls the rest on demand; `pc.js remember` now writes to the vault.
+- 8 memories migrated from memories.jsonl (backup: memories.jsonl.pre-vault.bak; jsonl left in place). Code backups: *.pre-vault.bak.
+- Tested: `node src/main/vault.js` self-check, node --check, npm test 13/13, live recall. Needs an app restart.
+
+## 2026-09-27 -- Clipper round 2: StreamLadder parity
+- Word-synced captions: Whisper word timestamps (`return_timestamps: 'word'`) -> ASS subtitles where the spoken word pops (colour + scale). Styles: bold (default), pop (one word), highlight (green box), boxed, classic. Edited lines fall back to length-weighted word timing. Clip Studio has a caption style picker.
+- 60fps export when the source is 50fps+ (was always 30).
+- VOD autopilot: each clip gets a virality score 0-100 (chat/audio spike vs the best moment + hype words), a hook title and hashtags from a one-shot `claude -p --model haiku`; clips land ranked in `Jarvis Clips\<VOD title> <date>\NN - score - title.mp4` with `clips.txt`, and the folder opens when done.
+- "Clip that" live: `pc.js clipthat` -> Twitch clip, waits for processing, downloads it, exports vertical with captions, notifies and shows it.
+- Fix: yt-dlp downloads use `--restrict-filenames`; non-ASCII VOD titles made the printed path unreadable and every VOD clip failed.
+- Tested: real 2.9h Twitch VOD, 3 clips end to end in 157s (1080x1920, 60fps, synced captions, titles/hashtags). All five styles rendered on a speech test clip. `npm test` 13/13. Not tested: clipthat against a live stream.
+- Skipped: auto facecam detection (uses the saved facecam box); emoji captions.
+
+## 2026-09-27 -- Facecam auto-detection
+- `clips.findFacecam`: 3 sampled frames per clip, zero-shot "a human face" (Xenova/owlvit-base-patch32, q8, local); the face that stays put across frames wins (game characters move), and the split's top panel is cropped around it. No steady face means no cam in that shot, so the clip uses full-frame blur. If detection itself fails, the saved facecam box is used.
+- Used per clip by the VOD autopilot and "clip that" (cams move between scenes, so it's per clip, not per VOD); Clip Studio auto-places its facecam box on load.
+- Tested: 3 sections of a real Twitch VOD with the cam in two different spots; face centred in the top panel every time, ~1.5-3s per clip. Unit test for steadyFace/camAround.

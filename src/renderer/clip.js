@@ -49,6 +49,10 @@ const Clip = (() => {
     $('cReveal').hidden = true; $('cBar').style.width = '0'; msg('Set your in and out points, pick a layout, then export.');
     renderCaps(); overlay(); timeline();
     $('cMoments').textContent = ''; tl.querySelectorAll('.mk').forEach(m => m.remove());
+    // Auto-place the facecam box on his face (drag it if it's off).
+    jarvis.clips.facecam({ file: r.file, start: 0, end: Math.min(r.duration, 120) }).then(f => {
+      if (f?.cam && C2.clip === r) { C2.cam = f.cam; overlay(); msg('Found your facecam. Pick the split layout to use it.'); }
+    });
   }
 
   // Facecam box: drag to move, drag the bottom-right corner to resize.
@@ -92,7 +96,7 @@ const Clip = (() => {
   $('cExport').onclick = async () => {
     if (!C2.clip || C2.busy) return; C2.busy = true; msg('Exporting…'); $('cBar').style.width = '0'; $('cReveal').hidden = true;
     const r = await jarvis.clips.export({ input: C2.clip.file, start: C2.inP, end: C2.outP, layout: C2.layout, facecam: C2.cam,
-      captions: $('cBurn').checked ? C2.caps.filter(c => c.text.trim()) : [] });
+      captions: $('cBurn').checked ? C2.caps.filter(c => c.text.trim()) : [], captionStyle: $('cStyle').value });
     C2.busy = false;
     if (r.error) return msg(r.error, true);
     C2.out = r.output; $('cReveal').hidden = false; msg('Done: ' + r.output.split(/[\\/]/).pop());

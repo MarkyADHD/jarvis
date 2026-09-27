@@ -7,13 +7,63 @@ const path = require('path');
 
 const W = 1080, H = 1920;
 const LAYOUTS = ['crop', 'blur', 'split'];
+// StreamLadder-style captions: word-synced, the word being spoken pops. ASS colours are &HBBGGRR.
+// words = max words on screen; hi = active-word colour (null = no highlight); box = coloured box behind the active word.
+const CAPTION_STYLES = {
+  bold:      { words: 3, font: 'Arial Black', size: 78, hi: '&H00FFFF', upper: true },          // white caps, yellow active word (default)
+  pop:       { words: 1, font: 'Arial Black', size: 118, hi: '&H00FFFF', upper: true },         // one big word at a time
+  highlight: { words: 4, font: 'Arial Black', size: 74, hi: '&HFFFFFF', box: '&H3CC814', upper: true },   // green box behind the active word
+  boxed:     { words: 4, font: 'Bahnschrift', size: 64, hi: null, panel: true },                  // plain lines on a dark panel
+  classic:   { words: 6, font: 'Bahnschrift', size: 58, hi: null },                               // the old look
+};
+
+// Caption lines [{ start, end, text, words? }] -> flat word timings. Real Whisper word times when the
+// line wasn't edited; otherwise the line's time is shared out by word length.
+function wordTimes(caps) {
+  const out = [];
+  for (const c of caps) {
+    const ws = String(c.text || '').trim().split(/\s+/).filter(Boolean);
+    if (!ws.length || !(c.end > c.start)) continue;
+    if (c.words?.length === ws.length) { c.words.forEach((w, i) => out.push({ w: ws[i], s: w.s, e: w.e })); continue; }
+    const total = ws.reduce((n, w) => n + w.length + 1, 0); let t = c.start;
+    for (const w of ws) { const d = (c.end - c.start) * (w.length + 1) / total; out.push({ w, s: t, e: t + d }); t += d; }
+  }
+  return out;
+}
+// Words -> on-screen groups of <= n words; a pause (>0.6s) or a sentence end starts a new group.
+function groupWords(words, n) {
+  const g = [];
+  for (const w of words) {
+    const cur = g[g.length - 1], prev = cur?.[cur.length - 1];
+    if (!cur || cur.length >= n || w.s - prev.e > 0.6 || /[.!?]$/.test(prev.w)) g.push([w]); else cur.push(w);
+  }
+  return g;
+}
+const assT = s => { const cs = Math.max(0, Math.round(s * 100)), p = n => String(n).padStart(2, '0'); return `${cs / 360000 | 0}:${p(cs / 6000 % 60 | 0)}:${p(cs / 100 % 60 | 0)}.${p(cs % 100)}`; };
+// Word-synced ASS subtitles on the 1080x1920 canvas. marginV = distance from the bottom in px.
+function toAss(caps, styleName = 'bold', marginV = 520) {
+  const st = CAPTION_STYLES[styleName] || CAPTION_STYLES.bold;
+  const head = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\n\n[V4+ Styles]\n` +
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n' +
+    `Style: C,${st.font},${st.size},&H00FFFFFF,&H00FFFFFF,${st.panel ? '&H60000000' : '&H00000000'},&H80000000,1,0,0,0,100,100,0,0,${st.panel ? 3 : 1},${st.panel ? 16 : Math.round(st.size / 11)},${st.panel ? 0 : 4},2,70,70,${marginV},1\n\n` +
+    '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n';
+  const ev = (s, e, text) => `Dialogue: 0,${assT(s)},${assT(e)},C,,0,0,0,,${text}`, lines = [];
+  for (const g of groupWords(wordTimes(caps), st.words)) {
+    const txt = g.map(w => (st.upper ? w.w.toUpperCase() : w.w).replace(/[{}\\]/g, '')), end = g[g.length - 1].e;
+    if (!st.hi) { lines.push(ev(g[0].s, end, `{\\fad(80,0)}${txt.join(' ')}`)); continue; }
+    const on = st.box ? `{\\c${st.hi}&\\3c${st.box}&\\bord16}` : `{\\c${st.hi}&\\fscx122\\fscy122\\t(0,110,\\fscx108\\fscy108)}`;
+    g.forEach((w, i) => lines.push(ev(w.s, i + 1 < g.length ? g[i + 1].s : end,   // one event per spoken word; that word pops
+      (i ? '' : '{\\fad(60,0)}') + txt.map((t, j) => j === i ? `${on}${t}{\\r}` : t).join(' '))));
+  }
+  return head + lines.join('\n') + '\n';
+}
 
 function probe(file) {
   return new Promise((ok, fail) => execFile('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file], { windowsHide: true }, (err, out) => {
     if (err) return fail(new Error('Could not read that video.'));
     const j = JSON.parse(out), v = j.streams.find(s => s.codec_type === 'video');
     if (!v) return fail(new Error('No video stream in that file.'));
-    ok({ duration: +j.format.duration, width: v.width, height: v.height, hasAudio: j.streams.some(s => s.codec_type === 'audio') });
+    ok({ duration: +j.format.duration, width: v.width, height: v.height, fps: (([a, b]) => +a / (+b || 1))(String(v.avg_frame_rate || '30/1').split('/')), hasAudio: j.streams.some(s => s.codec_type === 'audio') });
   }));
 }
 
@@ -35,15 +85,15 @@ function filterFor(layout, facecam) {
 // Filter-graph path escaping for the subtitles filter (Windows drive colon, quotes, backslashes).
 const filterPath = p => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 
-function buildArgs({ input, output, start = 0, end, layout = 'blur', facecam, srt }) {
+function buildArgs({ input, output, start = 0, end, layout = 'blur', facecam, subs, fps = 30 }) {
   if (!LAYOUTS.includes(layout)) throw new Error(`layout must be one of ${LAYOUTS.join(', ')}`);
   const s = Math.max(0, +start || 0), e = +end;
   if (!(e > s)) throw new Error('Out point must be after the in point.');
   let fc = filterFor(layout, facecam);
-  if (srt) fc = fc.replace(/\[v\]$/, `[vs];[vs]subtitles='${filterPath(srt)}':force_style='FontName=Bahnschrift,FontSize=15,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=70'[v]`);
+  if (subs) fc = fc.replace(/\[v\]$/, `[vs];[vs]subtitles='${filterPath(subs)}'[v]`);
   return ['-y', '-hide_banner', '-ss', s.toFixed(3), '-to', e.toFixed(3), '-i', input,
     '-filter_complex', fc, '-map', '[v]', '-map', '0:a?',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', fps >= 50 ? '60' : '30',
     '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', output];
 }
 
@@ -77,6 +127,12 @@ function splitCaptions(chunks, maxWords = 6) {
   return out;
 }
 
+// Whisper word chunks -> editable lines (<= 6 words) that keep their per-word times.
+function wordLines(chunks) {
+  const ws = chunks.map(c => ({ w: c.text.trim(), s: c.timestamp[0], e: c.timestamp[1] ?? c.timestamp[0] + 0.3 })).filter(w => w.w);
+  return groupWords(ws, 6).map(g => ({ start: +g[0].s.toFixed(2), end: +g[g.length - 1].e.toFixed(2), text: g.map(w => w.w).join(' '), words: g.map(w => ({ s: w.s, e: w.e })) }));
+}
+
 async function caption(input, start, end, asr) {
   const pcm = await extractPcm(input, start, end);
   if (pcm.length < 16000 * 0.5) return [];
@@ -84,7 +140,10 @@ async function caption(input, start, end, asr) {
   if (peak > 1) for (let i = 0; i < pcm.length; i++) pcm[i] /= peak;   // clipped/boosted audio breaks Whisper's timestamp mode
   // Chunking only for >30s audio: with an exactly-30s window the chunker returns nothing.
   const long = pcm.length > 16000 * 29;
-  const r = await asr(pcm, long ? { return_timestamps: true, chunk_length_s: 20, stride_length_s: 4 } : { return_timestamps: true });
+  const chunk = long ? { chunk_length_s: 20, stride_length_s: 4 } : {};
+  const words = await asr(pcm, { return_timestamps: 'word', ...chunk }).catch(() => null);   // word times = synced captions
+  if (words?.chunks?.length) return wordLines(words.chunks);
+  const r = await asr(pcm, { return_timestamps: true, ...chunk });
   if (r.chunks?.length) return splitCaptions(r.chunks);
   // Timestamp mode sometimes returns nothing over steady background noise (game audio); plain mode still works.
   // Fall back to plain text spread evenly over the window (approximate timing; lines stay editable).
@@ -99,22 +158,24 @@ function outDir() {
 }
 
 // Runs the export; onProgress(0..1). Resolves to the output path.
-function exportClip(opts, onProgress = () => {}) {
+async function exportClip(opts, onProgress = () => {}) {
+  opts = { ...opts, fps: opts.fps ?? (await probe(opts.input).catch(() => ({}))).fps };   // 60fps sources stay 60
   const base = path.basename(opts.input).replace(/\.[^.]+$/, '').replace(/[^\w\- ]+/g, '').slice(0, 60) || 'clip';
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+  const stamp = new Date().toISOString().slice(0, 23).replace(/[T:.]/g, '-');
   const output = path.join(outDir(), `${base}_${opts.layout}_${stamp}.mp4`);
-  let srt = null;
+  let subs = null;
   if (opts.captions?.length) {
-    srt = path.join(os.tmpdir(), `jarvis_caps_${Date.now()}.srt`);
-    fs.writeFileSync(srt, toSrt(opts.captions));
+    subs = path.join(os.tmpdir(), `jarvis_caps_${Date.now()}_${process.hrtime()[1]}.ass`);
+    // Captions sit just under the facecam seam on split, lower third otherwise.
+    fs.writeFileSync(subs, toAss(opts.captions, opts.captionStyle, opts.layout === 'split' ? 1080 : 520));
   }
-  const args = buildArgs({ ...opts, output, srt }), dur = opts.end - opts.start;
+  const args = buildArgs({ ...opts, output, subs }), dur = opts.end - opts.start;
   return new Promise((ok, fail) => {
     const p = spawn('ffmpeg', args, { windowsHide: true });
     let err = '';
     p.stdout.on('data', d => { const m = /out_time_ms=(\d+)/.exec(String(d)); if (m) onProgress(Math.min(1, +m[1] / 1e6 / dur)); });
     p.stderr.on('data', d => { err = (err + d).slice(-600); });
-    p.on('close', code => { if (srt) fs.unlink(srt, () => {}); code ? fail(new Error('Export failed: ' + err.trim().split('\n').pop())) : (onProgress(1), ok(output)); });
+    p.on('close', code => { if (subs) fs.unlink(subs, () => {}); code ? fail(new Error('Export failed: ' + err.trim().split('\n').pop())) : (onProgress(1), ok(output)); });
   });
 }
 
@@ -185,7 +246,7 @@ function download(url, { section, onProgress = () => {} } = {}) {
   if (!/^https?:\/\/\S+$/i.test(url) && !/^file:\/\/\S+$/i.test(url)) return Promise.reject(new Error('That doesn\'t look like a link.'));
   const bin = ytDlp(); if (!bin) return Promise.reject(new Error('yt-dlp is not installed.'));
   const dir = path.join(outDir(), 'sources'); fs.mkdirSync(dir, { recursive: true });
-  const args = ['--no-playlist', '--newline', '-f', 'bv*[height<=1080]+ba/b[height<=1080]/b', '--merge-output-format', 'mp4',
+  const args = ['--no-playlist', '--newline', '--restrict-filenames', '-f', 'bv*[height<=1080]+ba/b[height<=1080]/b', '--merge-output-format', 'mp4',
     '-o', path.join(dir, `%(title).80B [%(id)s]${section ? ' @%(section_start)d' : ''}.%(ext)s`), '--print', 'after_move:filepath'];
   if (url.startsWith('file://')) args.push('--enable-file-urls');
   if (section) args.push('--download-sections', `*${Math.max(0, +section.start || 0)}-${+section.end}`, '--force-keyframes-at-cuts');
@@ -234,8 +295,73 @@ async function chatMoments(videoID, duration, { step = 60, count = 25, onProgres
   const med = rows.map(r => r.rate).sort((a, b) => a - b)[rows.length >> 1] || 0.01;
   return rows.map(r => ({ t: r.peak, score: r.rate / med })).filter(r => r.score > 1.3).sort((a, b) => b.score - a.score).slice(0, count);
 }
+// ---------- facecam auto-detect: find his face in a few frames, crop the split's top panel around it ----------
+// Zero-shot "a human face" (OWL-ViT, local, ~150 MB once). The streamer's face sits in the same spot in
+// every frame; game characters move, so the box seen in the most frames wins.
+let faceP = null;
+const faceDetector = () => (faceP ??= (async () => {
+  const { pipeline, env } = await import('@huggingface/transformers');
+  env.cacheDir = path.join(process.env.LOCALAPPDATA || os.homedir(), 'jarvis-v3', 'models');
+  return pipeline('zero-shot-object-detection', 'Xenova/owlvit-base-patch32', { dtype: 'q8' });
+})().catch(e => { faceP = null; throw e; }));
+
+// Face boxes per frame [[{ score, box: {xmin,ymin,xmax,ymax} (0..1) }]] -> the face that stays put, or null.
+function steadyFace(frames, minScore = 0.12) {
+  const cands = frames.flat().filter(d => d.score >= minScore);
+  const cx = b => (b.xmin + b.xmax) / 2, cy = b => (b.ymin + b.ymax) / 2;
+  let best = null;
+  for (const c of cands) {
+    const seen = frames.filter(f => f.some(d => d.score >= minScore && Math.abs(cx(d.box) - cx(c.box)) < 0.04 && Math.abs(cy(d.box) - cy(c.box)) < 0.06)).length;
+    if (!best || seen > best.seen || (seen === best.seen && c.score > best.c.score)) best = { c, seen };
+  }
+  return best && (frames.length < 2 || best.seen >= 2) ? best.c.box : null;
+}
+
+// Face box -> facecam crop (fractions of the source) shaped like the split's top panel, face a bit above centre.
+function camAround(b, srcW = 1920, srcH = 1080) {
+  const panel = W / (Math.round(H * 0.34 / 2) * 2);
+  let h = Math.min(1, (b.ymax - b.ymin) * 2.4), w = h * srcH * panel / srcW;
+  if (w > 1) { w = 1; h = srcW / panel / srcH; }
+  const x = Math.min(1 - w, Math.max(0, (b.xmin + b.xmax) / 2 - w / 2)), y = Math.min(1 - h, Math.max(0, (b.ymin + b.ymax) / 2 - h * 0.42));
+  return { x: +x.toFixed(4), y: +y.toFixed(4), w: +w.toFixed(4), h: +h.toFixed(4) };
+}
+
+// Samples 3 frames of [start,end]; resolves to a facecam box or null (no steady face = no facecam in this shot).
+async function findFacecam(input, start = 0, end) {
+  const { RawImage } = await import('@huggingface/transformers');
+  const { width, height, duration } = await probe(input), e = end ?? duration, det = await faceDetector(), frames = [];
+  for (const k of [0.2, 0.5, 0.8]) {
+    const png = path.join(os.tmpdir(), `jarvis_face_${process.hrtime()[1]}.png`);
+    await new Promise(ok => execFile('ffmpeg', ['-v', 'error', '-y', '-ss', String(start + (e - start) * k), '-i', input, '-frames:v', '1', '-vf', 'scale=640:-2', png], { windowsHide: true }, ok));
+    try { frames.push(await det(await RawImage.read(png), ['a human face'], { threshold: 0.08, percentage: true })); } catch {}
+    fs.unlink(png, () => {});
+  }
+  const face = steadyFace(frames);
+  return face ? camAround(face, width, height) : null;
+}
+
+// Split around the detected face; no steady face means no facecam in this shot, so full-frame blur instead.
+// Detection failing outright (model download etc.) falls back to the saved box.
+async function autoLayout(input, start, end, saved) {
+  try { const cam = await findFacecam(input, start, end); return cam ? { layout: 'split', facecam: cam } : { layout: 'blur' }; }
+  catch { return { layout: 'split', facecam: saved }; }
+}
+
+// Hook title + hashtags from what was said, via a one-shot Claude (haiku). Falls back to the opening words.
+function describe(said) {
+  const fallback = { title: said.split(/\s+/).slice(0, 8).join(' ') || 'Stream moment', hashtags: '#twitch #gaming #streamer #fyp' };
+  if (!said.trim()) return Promise.resolve(fallback);
+  const { Claude } = require('./claude'), bin = new Claude().bin;
+  const prompt = 'You write TikTok/Shorts captions for a streamer\'s clips. From this clip transcript, reply with ONLY JSON ' +
+    '{"title": "<punchy hook title, max 8 words, no emojis>", "hashtags": "<5 relevant hashtags, space separated>"}.\nTranscript: ' + said.slice(0, 1500);
+  return new Promise(ok => execFile(bin, ['-p', prompt, '--model', 'haiku'], { windowsHide: true, timeout: 90000 }, (e, out) => {
+    try { const j = JSON.parse(/\{[\s\S]*\}/.exec(out)[0]); ok({ title: String(j.title || fallback.title), hashtags: String(j.hashtags || fallback.hashtags) }); }
+    catch { ok(fallback); }
+  }));
+}
+
 // Up to `count` 9:16 clips (split facecam layout, burned subtitles) from a VOD link. asr optional (null = no subs).
-async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', facecam, onProgress = () => {} } = {}) {
+async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', facecam, captionStyle = 'bold', onProgress = () => {} } = {}) {
   const bin = ytDlp(); if (!bin) throw new Error('yt-dlp is not installed.');
   const info = JSON.parse(await ytJson(bin, ['--no-playlist', '-J', '--', url]));
   const duration = +info.duration;
@@ -251,21 +377,38 @@ async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', f
   const lead = how === 'chat' ? clipLen - 5 : 20, wins = [];
   for (const p of peaks) {
     const start = Math.max(0, Math.min(p.t - lead, duration - clipLen));
-    if (wins.every(w => Math.abs(w.start - start) >= clipLen)) wins.push({ start, end: Math.min(duration, start + clipLen) });
+    if (wins.every(w => Math.abs(w.start - start) >= clipLen)) wins.push({ start, end: Math.min(duration, start + clipLen), score: p.score });
   }
-  const out = [];
+  // One folder per VOD; clips end up ranked "01 - 92 - Hook title.mp4" with a clips.txt of titles + hashtags.
+  const dir = path.join(outDir(), `${String(info.title || 'VOD').replace(/[^\w\- ]+/g, '').trim().slice(0, 60) || 'VOD'} ${new Date().toISOString().slice(0, 10)}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const top = Math.max(...wins.map(w => w.score), 1e-9), made = [], failed = [];
   for (const [i, w] of wins.entries()) {
     onProgress(i / wins.length, `clip ${i + 1} of ${wins.length}`);
     try {
       const file = await download(url, { section: { start: Math.floor(w.start), end: Math.ceil(w.end) } });
       const { duration: d } = await probe(file);
       const captions = asr ? await caption(file, 0, d, asr).catch(() => []) : [];
-      out.push(await exportClip({ input: file, start: 0, end: d, layout, facecam, captions }));
+      const said = captions.map(c => c.text).join(' ');
+      const shot = layout === 'split' ? await autoLayout(file, 0, d, facecam) : { layout, facecam };
+      const tmp = await exportClip({ input: file, start: 0, end: d, ...shot, captions, captionStyle });
       fs.unlink(file, () => {});
-    } catch (e) { out.push('FAILED ' + e.message); }
+      // Virality 0-100: how hard chat/audio spiked vs the best moment, plus hype words in what was said.
+      const virality = Math.min(100, Math.round(w.score / top * 80 + Math.min(20, cueScore(said) * 2)));
+      made.push({ tmp, virality, at: w.start, said, ...(await describe(said)) });
+    } catch (e) { failed.push('FAILED ' + e.message); }
   }
+  made.sort((a, b) => b.virality - a.virality);
+  const clean = t => t.replace(/[^\w\- ']+/g, '').trim().slice(0, 70);
+  made.forEach((m, i) => {
+    m.file = path.join(dir, `${String(i + 1).padStart(2, '0')} - ${m.virality} - ${clean(m.title) || 'clip'}.mp4`);
+    fs.renameSync(m.tmp, m.file);
+  });
+  const hms = s => `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  fs.writeFileSync(path.join(dir, 'clips.txt'), made.map((m, i) =>
+    `#${i + 1}  virality ${m.virality}/100  (VOD ${hms(m.at)})\n${m.title}\n${m.hashtags}\n"${m.said.slice(0, 300)}"\n`).join('\n'));
   onProgress(1, 'done');
-  return { how, clips: out };
+  return { how, dir, clips: [...made.map(m => m.file), ...failed] };
 }
 
-module.exports = { autoVod, chatMoments, findMoments, spikes, cueScore, download, ytDlp, probe, buildArgs, toSrt, splitCaptions, caption, exportClip, outDir, LAYOUTS };
+module.exports = { autoVod, chatMoments, findMoments, spikes, cueScore, download, ytDlp, probe, buildArgs, toSrt, splitCaptions, caption, exportClip, outDir, LAYOUTS, CAPTION_STYLES, toAss, wordTimes, groupWords, describe, findFacecam, autoLayout, steadyFace, camAround };

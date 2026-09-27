@@ -274,10 +274,12 @@ function run(action, arg = '') {
       return clips.probe(file).then(p => clips.exportClip({ input: file, start: Math.max(0, p.duration - secs), end: p.duration, layout }))
         .then(out => `clip saved: ${out}`);
     }
-    case 'vod': {                         // vod <link|latest> [count<=25]: auto-clip a whole VOD (chat/audio picks moments, only those get downloaded)
-      const br = require('../main/bridge'), [what = 'latest', n] = arg.split(/\s+/);
+    case 'clipthat': return require('../main/bridge').call(DATA, 'clips.live', []);   // live: Twitch clip -> vertical captioned short
+    case 'vod': {                         // vod <link|latest> [count<=25] [bold|pop|highlight|boxed|classic captions]: auto-clip a whole VOD (chat/audio picks moments, only those get downloaded)
+      const br = require('../main/bridge'), [what = 'latest', ...rest] = arg.split(/\s+/);
+      const n = rest.find(w => /^\d+$/.test(w)), style = rest.map(w => w.toLowerCase()).find(w => w in require('../main/clips').CAPTION_STYLES);
       const link = /^https?:/i.test(what) ? Promise.resolve(what) : br.call(DATA, 'twitch.vod', []).then(v => (/(https:\/\/\S+)/.exec(v) || [])[1]);
-      return link.then(url => { if (!url) throw new Error('vod <link|latest> [count]: no VOD link found'); return br.call(DATA, 'clips.vod', [url, n]); });
+      return link.then(url => { if (!url) throw new Error('vod <link|latest> [count]: no VOD link found'); return br.call(DATA, 'clips.vod', [url, n, style]); });
     }
     case 'thumbnail': {                   // thumbnail "<title>" [latest|"<file>"] [at <seconds>]   |   thumbnail ai "<scene prompt>" "<title>"
       const thumbs = require('../main/thumbs'), clips = require('../main/clips');
@@ -345,7 +347,7 @@ function run(action, arg = '') {
       return JSON.stringify({ host: os.hostname(), cpu: os.cpus()[0]?.model.trim(), cores: os.cpus().length,
         ramGB: +(os.totalmem() / 2 ** 30).toFixed(1), freeGB: +(os.freemem() / 2 ** 30).toFixed(1), uptimeH: +(os.uptime() / 3600).toFixed(1) });
     default:
-      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, map, window, clipboard, power, clip, vod, thumbnail, twitch, discord, hands, lock, info');
+      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, lock, info');
   }
 }
 

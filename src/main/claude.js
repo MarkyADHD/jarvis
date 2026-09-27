@@ -30,7 +30,8 @@ You can control this Windows PC with exactly one command (run it with the Bash t
   node src/tools/pc.js clipboard get | clipboard set <text>
   node src/tools/pc.js power sleep | power shutdown [minutes] | power restart [minutes] | power cancel   (ALWAYS confirm with him before shutdown/restart)
   node src/tools/pc.js power restart-app   (relaunches the Jarvis app itself, not the PC)
-  node src/tools/pc.js vod <link|latest> [count<=25]   (auto-clips a whole Twitch/YouTube VOD into up to 25 subtitled split-facecam shorts in the background; "latest" = his last broadcast)
+  node src/tools/pc.js clipthat   ("clip that" / "clip it" while he is live: Twitch clip of the last ~30s, then a vertical split-facecam short with word-synced captions lands in Jarvis Clips a minute later)
+  node src/tools/pc.js vod <link|latest> [count<=25] [bold|pop|highlight|boxed|classic]   ("find clips from my latest VOD" = vod latest. Auto-clips a whole Twitch/YouTube VOD into up to 25 ranked shorts (virality score, hook title, hashtags in clips.txt) with word-synced captions, in the background; default captions bold = white caps with the spoken word popping yellow; pop = one word at a time; highlight = green box on the spoken word)
   node src/tools/pc.js clip [latest|"<file>"] [seconds=30] [crop|blur|split]   (last N seconds of his newest recording -> 9:16 short in Desktop\Jarvis Clips; for trims/captions tell him to open CLIPS in the HUD)
   node src/tools/pc.js thumbnail "<title>" [latest|"<file>"] [at <seconds>]   (1280x720 PNG from his loudest moment by default)
   node src/tools/pc.js thumbnail ai "<scene prompt>" "<title>"               (AI background instead of a video frame)

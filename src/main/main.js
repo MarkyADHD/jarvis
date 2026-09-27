@@ -197,17 +197,37 @@ app.whenReady().then(() => {
   ipcMain.handle('connect:nanoleaf', async () => { try { return { msg: await nanoleaf.pair() }; } catch (e) { return { error: e.message }; } });
   // Whole-VOD autopilot runs in the background; the result arrives as a notification.
   let vodBusy = false;
-  const clipVod = (url, count) => {
+  const clipVod = (url, count, style) => {
     if (vodBusy) return 'Already clipping a VOD, sir.';
     vodBusy = true;
     stt.load().catch(() => null)                                  // no Whisper model = clips without subtitles
-      .then(asr => clips.autoVod(url, asr, { count: Math.min(25, +count || 25), facecam: readSet().facecam,
+      .then(asr => clips.autoVod(url, asr, { count: Math.min(25, +count || 25), facecam: readSet().facecam, captionStyle: style || 'bold',
         onProgress: (p, s) => win?.webContents.send('clips:status', { p, s }) }))
       .then(r => { const ok = r.clips.filter(c => !c.startsWith('FAILED')).length;
-        new Notification({ title: 'Jarvis VOD clips', body: `${ok} of ${r.clips.length} clips saved to Jarvis Clips (picked by ${r.how}).` }).show(); },
+        new Notification({ title: 'Jarvis VOD clips', body: `${ok} of ${r.clips.length} clips ranked by virality, with titles and hashtags in clips.txt (picked by ${r.how}).` }).show(); shell.openPath(r.dir); },
         e => new Notification({ title: 'Jarvis VOD clips', body: 'VOD clipping failed: ' + e.message }).show())
       .finally(() => { vodBusy = false; });
     return 'Clipping the VOD in the background, up to 25 clips into Desktop\\Jarvis Clips. A notification lands when done.';
+  };
+  // "Clip that" while live: Twitch clip of the last ~30s -> vertical, word-synced captions, into Jarvis Clips.
+  const clipThat = async () => {
+    const made = await twitch.clip();                                       // throws if Twitch isn't connected / offline
+    const link = /(https:\/\/clips\.twitch\.tv\/\S+)/.exec(made)[1];
+    (async () => {
+      let file;
+      for (let i = 0; i < 8 && !file; i++) {                                // Twitch needs ~15-30s to process a new clip
+        await new Promise(r => setTimeout(r, 8000));
+        file = await clips.download(link).catch(() => null);
+      }
+      if (!file) throw new Error('Twitch never finished processing the clip: ' + link);
+      const { duration } = await clips.probe(file);
+      const captions = await clips.caption(file, 0, duration, await stt.load().catch(() => null)).catch(() => []);
+      const out = await clips.exportClip({ input: file, start: 0, end: duration, ...(await clips.autoLayout(file, 0, duration, readSet().facecam)), captions, captionStyle: 'bold' });
+      fs.unlink(file, () => {});
+      new Notification({ title: 'Jarvis clip', body: 'Clipped and made vertical: ' + path.basename(out) }).show();
+      shell.showItemInFolder(out);
+    })().catch(e => new Notification({ title: 'Jarvis clip', body: 'Clip that failed: ' + e.message }).show());
+    return `Clipped it on Twitch (${link}). The vertical, captioned version lands in Jarvis Clips in about a minute.`;
   };
   // barehands (Jared Rhodenizer, AGPL-3.0, in barehands/): its own window, only when asked for.
   // The Python board server runs only while that window is open.
@@ -235,7 +255,7 @@ app.whenReady().then(() => {
     'spotify.like': () => spotify.like(), 'spotify.shuffle': on => spotify.shuffle(on),
     'twitch.status': () => twitch.status(), 'twitch.clip': () => twitch.clip(), 'twitch.ad': s => twitch.ad(s),
     'twitch.title': t => twitch.title(t), 'twitch.category': c => twitch.category(c), 'twitch.vod': () => twitch.lastVod(),
-    'clips.vod': (url, n) => clipVod(url, n),
+    'clips.vod': (url, n, style) => clipVod(url, n, style), 'clips.live': () => clipThat(),
     'app.restart': () => { setTimeout(() => { app.isQuitting = true; app.relaunch(); app.exit(0); }, 200); return 'restarting'; },
   });
   // HUD quick controls: only these tool actions can be triggered from the UI.
@@ -292,6 +312,7 @@ app.whenReady().then(() => {
   ipcMain.handle('clips:caption', async (_e, { file, start, end }) => {
     try { return { captions: await clips.caption(file, start, end, await stt.load()) }; } catch (e) { return { error: e.message }; }
   });
+  ipcMain.handle('clips:facecam', async (_e, { file, start, end }) => { try { return { cam: await clips.findFacecam(file, start, end) }; } catch (e) { return { error: e.message }; } });
   ipcMain.handle('clips:export', async (_e, opts) => {
     try { return { output: await clips.exportClip(opts, p => win?.webContents.send('clips:progress', p)) }; } catch (e) { return { error: e.message }; }
   });

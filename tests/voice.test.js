@@ -30,10 +30,17 @@ test('pc tool rejects unsafe or unknown input', async () => {
 });
 
 test('clip export args are structured and validated', () => {
-  const { buildArgs, toSrt, splitCaptions } = require('../src/main/clips');
-  const a = buildArgs({ input: 'C:/x & y.mp4', output: 'o.mp4', start: 1, end: 5, layout: 'split', srt: 'C:\\t\\c.srt' });
+  const { buildArgs, toSrt, splitCaptions, toAss, wordTimes } = require('../src/main/clips');
+  const a = buildArgs({ input: 'C:/x & y.mp4', output: 'o.mp4', start: 1, end: 5, layout: 'split', subs: 'C:\\t\\c.ass', fps: 60 });
   assert.ok(a.includes('C:/x & y.mp4'));                       // file name passed as one argument, never through a shell
-  assert.match(a[a.indexOf('-filter_complex') + 1], /vstack.*subtitles='C\\:\/t\/c\.srt'/);
+  assert.match(a[a.indexOf('-filter_complex') + 1], /vstack.*subtitles='C\\:\/t\/c\.ass'/);
+  assert.strictEqual(a[a.indexOf('-r') + 1], '60');
+  // Word-synced captions: real word times kept, edited lines spread by length, spoken word highlighted.
+  assert.deepStrictEqual(wordTimes([{ start: 0, end: 1, text: 'hi there', words: [{ s: 0, e: 0.3 }, { s: 0.4, e: 1 }] }]).map(w => w.s), [0, 0.4]);
+  assert.strictEqual(wordTimes([{ start: 0, end: 2, text: 'aa bb' }])[1].s, 1);
+  const ass = toAss([{ start: 0, end: 1, text: 'go {now}', words: [{ s: 0, e: 0.5 }, { s: 0.5, e: 1 }] }], 'bold');
+  assert.match(ass, /Dialogue: 0,0:00:00\.00,0:00:00\.50,.*\{\\c&H00FFFF&.*\}GO\{\\r\} NOW/);
+  assert.match(ass, /0:00:00\.50,0:00:01\.00,.*GO \{\\c&H00FFFF/);
   assert.throws(() => buildArgs({ input: 'a', output: 'b', start: 5, end: 2 }), /Out point/);
   assert.throws(() => buildArgs({ input: 'a', output: 'b', start: 0, end: 2, layout: 'weird' }), /layout/);
   assert.strictEqual(toSrt([{ start: 0, end: 1.5, text: 'Hi' }]), '1\n00:00:00,000 --> 00:00:01,500\nHi\n');
@@ -65,4 +72,15 @@ test('file bridge round-trips requests and errors to the app', async () => {
     await assert.rejects(bridge.call(dir, 'boom'), /nope/);
     await assert.rejects(bridge.call(dir, 'missing'), /unknown command/);
   } finally { clearInterval(timer); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('facecam detection keeps the face that stays put, not a moving game character', () => {
+  const { steadyFace, camAround } = require('../src/main/clips');
+  const cam = { score: 0.2, box: { xmin: 0.12, ymin: 0.10, xmax: 0.16, ymax: 0.17 } };
+  const npc = x => ({ score: 0.3, box: { xmin: x, ymin: 0.4, xmax: x + 0.05, ymax: 0.5 } });
+  assert.deepStrictEqual(steadyFace([[cam, npc(0.3)], [cam, npc(0.6)], [npc(0.8)]]), cam.box);
+  assert.strictEqual(steadyFace([[npc(0.3)], [npc(0.6)], []]), null);                   // no steady face = no facecam in the shot
+  const c = camAround(cam.box);
+  assert.ok(c.x <= 0.12 && c.x + c.w >= 0.16 && c.y <= 0.10 && c.y + c.h >= 0.17);       // face inside the crop
+  assert.ok(Math.abs(c.w * 1920 / (c.h * 1080) - 1080 / 652) < 0.01);                    // panel-shaped
 });

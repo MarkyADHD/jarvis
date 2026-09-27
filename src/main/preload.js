@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('jarvis', {
     pick: () => ipcRenderer.invoke('clips:pick'),
     caption: o => ipcRenderer.invoke('clips:caption', o),
     export: o => ipcRenderer.invoke('clips:export', o),
+    facecam: o => ipcRenderer.invoke('clips:facecam', o),
     reveal: f => ipcRenderer.invoke('clips:reveal', f),
     moments: f => ipcRenderer.invoke('clips:moments', f),
     thumb: o => ipcRenderer.invoke('clips:thumb', o),
