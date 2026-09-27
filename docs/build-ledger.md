@@ -71,3 +71,6 @@ Tested: npm test (16 pass, tests/phone.test.js), live: HUD + /api status over th
 - 2026-09-27: weather/briefing auto-locate via IP (ipwho.is) when no city given or set; London only if lookup fails. Tested: pc.js weather with no city, npm test green.
 
 - 2026-09-27: Em/en dashes banned in persona (claude.js) and replaced with commas before TTS (voice.js speak). npm test green.
+
+- 2026-09-27: Final release 3.0.0. New skills: `pc.js news [topic]` (BBC RSS headlines, no key) and `pc.js convert <amount> <from> <to>` (ECB rates via frankfurter.dev, no key); both added to the persona. Tested live: news tech/sport, convert 100 gbp usd; npm test 16 pass.
+- 2026-09-27: 3.0.1 released (dist\3.0.1\Jarvis Setup 3.0.1.exe), pushed to main and tagged v3.0.1. Supersedes the 3.0.0 build; adds IP auto-location and scrubbed tailnet IPs from tests.
