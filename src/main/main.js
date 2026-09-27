@@ -48,10 +48,14 @@ function createWindow() {
 
 // Voice overlay: the reactor, bottom-centre, while he talks / Jarvis speaks and the HUD is in the background.
 // Click-through, never focusable, no taskbar entry; only renders while shown.
-let overlay;
+let overlay, overlayHide;
 function showOverlay(c) {
   const bg = !win || !win.isVisible() || win.isMinimized() || !win.isFocused();
-  if (!c || !bg) { if (overlay?.isVisible()) { overlay.webContents.send('core', null); overlay.hide(); } return; }
+  clearTimeout(overlayHide);
+  const hide = () => { if (overlay?.isVisible()) { overlay.webContents.send('core', null); overlay.hide(); } };
+  if (!bg) return hide();
+  if (!c) { overlayHide = setTimeout(hide, 2500); return; }   // grace period: gaps between sentences / transcribe -> reply
+
   if (!overlay) {
     const { screen } = require('electron'), a = screen.getPrimaryDisplay().workArea, S = 220;
     overlay = new BrowserWindow({ width: S, height: S, x: Math.round(a.x + (a.width - S) / 2), y: a.y + a.height - S - 8,
