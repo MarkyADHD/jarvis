@@ -266,6 +266,15 @@ function run(action, arg = '') {
       if (!require('../main/vault').add(kind, imp, m[3].trim())) return 'already remembered';
       return `remembered in the vault (${kind}, importance ${imp})`;
     }
+    case 'business': {                    // business manager: profile/goal/task/done/site/show, all kept in the memory vault
+      const v = require('../main/vault'), [, sub = 'show', rest = ''] = /^(\S+)?\s*([\s\S]*)$/.exec(raw.trim());
+      const into = { profile: ['business', 9], goal: ['goals', 8], task: ['tasks', 7] }[sub];
+      if (into) { if (!rest) throw new Error(`business ${sub} <text>`); return v.add(into[0], into[1], rest) ? `saved to ${into[0]}` : 'already there'; }
+      if (sub === 'done') return `${v.done('Tasks', rest) + v.done('Goals', rest)} item(s) marked done`;
+      if (sub === 'repo') { if (!rest) throw new Error('business repo <github url>'); v.done('Business', 'github repo'); v.add('business', 9, 'GitHub repo: ' + rest); return 'github repo saved'; }
+      if (sub === 'site') { if (!require('fs').existsSync(rest)) throw new Error('folder not found: ' + rest); v.done('Business', 'website folder'); v.add('business', 9, 'Website folder: ' + require('path').resolve(rest)); return 'website folder saved; restart-app so I can edit it'; }
+      return ['Business', 'Goals', 'Tasks'].map(n => v.recall(n)).join('\n');
+    }
     case 'recall': {                      // pull a vault note by name, or every memory matching the words
       if (!raw) throw new Error('recall <note name | words>');
       return require('../main/vault').recall(raw);
@@ -411,7 +420,7 @@ function run(action, arg = '') {
       return JSON.stringify({ host: os.hostname(), cpu: os.cpus()[0]?.model.trim(), cores: os.cpus().length,
         ramGB: +(os.totalmem() / 2 ** 30).toFixed(1), freeGB: +(os.freemem() / 2 ** 30).toFixed(1), uptimeH: +(os.uptime() / 3600).toFixed(1) });
     default:
-      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, health, lock, info');
+      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, business, health, lock, info');
   }
 }
 

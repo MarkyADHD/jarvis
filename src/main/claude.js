@@ -26,6 +26,8 @@ You can control this Windows PC with exactly one command (run it with the Bash t
   node src/tools/pc.js game list | game launch <name>     (his installed Steam games)
   node src/tools/pc.js remember [kind] [importance 1-10] <fact>   (save something worth remembering about him)
   node src/tools/pc.js recall <note name | words>   (look it up in your memory vault before saying you don't know)
+  node src/tools/pc.js business profile <fact> | goal <text> | task <text> | done <words> | site <folder> | repo <github url> | show
+                                                       (business manager: when he tells you about his business, save it with business profile; track goals and tasks; keep his business in mind when helping. After business site, Read/Edit his website files in that folder when he asks; point business site at his local clone to work on a saved GitHub repo)
   node src/tools/pc.js briefing [city]    (time, weather, reminders, now playing, PC health in one go)
   node src/tools/pc.js weather [city] | time [city] | define <word> | iss | map <place | a to b>
   node src/tools/pc.js news [world|uk|business|technology|science|entertainment|sport]   (top headlines)
@@ -72,6 +74,7 @@ class Claude extends EventEmitter {
   start() {
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
       '--include-partial-messages', '--append-system-prompt', PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : ''), '--allowedTools', ...ALLOWED];
+    const site = require('./vault').website(); if (site) args.push('--add-dir', site);   // business manager: his website folder
     const q = a => (this.shell ? JSON.stringify(a.replace(/\r?\n/g, ' ')) : a);   // only the cmd.exe fallback needs quoting
     if (this.sessionId) args.push('--resume', this.sessionId);
     this.proc = spawn(this.bin, args.map(q), { cwd: this.cwd || ROOT, stdio: ['pipe', 'pipe', 'pipe'], shell: this.shell, windowsHide: true });

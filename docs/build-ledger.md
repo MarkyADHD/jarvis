@@ -74,3 +74,4 @@ Tested: npm test (16 pass, tests/phone.test.js), live: HUD + /api status over th
 
 - 2026-09-27: Final release 3.0.0. New skills: `pc.js news [topic]` (BBC RSS headlines, no key) and `pc.js convert <amount> <from> <to>` (ECB rates via frankfurter.dev, no key); both added to the persona. Tested live: news tech/sport, convert 100 gbp usd; npm test 16 pass.
 - 2026-09-27: 3.0.1 released (dist\3.0.1\Jarvis Setup 3.0.1.exe), pushed to main and tagged v3.0.1. Supersedes the 3.0.0 build; adds IP auto-location and scrubbed tailnet IPs from tests.
+- 2026-09-28: Business manager mode. `pc.js business profile|goal|task|done|site|repo|show` stores Business/Goals/Tasks notes in the memory vault; those load into every session (vault.boot); `site <folder>` adds the website folder to Claude via --add-dir so Jarvis can edit it. vault.js self-check + npm test 16 pass; CLI smoke-tested on a temp vault.
