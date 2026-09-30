@@ -53,8 +53,15 @@ class Spotify {
     return d;
   }
   // kind: track | artist | album | playlist. Picks an exact name match if there is one, else the top result.
+  // A pasted open.spotify.com link or spotify: URI skips search entirely and plays that exact item.
   async play(query, kind = 'track') {
     if (!query) throw new Error('What should I play?');
+    const link = /(?:open\.spotify\.com\/(track|artist|album|playlist)\/|spotify:(track|artist|album|playlist):)([A-Za-z0-9]+)/.exec(query);
+    if (link) {
+      const type = link[1] || link[2], uri = `spotify:${type}:${link[3]}`, dev = await this.device();
+      await this.api('PUT', `/me/player/play?device_id=${dev.id}`, type === 'track' ? { uris: [uri] } : { context_uri: uri });
+      return `Playing your ${type} on ${dev.name}.`;
+    }
     const types = ['track', 'artist', 'album', 'playlist']; if (!types.includes(kind)) kind = 'track';
     const res = await this.api('GET', `/search?${new URLSearchParams({ q: query, type: kind, limit: '8' })}`);
     const items = (res[kind + 's']?.items || []).filter(Boolean);

@@ -416,11 +416,18 @@ function run(action, arg = '') {
       const line = (name, ok) => `${name}: ${ok ? 'OK' : 'not connected'}`;
       return [claudeOk.connected ? 'Claude CLI: OK' : `Claude CLI: ${claudeOk.error}`, line('Spotify', app.spotify), line('Twitch', app.twitch), line('Nanoleaf', app.nanoleaf), `Voice engine: ${app.voice}`].join('\n');
     })();
+    case 'doctor': {                      // doctor [check] | optimise | undo | startup enable|disable <app>
+      const d = require('../main/pcdoctor'), [sub = 'check', ...rest] = raw.split(' ');
+      if (/^optimi[sz]e$/i.test(sub)) return d.optimise(DATA);
+      if (sub === 'undo') return d.undo(DATA);
+      if (sub === 'startup') return d.startup(rest[0], rest.slice(1).join(' '));
+      return JSON.stringify(d.diagnose(), null, 1);
+    }
     case 'info':
       return JSON.stringify({ host: os.hostname(), cpu: os.cpus()[0]?.model.trim(), cores: os.cpus().length,
         ramGB: +(os.totalmem() / 2 ** 30).toFixed(1), freeGB: +(os.freemem() / 2 ** 30).toFixed(1), uptimeH: +(os.uptime() / 3600).toFixed(1) });
     default:
-      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, business, health, lock, info');
+      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, business, health, doctor, lock, info');
   }
 }
 

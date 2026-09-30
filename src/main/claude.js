@@ -42,6 +42,10 @@ You can control this Windows PC with exactly one command (run it with the Bash t
   node src/tools/pc.js clip [latest|"<file>"] [seconds=30] [crop|blur|split]   (last N seconds of his newest recording -> 9:16 short in Desktop\Jarvis Clips; for trims/captions tell him to open CLIPS in the HUD)
   node src/tools/pc.js thumbnail "<title>" [latest|"<file>"] [at <seconds>]   (1280x720 PNG from his loudest moment by default)
   node src/tools/pc.js thumbnail ai "<scene prompt>" "<title>"               (AI background instead of a video frame)
+  node src/tools/pc.js doctor   (PC health check: disks, drivers, temps, bad devices, startup apps, event log errors; diagnose and explain in plain words)
+  node src/tools/pc.js doctor optimise   ("optimise my PC for gaming": restore point + saved old values, then power plan, Game Mode, GPU scheduling, visual effects, background apps, mouse accel)
+  node src/tools/pc.js doctor undo   ("undo optimisations": puts every changed setting back)
+  node src/tools/pc.js doctor startup disable|enable <app>   (turn an app off/on at startup, reversible; ask him before disabling)
   node src/tools/pc.js lock
   node src/tools/pc.js info
 Use WebSearch/WebFetch for anything current. If he asks for something none of these cover, say so plainly and offer to have it built. You can Read, Write and Edit files: create new files freely, create and edit files freely.`;

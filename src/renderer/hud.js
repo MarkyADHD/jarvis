@@ -574,15 +574,16 @@ const Voice = (() => {
     if (playing) return;
     const i = queue.findIndex(a => a.n === next); if (i < 0) return;
     const [a] = queue.splice(i, 1); next = a.n + 1;
-    ensure();
+    ensure(); const claim = playing = {};   // claim before the async decode, or the next sentence starts on top of this one
     try {
       const u8 = a.buf instanceof Uint8Array ? a.buf : new Uint8Array(a.buf);
       const audio = await ctx.decodeAudioData(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
+      if (playing !== claim) return;        // stopped while decoding
       const src = ctx.createBufferSource(); src.buffer = audio; src.connect(an);
       playing = src; setMode('speaking', 'Speaking');
       src.onended = () => { if (playing === src) playing = null; if (!busy() && !live) setMode('idle', 'Standing by'); pump(); };
       src.start();
-    } catch { playing = null; pump(); }
+    } catch { if (playing === claim) playing = null; pump(); }
   }
   jarvis.onAudio(a => {
     if (a.n < next) next = a.n;             // new run after a stop: resync ordering
