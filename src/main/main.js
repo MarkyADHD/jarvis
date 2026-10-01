@@ -58,14 +58,27 @@ function createWindow() {
   app.on('child-process-gone', (_e, d) => { if (d.type === 'GPU') recover('gpu gone: ' + d.reason); });
   require('electron').powerMonitor.on('resume', () => setTimeout(() => recover('resume from sleep'), 3000));
   require('electron').screen.on('display-metrics-changed', () => setTimeout(() => recover('display changed'), 1500));
+  // Off-screen fix: after monitor changes/restarts the window can sit half off a display, so the centred reactor is out of view (looks black). Pull it fully onto a display.
+  const onScreen = () => {
+    if (win.isDestroyed() || win.isMaximized() || win.isMinimized()) return;
+    const b = win.getBounds(), a = require('electron').screen.getDisplayMatching(b).workArea;
+    const w = Math.min(b.width, a.width), h = Math.min(b.height, a.height);
+    const x = Math.min(Math.max(b.x, a.x), a.x + a.width - w), y = Math.min(Math.max(b.y, a.y), a.y + a.height - h);
+    if (x !== b.x || y !== b.y || w !== b.width || h !== b.height) win.setBounds({ x, y, width: w, height: h });
+  };
+  win.once('ready-to-show', onScreen); win.on('show', onScreen); setTimeout(onScreen, 3000);
+  require('electron').screen.on('display-metrics-changed', () => setTimeout(onScreen, 500));
   // Autostart at login: the window paints before the GPU/display stack is settled and stays black, so repaint it twice once things calm down.
   if (os.uptime() < 600) for (const ms of [15000, 45000]) setTimeout(() => recover('boot repaint'), ms);
-  let lastF = -1;   // watchdog: hud.js stamps window.__f every frame; a visible window whose stamp stops moving is black
+  let lastF = -1, blankN = 0;   // watchdog: hud.js stamps window.__f every frame; a visible window whose stamp stops moving is black
   setInterval(async () => {
     if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) return;
     const f = await win.webContents.executeJavaScript('window.__f').catch(() => null);
     if (f != null && f === lastF) recover('render loop stalled'); lastF = f;
-  }, 20000);
+    // Black-but-looping case: frames tick but the reactor canvas is empty once the HUD says it has booted.
+    const blank = await win.webContents.executeJavaScript("(()=>{const c=document.getElementById('reactor');if(!window.__booted||!c||!c.width)return false;const d=c.getContext('2d').getImageData(c.width>>1,c.height>>1,1,1).data;return !d[3]})()").catch(() => false);
+    if (blank && ++blankN >= 2) { blankN = 0; recover('reactor blank'); } else if (!blank) blankN = 0;
+  }, 8000);
 }
 
 // Voice overlay: the reactor, bottom-centre, while he talks / Jarvis speaks and the HUD is in the background.

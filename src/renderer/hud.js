@@ -532,7 +532,7 @@ addEventListener('keydown', e => { if (e.key === 'Escape') { jarvis.cancel(); Vo
   }
   line('ALL SYSTEMS ONLINE', 'WELCOME BACK, SIR'); await wait(650);
   $('boot').classList.add('gone'); document.body.classList.add('on');
-  S.booted = true; S.bootAt = performance.now();
+  S.booted = true; S.bootAt = performance.now(); window.__booted = true;
   const st = S.status;
   $('linkDot').className = 'dot ' + (st?.claude.connected ? 'on' : 'warn');
   $('link').textContent = st?.claude.connected ? 'CLAUDE LINKED' : 'SETUP NEEDED';
