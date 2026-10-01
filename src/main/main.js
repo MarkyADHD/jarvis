@@ -30,7 +30,12 @@ const handlers = {}; const ipcHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (ch, f) => { handlers[ch] = f; return ipcHandle(ch, f); };
 let phone;
 
-function show() { if (!win) createWindow(); win.show(); win.focus(); }
+// After sitting occluded a while (e.g. behind an exclusive-fullscreen game), Chromium's paint
+// cache can be stale, and the renderer's own 'anim' throttle flag (set by the hide/show/focus/blur
+// listeners below) can get stuck 'off' if those events fire oddly around a fullscreen app -- stuck
+// 'off' means the reactor's draw loop skips itself forever, showing as a permanent black circle.
+// Force both a repaint and an explicit 'on' on every show() so it always recovers.
+function show() { if (!win) createWindow(); win.show(); win.focus(); win.webContents.invalidate(); win.webContents.send('anim', 'on'); }
 
 function createWindow() {
   win = new BrowserWindow({
@@ -49,7 +54,7 @@ function createWindow() {
   }, +process.env.JARVIS_DEBUG_SNAP_MS || 9000);
   win.on('close', e => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
   // Gaming: tell the HUD to stop animating when hidden/minimised and slow down when unfocused (throttling itself stays off, see black-HUD note).
-  for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['blur', 'slow'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', win.isMinimized() || !win.isVisible() ? 'off' : s));
+  for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['blur', 'slow'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', s));   // the event itself says visible/hidden; isVisible() lags inside 'show', which left the HUD stuck 'off' (frozen black reactor)
   win.on('focus', () => showOverlay(null));
   // Black-HUD safety net: log why, then reload. Covers renderer/GPU crashes, sleep/display changes, and a silently stalled render loop.
   const logFile = path.join(app.getPath('userData'), 'data', 'hud-recovery.log');
@@ -73,6 +78,7 @@ function createWindow() {
   let lastF = -1, blankN = 0;   // watchdog: hud.js stamps window.__f every frame; a visible window whose stamp stops moving is black
   setInterval(async () => {
     if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) return;
+    win.webContents.send('anim', win.isFocused() ? 'on' : 'slow');   // resync, in case an event was missed
     const f = await win.webContents.executeJavaScript('window.__f').catch(() => null);
     if (f != null && f === lastF) recover('render loop stalled'); lastF = f;
     // Black-but-looping case: frames tick but the reactor canvas is empty once the HUD says it has booted.
