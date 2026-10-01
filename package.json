@@ -1,6 +1,6 @@
 {
   "name": "jarvis",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "private": true,
   "description": "Jarvis desktop assistant (Electron rebuild, no Python)",
   "main": "src/main/main.js",
@@ -15,7 +15,8 @@
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1"
+    "@huggingface/transformers": "^3.8.1",
+    "tsdav": "^2.3.4"
   },
   "author": "MarkyADHD",
   "build": {

@@ -425,6 +425,7 @@ function drawFx() {
 let anim = 'on', lastT = 0;
 jarvis.onAnim(a => { anim = a; });
 function frame(t) {
+  window.__f = t;
   if (anim === 'off' || (anim === 'slow' && t - lastT < 100)) return requestAnimationFrame(frame);   // 0 / 10 fps while gaming
   lastT = t;
   drawBg(t); drawReactor(t); drawRadar(t); drawClockRing(); drawCores(); drawFx();
@@ -559,7 +560,8 @@ const Voice = (() => {
   const busy = () => !!playing || queue.length > 0;
   function ensure() {
     if (ctx) return;
-    ctx = new AudioContext(); an = ctx.createAnalyser(); an.fftSize = 512; an.connect(ctx.destination);
+    ctx = new AudioContext(); an = ctx.createAnalyser(); an.fftSize = 512;
+    const boost = ctx.createGain(); boost.gain.value = window.PHONE ? 3 : 1; an.connect(boost).connect(ctx.destination);   // phone speakers play it quiet
     data = new Uint8Array(an.fftSize);
     (function meter() {
       if (playing) {
@@ -574,7 +576,7 @@ const Voice = (() => {
     if (playing) return;
     const i = queue.findIndex(a => a.n === next); if (i < 0) return;
     const [a] = queue.splice(i, 1); next = a.n + 1;
-    ensure(); const claim = playing = {};   // claim before the async decode, or the next sentence starts on top of this one
+    ensure(); if (ctx.state === 'suspended') ctx.resume(); const claim = playing = {};   // claim before the async decode, or the next sentence starts on top of this one
     try {
       const u8 = a.buf instanceof Uint8Array ? a.buf : new Uint8Array(a.buf);
       const audio = await ctx.decodeAudioData(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
@@ -585,6 +587,9 @@ const Voice = (() => {
       src.start();
     } catch { if (playing === claim) playing = null; pump(); }
   }
+  // phone browsers only allow audio after a user gesture: unlock on the first tap anywhere, not just MIC
+  const unlock = () => { ensure(); ctx.resume(); };
+  ['pointerdown', 'touchend', 'keydown'].forEach(e => globalThis.addEventListener?.(e, unlock, { passive: true }));
   jarvis.onAudio(a => {
     if (a.n < next) next = a.n;             // new run after a stop: resync ordering
     queue.push(a); showEngine(a.engine); pump();

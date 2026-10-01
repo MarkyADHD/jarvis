@@ -51,6 +51,21 @@ function createWindow() {
   // Gaming: tell the HUD to stop animating when hidden/minimised and slow down when unfocused (throttling itself stays off, see black-HUD note).
   for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['blur', 'slow'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', win.isMinimized() || !win.isVisible() ? 'off' : s));
   win.on('focus', () => showOverlay(null));
+  // Black-HUD safety net: log why, then reload. Covers renderer/GPU crashes, sleep/display changes, and a silently stalled render loop.
+  const logFile = path.join(app.getPath('userData'), 'data', 'hud-recovery.log');
+  const recover = why => { try { fs.appendFileSync(logFile, new Date().toISOString() + ' ' + why + '\n'); } catch {} if (!win.isDestroyed()) win.webContents.reload(); };
+  win.webContents.on('render-process-gone', (_e, d) => recover('renderer gone: ' + d.reason));
+  app.on('child-process-gone', (_e, d) => { if (d.type === 'GPU') recover('gpu gone: ' + d.reason); });
+  require('electron').powerMonitor.on('resume', () => setTimeout(() => recover('resume from sleep'), 3000));
+  require('electron').screen.on('display-metrics-changed', () => setTimeout(() => recover('display changed'), 1500));
+  // Autostart at login: the window paints before the GPU/display stack is settled and stays black, so repaint it twice once things calm down.
+  if (os.uptime() < 600) for (const ms of [15000, 45000]) setTimeout(() => recover('boot repaint'), ms);
+  let lastF = -1;   // watchdog: hud.js stamps window.__f every frame; a visible window whose stamp stops moving is black
+  setInterval(async () => {
+    if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) return;
+    const f = await win.webContents.executeJavaScript('window.__f').catch(() => null);
+    if (f != null && f === lastF) recover('render loop stalled'); lastF = f;
+  }, 20000);
 }
 
 // Voice overlay: the reactor, bottom-centre, while he talks / Jarvis speaks and the HUD is in the background.
