@@ -26,7 +26,7 @@ test('pc tool rejects unsafe or unknown input', async () => {
   assert.throws(() => run('open', 'evil & calc'), /unknown app/);
   assert.throws(() => run('media', 'mute'), /media:/);
   assert.throws(() => run('rm', '-rf'), /actions:/);
-  await assert.rejects(run('light', 'purple'), /light:/);
+  await assert.rejects(run('light', 'purple'), /light:|no Elgato Key Light/);   // no light configured on this PC
 });
 
 test('clip export args are structured and validated', () => {

@@ -81,3 +81,6 @@ node_modules/
 
 # barehands ships an (empty) models folder; don't let the global models/ rule hide it
 !barehands/media/models/
+
+# local edit backups (kept on disk, not in git)
+*.bak

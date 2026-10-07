@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('jarvis', {
   status: () => ipcRenderer.invoke('status'),
   history: () => ipcRenderer.invoke('history'),
-  send: t => ipcRenderer.invoke('send', t),
+  send: (t, imgs) => ipcRenderer.invoke('send', t, imgs),
   cancel: () => ipcRenderer.invoke('cancel'),
   stats: () => ipcRenderer.invoke('stats'),
   memories: () => ipcRenderer.invoke('memories'),

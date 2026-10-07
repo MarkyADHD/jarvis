@@ -1,6 +1,6 @@
 <!doctype html>
 <html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' file:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' file:">
 <title>Jarvis</title>
 <style>
 :root{
@@ -122,6 +122,12 @@ form{display:flex;gap:10px;margin-top:8px;align-items:stretch}
 button{font:600 12px var(--mono);letter-spacing:.28em;text-transform:uppercase;padding:0 24px;cursor:pointer;transition:.15s;
   background:rgba(53,214,255,.12);color:var(--cyan);border:1px solid var(--cyan);clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%)}
 button:hover{background:rgba(53,214,255,.3);color:#fff;text-shadow:0 0 8px var(--cyan)}
+#att{padding:0 14px}#att svg{display:block;filter:drop-shadow(0 0 4px var(--cyan))}
+#chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}#chips:empty{display:none}
+.achip{position:relative;width:48px;height:48px;border:1px solid var(--cyan);background:rgba(0,10,18,.75);box-shadow:0 0 8px rgba(53,214,255,.35);clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+.thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.thumbs img{max-width:140px;max-height:110px;border:1px solid var(--cyan);box-shadow:0 0 8px rgba(53,214,255,.35)}
+.achip img{width:100%;height:100%;object-fit:cover;display:block}
+.achip b{position:absolute;top:0;right:0;width:16px;height:16px;font:600 11px/16px var(--mono);text-align:center;cursor:pointer;color:var(--amber);background:rgba(0,10,18,.85)}.achip b:hover{color:#fff}
 #mic.on{background:var(--cyan);color:#001018;box-shadow:0 0 18px var(--cyan)}
 #stop{color:var(--amber);border-color:var(--amber);background:rgba(255,169,40,.08)} #stop:hover{background:rgba(255,169,40,.25)}
 ::-webkit-scrollbar{width:5px} ::-webkit-scrollbar-thumb{background:var(--cyan-dim)}
@@ -189,7 +195,7 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
   body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 42vh 60vh auto auto;
     grid-template-areas:"top" "core" "chat" "left" "right";gap:10px;padding:10px;max-width:560px;margin:0 auto;min-height:100vh}
   #bootTitle{font-size:22px;letter-spacing:.4em}#bootBar{width:70vw}#bootSub{font-size:8px;letter-spacing:.25em}
-  #chat .ptitle{order:-2}#f{order:-1;margin-bottom:8px;flex-wrap:wrap}#f button{flex:1;min-height:48px;font-size:14px}#top button{min-height:40px}#f .inwrap{order:1;flex-basis:100%}
+  #chat .ptitle{order:-2}#chips{order:-1}#f{order:-1;margin-bottom:8px;flex-wrap:wrap}#f button{flex:1;min-height:48px;font-size:14px}#top button{min-height:40px}#f .inwrap{order:1;flex-basis:100%}
   #top{flex-wrap:wrap;gap:10px 16px;padding:8px 12px;justify-content:center}
 }
 </style></head>
@@ -261,7 +267,8 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
 <section id="chat" class="panel" style="--d:.8s"><div class="scan"></div>
   <div class="ptitle">Comms Channel<em>ENTER send · CTRL+SHIFT+SPACE talk · ESC abort</em></div>
   <div id="log"></div>
-  <form id="f"><div class="inwrap"><textarea id="q" placeholder="Talk to me, boss"></textarea></div><button type="button" id="mic" title="Talk (Ctrl+Shift+Space)">Mic</button><button>Send</button><button type="button" id="stop">Stop</button></form>
+  <div id="chips"></div>
+  <form id="f"><div class="inwrap"><textarea id="q" placeholder="Talk to me, boss"></textarea></div><button type="button" id="att" title="Attach images"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11l-9 9a5 5 0 01-7-7l9-9a3.5 3.5 0 015 5l-9 9a2 2 0 01-3-3l8-8"/></svg></button><input type="file" id="file" accept="image/*" multiple hidden><button type="button" id="mic" title="Talk (Ctrl+Shift+Space)">Mic</button><button>Send</button><button type="button" id="stop">Stop</button></form>
 </section>
 <div id="clipModal" class="modal" hidden><div class="panel clipp">
   <div class="ptitle">Clip Studio<span id="cFile">no recording loaded</span></div>

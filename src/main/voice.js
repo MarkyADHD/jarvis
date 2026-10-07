@@ -82,10 +82,10 @@ class Eleven {
     const line = clean(text); if (!line || !this.ready()) return null;
     const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream?output_format=mp3_44100_128&optimize_streaming_latency=3`, {
       method: 'POST', headers: { 'xi-api-key': this.key(), 'content-type': 'application/json', accept: 'audio/mpeg' },
-      body: JSON.stringify({ text: line, model_id: this.model }),
+      body: JSON.stringify({ text: line, model_id: this.model }), signal: AbortSignal.timeout(15000),   // a hung request would block every later sentence
     });
     if (r.status === 401 || r.status === 402 || r.status === 403) this.failed = true;   // bad key / out of credit: stop trying, use Piper
-    if (!r.ok) { const t = await r.text().catch(() => ''); const why = /voice_not_found|not found/i.test(t) ? 'voice ID not found in your account' : r.status === 401 ? 'API key rejected' : /quota|credit/i.test(t) ? 'out of credits' : ''; throw new Error(`ElevenLabs ${r.status}${why ? ': ' + why : ''}`); }
+    if (!r.ok) { const t = await r.text().catch(() => ''); const why = /voice_not_found|not found/i.test(t) ? 'voice ID not found in your account' : r.status === 401 ? 'API key rejected' : /quota|credit/i.test(t) ? 'out of credits' : ''; throw new Error(`ElevenLabs ${r.status}${why ? ': ' + why : ''} ${t.slice(0, 200)}`.trim()); }
     return Buffer.from(await r.arrayBuffer());
   }
 }

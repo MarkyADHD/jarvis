@@ -1,6 +1,7 @@
 // Phone shim: gives the real HUD a window.jarvis that talks to the PC over HTTP (see src/main/phone.js).
 // Loaded only when phone.js serves hud.html; the desktop app uses preload.js instead.
 (() => {
+  window.PHONE = true;
   const revive = (_k, v) => v && v.type === 'Buffer' && Array.isArray(v.data) ? new Uint8Array(v.data) : v;
   const call = ch => async (...args) => {
     args = args.map(a => a instanceof Float32Array ? Array.from(a) : a);

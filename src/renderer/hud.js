@@ -505,9 +505,34 @@ jarvis.onDone(r => {
   if (r.error) add('err', r.error === 'cancelled' ? 'Stopped.' : r.error);
   live = null; if (!Voice.busy()) setMode('idle', 'Standing by');
 });
+// ---------- attachments: images only, downscaled to JPEG so history/IPC stay small ----------
+let files = [];
+function addFile(f) {
+  if (!f || !/^image/.test(f.type) || files.length >= 5) return;
+  const img = new Image(), u = URL.createObjectURL(f);
+  img.onload = () => {
+    const k = Math.min(1, 1568 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(u);
+    const url = c.toDataURL('image/jpeg', .85), o = { data: url.split(',')[1] };
+    files.push(o); const d = document.createElement('div'); d.className = 'achip';
+    d.innerHTML = `<img src="${url}"><b title="Remove">×</b>`;
+    d.querySelector('b').onclick = () => { files = files.filter(x => x !== o); d.remove(); };
+    $('chips').append(d);
+  };
+  img.src = u;
+}
+$('att').onclick = () => $('file').click();
+$('file').onchange = e => { [...e.target.files].forEach(addFile); e.target.value = ''; };
+q.addEventListener('paste', e => [...e.clipboardData.files].forEach(f => { e.preventDefault(); addFile(f); }));
+$('chat').addEventListener('dragover', e => e.preventDefault());
+$('chat').addEventListener('drop', e => { e.preventDefault(); [...e.dataTransfer.files].forEach(addFile); });
 function send() {
-  const text = q.value.trim(); if (!text) return;
-  add('user', text); jarvis.send(text); q.value = ''; fire(); setMode('thinking', 'Processing');
+  const text = q.value.trim(); if (!text && !files.length) return;
+  const imgs = files.map(f => f.data), n = imgs.length;
+  const body = add('user', text || 'Look at this');
+  if (n) { const r = document.createElement('div'); r.className = 'thumbs'; imgs.forEach(d => { const i = new Image(); i.src = 'data:image/jpeg;base64,' + d; r.append(i); }); body.parentNode.append(r); log.scrollTop = 1e9; }
+  jarvis.send(text || 'Look at this', imgs); q.value = ''; files = []; $('chips').innerHTML = ''; fire(); setMode('thinking', 'Processing');
 }
 $('f').onsubmit = e => { e.preventDefault(); send(); };
 q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });

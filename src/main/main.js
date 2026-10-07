@@ -58,7 +58,8 @@ function createWindow() {
   win.on('focus', () => showOverlay(null));
   // Black-HUD safety net: log why, then reload. Covers renderer/GPU crashes, sleep/display changes, and a silently stalled render loop.
   const logFile = path.join(app.getPath('userData'), 'data', 'hud-recovery.log');
-  const recover = why => { try { fs.appendFileSync(logFile, new Date().toISOString() + ' ' + why + '\n'); } catch {} if (!win.isDestroyed()) win.webContents.reload(); };
+  let lastRecover = 0;   // display changes fire in bursts (4 in 1s seen in the log): one reload per burst, not four
+  const recover = why => { if (Date.now() - lastRecover < 10000) return; lastRecover = Date.now(); try { fs.appendFileSync(logFile, new Date().toISOString() + ' ' + why + '\n'); } catch {} if (!win.isDestroyed()) win.webContents.reload(); };
   win.webContents.on('render-process-gone', (_e, d) => recover('renderer gone: ' + d.reason));
   app.on('child-process-gone', (_e, d) => { if (d.type === 'GPU') recover('gpu gone: ' + d.reason); });
   require('electron').powerMonitor.on('resume', () => setTimeout(() => recover('resume from sleep'), 3000));
@@ -115,9 +116,12 @@ app.whenReady().then(() => {
   db = store.create(path.join(app.getPath('userData'), 'data'));
   // Claude runs in a real folder: the repo in dev, a workspace in AppData when installed (tool script copied out of the asar).
   if (app.isPackaged) {
-    const ws = path.join(app.getPath('userData'), 'workspace'), dst = path.join(ws, 'src', 'tools');
-    fs.mkdirSync(dst, { recursive: true }); for (const t of ['pc.js', 'nowplaying.ps1']) fs.copyFileSync(path.join(root, 'src', 'tools', t), path.join(dst, t));
-    fs.mkdirSync(path.join(ws, 'src', 'main'), { recursive: true }); for (const m of ['clips.js', 'thumbs.js', 'bridge.js']) fs.copyFileSync(path.join(root, 'src', 'main', m), path.join(ws, 'src', 'main', m));
+    const ws = path.join(app.getPath('userData'), 'workspace');
+    // Every tool and main module: pc.js also needs vault, pcdoctor, claude etc., not just the clip engine.
+    for (const d of ['tools', 'main']) {
+      const from = path.join(root, 'src', d), to = path.join(ws, 'src', d); fs.mkdirSync(to, { recursive: true });
+      for (const f of fs.readdirSync(from)) if (/\.(js|ps1)$/.test(f)) fs.copyFileSync(path.join(from, f), path.join(to, f));
+    }
     claude.cwd = ws;
   }
   // Legacy Python memory locations (read-only import).
@@ -222,7 +226,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('memories', () => vault.all().slice(-50).reverse().map(m => ({ text: m.text, kind: m.kind, importance: m.importance })));
   ipcMain.handle('history', () => db.chat().slice(-100));
-  ipcMain.handle('send', (_e, text) => { if (typeof text === 'string' && text.trim()) { db.addChat('user', text); ring('thinking'); claude.send(text); } });
+  ipcMain.handle('send', (_e, text, imgs) => { if (typeof text === 'string' && text.trim()) { imgs = Array.isArray(imgs) ? imgs.filter(i => typeof i === 'string').slice(0, 5) : []; db.addChat('user', imgs.length ? `${text}  [${imgs.length} image(s) attached]` : text); ring('thinking'); claude.send(text, imgs); } });
   ipcMain.handle('cancel', () => { claude.cancel(); speech.cancel(); sentences.reset(); });
   // Settings (non-secret, settings.json) + ElevenLabs key encrypted with Windows DPAPI via safeStorage (elevenlabs.key).
   const dataDir = path.join(app.getPath('userData'), 'data');

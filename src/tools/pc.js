@@ -26,7 +26,33 @@ function keylights() {
   if (process.env.JARVIS_KEYLIGHTS) return process.env.JARVIS_KEYLIGHTS.split(',').map(h => { const [host, port] = h.split(':'); return { host, port: +port || 9123 }; });
   try { return JSON.parse(require('fs').readFileSync('E:/JarvisMemory/elgato/keylights.json', 'utf8')); } catch { return []; }
 }
+// Scans the local /24 for Elgato's accessory-info endpoint (port 9123, no auth) and caches hits.
+async function discoverKeylights() {
+  const nets = Object.values(os.networkInterfaces()).flat();
+  const me = nets.find(n => n.family === 'IPv4' && !n.internal && n.netmask !== '255.255.255.255');   // skip VPN/point-to-point adapters (e.g. Tailscale)
+  if (!me) throw new Error('no local network found');
+  const base = me.address.split('.').slice(0, 3).join('.');
+  const hosts = Array.from({ length: 254 }, (_, i) => `${base}.${i + 1}`);
+  const found = [];
+  await Promise.all(hosts.map(async host => {
+    try {
+      const r = await fetch(`http://${host}:9123/elgato/accessory-info`, { signal: AbortSignal.timeout(500) });
+      if (!r.ok) return;
+      const info = await r.json();
+      found.push({ host, port: 9123, name: info.displayName || info.productName || host });
+    } catch {}
+  }));
+  return found;
+}
 async function light(arg) {
+  if (arg === 'find' || arg === 'discover' || arg === 'connect') {
+    const found = await discoverKeylights();
+    if (!found.length) throw new Error('no Elgato Key Light found on the local network');
+    const file = 'E:/JarvisMemory/elgato/keylights.json';
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(found, null, 2));
+    return `found and connected: ${found.map(d => `${d.name} (${d.host})`).join(', ')}`;
+  }
   const devs = keylights(); if (!devs.length) throw new Error('no Elgato Key Light configured');
   const change = arg === 'on' ? { on: 1 } : arg === 'off' ? { on: 0 } : arg === 'warm' ? { on: 1, temperature: 344 } : arg === 'cool' ? { on: 1, temperature: 143 }
     : /^\d{1,3}%?$/.test(arg) ? { on: 1, brightness: Math.max(3, Math.min(100, parseInt(arg))) }
@@ -88,7 +114,7 @@ function steamGames() {
     for (const f of files) {
       const t = fs.readFileSync(path.join(lib, 'steamapps', f), 'utf8');
       const id = /"appid"\s+"(\d+)"/.exec(t)?.[1], name = /"name"\s+"([^"]+)"/.exec(t)?.[1];
-      if (id && name && !/Steamworks|Redistributable|Proton|Steam Linux Runtime/i.test(name)) out.push({ id, name });
+      if (id && name && !/Steamworks|Redistributable|Proton|Steam Linux Runtime/i.test(name)) out.push({ id, name, updated: /"LastUpdated"\s+"(\d+)"/i.exec(t)?.[1] });
     }
   }
   return out;
@@ -275,6 +301,8 @@ function run(action, arg = '') {
       if (sub === 'site') { if (!require('fs').existsSync(rest)) throw new Error('folder not found: ' + rest); v.done('Business', 'website folder'); v.add('business', 9, 'Website folder: ' + require('path').resolve(rest)); return 'website folder saved; restart-app so I can edit it'; }
       return ['Business', 'Goals', 'Tasks'].map(n => v.recall(n)).join('\n');
     }
+    case 'context':                       // read-only snapshot of recent games, projects, clips and time of day, for suggestions
+      return require('./context').context(steamGames);
     case 'recall': {                      // pull a vault note by name, or every memory matching the words
       if (!raw) throw new Error('recall <note name | words>');
       return require('../main/vault').recall(raw);
@@ -427,7 +455,7 @@ function run(action, arg = '') {
       return JSON.stringify({ host: os.hostname(), cpu: os.cpus()[0]?.model.trim(), cores: os.cpus().length,
         ramGB: +(os.totalmem() / 2 ** 30).toFixed(1), freeGB: +(os.freemem() / 2 ** 30).toFixed(1), uptimeH: +(os.uptime() / 3600).toFixed(1) });
     default:
-      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, business, health, doctor, lock, info');
+      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, business, context, health, doctor, lock, info');
   }
 }
 
