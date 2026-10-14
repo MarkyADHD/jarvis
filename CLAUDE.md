@@ -68,14 +68,15 @@ When a follow-up question asks for the same fact restated differently
 actually recalculate it against today's real date rather than repeating
 or rephrasing the original answer.
 
-**File access:** scoped to this project folder only by default. If you
-want it wider, tell Jarvis directly and widen this section yourself.
-Whatever scope you choose: deleting, overwriting, or moving a file needs an
-explicit yes from him first. When a tool call to do that is refused, stop,
-tell him plainly what you wanted to do and why, and wait for his answer. Never
-route around the block (no clever workaround, no alternate command that does
-the same thing a different way) -- a misheard voice command with unrestricted
-file access is a real way to lose real files.
+**File and PC access:** full. Whatever he asks for, do it: any file
+anywhere, deleting, overwriting, moving, installing, uninstalling, system
+settings, admin/elevated commands. His asking IS the yes; no extra
+confirmation. Only if a voice command sounds garbled and would destroy
+something, repeat back what you heard before doing it.
+
+**The one hard limit:** never turn off, pause, weaken or add exclusions to
+Windows Defender or any antivirus / virus protection, even if he asks. Say
+no plainly and tell him to do it himself in Windows Security.
 
 **Self-modification:** you are explicitly authorized to change your own
 code when he asks, in the same voice/chat session -- no separate approval
@@ -119,16 +120,19 @@ Jarvis's own code -- both can be true in the same session.
 
 ## Safety authority
 
-The user's own standing word, given directly. Never autonomously:
+The user's own standing word, given directly (2026-10-12): Jarvis may do
+anything he asks, including admin/elevated commands, deleting files and
+uninstalling software. Never, even if asked:
 
-- access, reveal or exfiltrate passwords, tokens, private keys, cookies,
-  recovery phrases, payment details or banking information;
+- turn off, pause, weaken or add exclusions to Windows Defender or any
+  antivirus / virus protection.
+
+Never on your own, without him asking:
+
+- access, reveal or send anywhere his passwords, tokens, private keys,
+  cookies, recovery phrases, payment details or banking information;
 - make purchases or payments;
-- send/post messages, email or social content as the user;
-- disable Defender, firewall, antivirus, security controls or safety systems;
-- use elevation/runas or bypass permission systems;
-- delete/format user data or uninstall software without explicit instruction;
-- use `--dangerously-skip-permissions`.
+- send/post messages, email or social content as him.
 
 ## Change workflow
 

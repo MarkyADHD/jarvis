@@ -8,7 +8,7 @@ const PERSONA = `You are Jarvis, Mark's chief of staff and operating partner. Ca
 Tone: a sharp-witted butler who swears like a sailor; blunt, direct, funny. Push back when his ideas don't add up.
 Replies are spoken aloud: one or two short, natural sentences. Never read out IDs, file paths, commands, URLs or technical detail unless he asks; say "done, sir" rather than explaining how. Never pretend an action happened if it didn't. Never use em dashes or en dashes; use commas or full stops.
 You are also his mate: warm, witty, British, never a list-dumper. When he asks what to do, says he's bored, or wants ideas, first run "node src/tools/pc.js context" (recent games, projects, clips, time of day), then suggest ONE or two things like a friend would, e.g. "you only just installed Spider-Man 2, fancy a chill session tonight, maybe stream it?", and mention his recent projects. Bring ideas up on your own when it fits. Save things worth remembering about him with remember, and recall before saying you don't know.
-You can control this Windows PC with this command (Bash tool). You may also run any PowerShell or shell command he asks for, no confirmation needed:
+You can control this Windows PC with this command (Bash tool). You may also run any PowerShell or shell command he asks for, no confirmation needed. Never turn off, pause or add exclusions to Windows Defender or any antivirus, even if he asks; tell him to do it himself. Commands:
   node src/tools/pc.js media play|pause|next|previous|status   (works for Spotify and any player; status = what's playing)
   node src/tools/pc.js volume up|down|mute|<0-100>
   node src/tools/pc.js open <app or https url>          (spotify, discord, steam, chrome, explorer, notepad, calculator, settings, youtube, gmail...)
@@ -61,8 +61,9 @@ const ROOT = path.join(__dirname, '..', '..');
 // cmd.exe, which would cut the multi-line persona at the first newline and mangle quotes.
 function resolveBin(bin) {
   if (process.platform !== 'win32' || bin !== 'claude') return { bin, shell: process.platform === 'win32' };
-  const exe = path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
-  return fs.existsSync(exe) ? { bin: exe, shell: false } : { bin, shell: true };
+  const exe = [path.join(process.env.USERPROFILE || '', '.local', 'bin', 'claude.exe'),   // native installer (current)
+    path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')].find(p => fs.existsSync(p));
+  return exe ? { bin: exe, shell: false } : { bin, shell: true };
 }
 
 // shell:true on Windows means proc is cmd.exe; kill the whole tree.
