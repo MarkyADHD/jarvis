@@ -235,6 +235,7 @@ app.whenReady().then(() => {
   const applySet = s => {
     if (s.city) process.env.JARVIS_CITY = s.city;
     if (s.voiceId) { speech.eleven.voiceId = s.voiceId; speech.eleven.enabled = !process.env.JARVIS_NO_ELEVENLABS; }
+    require('./local').configure({ url: s.localUrl, model: s.localModel }); claude.localOnly = s.brain === 'local';
   };
   speech.eleven.keyStore = () => { try { return safeStorage.decryptString(fs.readFileSync(keyFile)); } catch { return ''; } };
   applySet(readSet());
@@ -336,13 +337,20 @@ app.whenReady().then(() => {
   ipcMain.handle('connect:twitch', async () => { try { return { msg: await twitch.connect(win) }; } catch (e) { return { error: e.message }; } });
   ipcMain.handle('settings:get', () => { const s = readSet(); return { city: s.city || '', voiceId: speech.eleven.voiceId || '', hasKey: fs.existsSync(keyFile), engine: speech.engine(),
     spotifyClientId: s.spotifyClientId || '', spotifyConnected: spotify.connected(), twitchClientId: s.twitchClientId || '', twitchHasSecret: fs.existsSync(twSecretFile), twitchConnected: twitch.connected(),
-    discord: s.discord || {}, nanoleafIp: s.nanoleafIp || '', nanoleafPaired: nanoleaf.connected(), ptt: !!s.ptt, pttKey: s.pttKey || 'Home' }; });
+    discord: s.discord || {}, nanoleafIp: s.nanoleafIp || '', nanoleafPaired: nanoleaf.connected(), ptt: !!s.ptt, pttKey: s.pttKey || 'Home',
+    brain: s.brain || 'claude', localUrl: s.localUrl || '', localModel: s.localModel || '' }; });
+  ipcMain.handle('local:models', (_e, extra) => require('./local').models(typeof extra === 'string' ? extra.trim() : ''));
   ipcMain.handle('settings:set', (_e, s = {}) => {
     const next = readSet();
     if (typeof s.city === 'string') next.city = s.city.trim().slice(0, 80);
     if (typeof s.voiceId === 'string') {
       if (!/^[A-Za-z0-9]{0,40}$/.test(s.voiceId.trim())) return { error: 'That voice ID looks wrong.' };
       next.voiceId = s.voiceId.trim();
+    }
+    if (['claude', 'local'].includes(s.brain)) next.brain = s.brain;
+    if (typeof s.localUrl === 'string') {   // '' = back to the default (Ollama, qwen3:8b)
+      if (s.localUrl && !/^https?:\/\/\S{1,200}$/.test(s.localUrl.trim())) return { error: 'That server address should start with http://' };
+      next.localUrl = s.localUrl.trim(); next.localModel = String(s.localModel || '').replace(/[\x00-\x1f]/g, '').slice(0, 200);
     }
     fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(setFile, JSON.stringify(next, null, 2)); applySet(next);
     if (typeof s.key === 'string' && s.key.trim()) {

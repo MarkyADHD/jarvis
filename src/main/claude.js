@@ -127,7 +127,7 @@ class Claude extends EventEmitter {
 
   send(text, imgs = []) {
     this.last = { text, imgs };
-    if (this.localUntil > Date.now()) return this.local(text, imgs);
+    if (this.localOnly || this.localUntil > Date.now()) return this.local(text, imgs);   // localOnly: Settings > Brain = local model
     if (!this.proc) { this.resumed = !!this.sessionId; this.start(); }
     this.lastText = this.resumed ? text : null;   // ponytail: the stale-session retry drops images
     const content = imgs.length ? [...imgs.map(data => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } })), { type: 'text', text }] : text;
@@ -154,7 +154,7 @@ class Claude extends EventEmitter {
     const system = PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : '');
     let out;
     try {
-      out = await require('./local').turn({ text, imgs, system, history: this.localHistory, cwd: this.cwd || ROOT }, (ev, p) => gen === this.gen && this.emit(ev, p));
+      out = await require('./local').turn({ text, imgs, system, history: this.localHistory, cwd: this.cwd || ROOT, primary: this.localOnly }, (ev, p) => gen === this.gen && this.emit(ev, p));
       if (announce) out = "Heads up, boss, the Claude brain isn't answering, so I'm on the local backup. " + out;
     } catch (e) {
       out = "Sorry boss, my brain's offline. Claude isn't answering and the local backup won't start, but the HUD buttons still work.";

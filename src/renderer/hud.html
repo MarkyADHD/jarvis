@@ -182,7 +182,7 @@ button:hover{background:rgba(53,214,255,.3);color:#fff;text-shadow:0 0 8px var(-
 .srow{display:grid;grid-template-columns:170px 1fr auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px dashed rgba(53,214,255,.13)}
 .srow label{font:11px var(--mono);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
 .srow small{font:10.5px var(--mono);color:var(--muted);letter-spacing:.08em}
-.srow input{background:rgba(0,10,18,.8);color:var(--text);border:1px solid var(--line);padding:9px 10px;font:13px var(--disp);outline:none}
+.srow input,.srow select{background:rgba(0,10,18,.8);color:var(--text);border:1px solid var(--line);padding:9px 10px;font:13px var(--disp);outline:none}
 .srow input:focus{border-color:var(--cyan)}
 .srow button{height:34px;padding:0 16px}
 body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)} body.private .chip:has(#netChip),body.private #host{visibility:hidden}
@@ -315,6 +315,9 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
   <div class="srow"><label>Hands-free</label><button type="button" id="sHf"></button><small>say "Jarvis ..."</small></div>
   <div class="srow"><label>Push-to-talk</label><button type="button" id="sPtt"></button><input id="sPttKey" placeholder="Home" title="Click, then press a key"><small>hold to talk, release to send</small></div>
   <div class="srow"><label>Home city</label><input id="sCity" placeholder="e.g. Manchester"><small>weather and briefings</small></div>
+  <div class="srow"><label>Brain</label><select id="sBrain"><option value="claude">Claude, local model as backup</option><option value="local">Local model only</option></select><small id="sBrainState"></small></div>
+  <div class="srow"><label>Local model</label><select id="sModel"></select><button type="button" id="sScan">Scan PC</button></div>
+  <div class="srow"><label>Model server</label><input id="sLocalUrl" placeholder="Ollama, LM Studio or any server ending in /v1"><small>found automatically; type one here and Scan</small></div>
   <div class="srow"><label>ElevenLabs voice ID</label><input id="sVoiceId" placeholder="voice id"></div>
   <div class="srow"><label>ElevenLabs API key</label><input id="sKey" type="password" autocomplete="off" placeholder="paste to set or replace"><small id="sKeyState"></small></div>
   <div class="srow"><label></label><button type="button" id="sSave">Save</button><button type="button" id="sClearKey">Remove key</button><small id="sMsg"></small></div>

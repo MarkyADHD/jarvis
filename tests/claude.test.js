@@ -29,3 +29,23 @@ test('local brain splits pc args without a shell', () => {
   assert.deepEqual(split('thumbnail "My big win" latest'), ['thumbnail', 'My big win', 'latest']);
   assert.deepEqual(split("hands '{\"a\":\"clear\"}'"), ['hands', '{"a":"clear"}']);
 });
+
+test('local brain finds models on an OpenAI-compatible server and talks its format', async () => {
+  const http = require('http'), local = require('../src/main/local');
+  let got;
+  const srv = http.createServer((q, s) => {
+    let b = ''; q.on('data', d => b += d); q.on('end', () => {
+      if (q.url === '/v1/models') return s.end(JSON.stringify({ data: [{ id: 'my-model' }] }));
+      got = JSON.parse(b); s.end(JSON.stringify({ choices: [{ message: { content: 'Evening, sir.' } }] }));
+    });
+  }).listen(0);
+  const url = `http://127.0.0.1:${srv.address().port}/v1`;
+  try {
+    assert.deepEqual((await local.models(url)).filter(m => m.url === url), [{ url, model: 'my-model' }]);
+    local.configure({ url, model: 'my-model' });
+    const out = await local.turn({ text: 'hi', system: 'x', history: [], cwd: '.', primary: true }, () => {});
+    assert.equal(out, 'Evening, sir.'); assert.equal(got.model, 'my-model'); assert.equal(got.tools[0].function.name, 'pc');
+    const tc = local.toOAI({ role: 'assistant', content: '', tool_calls: [{ id: 'a', function: { name: 'pc', arguments: { args: 'weather' } } }] });
+    assert.equal(tc.tool_calls[0].function.arguments, '{"args":"weather"}');
+  } finally { local.configure({}); srv.close(); }
+});

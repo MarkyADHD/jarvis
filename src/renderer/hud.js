@@ -788,7 +788,28 @@ const Settings = (() => {
     $('sEngine').textContent = s.engine === 'elevenlabs' ? 'using ElevenLabs' : s.engine === 'piper' ? 'using local voice' : 'no voice available';
     $('sPtt').textContent = s.ptt ? 'On' : 'Off'; $('sPttKey').value = s.pttKey;
     $('sVoice').textContent = voiceOn ? 'On' : 'Off'; $('sHf').textContent = HandsFree.active() ? 'On' : 'Off';
+    $('sBrain').value = s.brain; $('sLocalUrl').value = s.localUrl; brain = s; scan();
   }
+  // Local brain: list every model the local AI apps on this PC report; picking one saves it straight away.
+  let brain = {};
+  const opt = (value, text) => Object.assign(document.createElement('option'), { value, textContent: text });
+  async function scan() {
+    $('sBrainState').textContent = 'scanning for local models…';
+    const found = await jarvis.localModels($('sLocalUrl').value), sel = $('sModel');
+    sel.replaceChildren(opt('', 'Default (qwen3:8b on Ollama)'), ...found.map(f => opt(JSON.stringify(f), `${f.model}  ·  ${f.url}`)));
+    const cur = found.find(f => f.model === brain.localModel && f.url === brain.localUrl);
+    if (brain.localModel && !cur) sel.append(opt(JSON.stringify({ url: brain.localUrl, model: brain.localModel }), `${brain.localModel} (not running)`));
+    sel.value = brain.localModel ? JSON.stringify(cur || { url: brain.localUrl, model: brain.localModel }) : '';
+    $('sBrainState').textContent = found.length ? `${found.length} local model(s) found` : 'no local AI app running (Ollama, LM Studio...)';
+  }
+  $('sScan').onclick = scan;
+  $('sBrain').onchange = async () => { await jarvis.setSettings({ brain: $('sBrain').value }); msg($('sBrain').value === 'local' ? 'Using the local model for everything.' : 'Using Claude, local model as backup.'); };
+  $('sModel').onchange = async () => {
+    const f = $('sModel').value ? JSON.parse($('sModel').value) : { url: '', model: '' };
+    const r = await jarvis.setSettings({ localUrl: f.url, localModel: f.model });
+    if (r.error) return msg(r.error, true);
+    brain = { ...brain, localUrl: f.url, localModel: f.model }; $('sLocalUrl').value = f.url; msg('Local model: ' + (f.model || 'default'));
+  };
   const msg = (t, bad) => { $('sMsg').textContent = t; $('sMsg').style.color = bad ? 'var(--amber)' : 'var(--cyan)'; };
   $('setChip').onclick = () => { m.hidden = false; msg(''); refresh(); };
   m.onclick = e => { if (e.target === m) m.hidden = true; };

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   onNowPlaying: f => ipcRenderer.on('nowplaying', (_e, n) => f(n)),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: s => ipcRenderer.invoke('settings:set', s),
+  localModels: extra => ipcRenderer.invoke('local:models', extra),
   connect: which => ipcRenderer.invoke('connect:' + (['twitch', 'nanoleaf'].includes(which) ? which : 'spotify')),
   clips: {
     pick: () => ipcRenderer.invoke('clips:pick'),
