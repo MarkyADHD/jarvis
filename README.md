@@ -4,7 +4,7 @@
 
 Created by **MarkyADHD**. Tested by **TreeLoc**.
 
-Jarvis v3 is a desktop app (Electron) with Claude as the brain. It replaces the old Python Jarvis.
+Jarvis v3 is a desktop app (Electron) with Claude as the brain, or any local AI model on your PC. It replaces the old Python Jarvis.
 
 ## What he does
 
@@ -18,12 +18,16 @@ Jarvis v3 is a desktop app (Electron) with Claude as the brain. It replaces the 
   pick a 9:16 layout (crop, blur fill, facecam split), auto-captions, export shorts; thumbnails too.
 - **Everyday stuff:** weather, world time, dictionary, maps, reminders, notes, a daily briefing,
   screen awareness ("what's on my screen?"), Steam game launching, memory of what matters to you.
+- **Pick his brain:** Claude by default, with a local model as backup if Claude stops answering, or run fully on a
+  local model. **Settings > Scan PC** lists every model in Ollama, LM Studio, llama.cpp, Jan, KoboldCpp or any
+  OpenAI-compatible server (address ending in `/v1`). Local mode can run PC commands but has no web search or file editing.
 - **Works on himself:** ask him to fix or add something and he edits his own code, checks it and tells you what changed.
 
 ## What you'll need
 
 - Windows 10/11, a microphone and speakers
-- [Claude Code](https://claude.com/claude-code) signed in to your own Claude account (the $20/mo Pro plan is enough)
+- [Claude Code](https://claude.com/claude-code) signed in to your own Claude account (the $20/mo Pro plan is enough),
+  or a local AI app such as [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) for the free local brain
 - FFmpeg for Clip Studio (`winget install ffmpeg`)
 - Optional: Spotify, Twitch, ElevenLabs, Discord, Elgato Key Light
 
