@@ -2,7 +2,8 @@
 const $ = id => document.getElementById(id);
 const TAU = Math.PI * 2, rad = d => d * Math.PI / 180, lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v)), ease = t => 1 - Math.pow(1 - clamp(t), 3);
-const C = { cyan: '#35d6ff', cyan2: '#7fe7ff', blue: '#2a9fe0', amber: '#ffa928', gold: '#ffd23f', red: '#ff4d5e', white: '#eafcff' };
+const C = { red: '#ff4d5e' }; applyTheme(C);   // the rest of the palette comes from theme.js
+addEventListener('storage', e => { if (e.key === 'jarvis.theme') applyTheme(C); });   // follow the HUD's Settings live
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; };
 
 // ---------- shared state ----------
@@ -101,18 +102,18 @@ function drawReactor(t) {
   layer(g, 2, () => {
     g.save(); g.rotate(Math.sin(s * 0.15 * sp) * 0.08 + S.heat * s * 0.3);
     const band = g.createRadialGradient(0, 0, r0, 0, 0, r1);
-    band.addColorStop(0, rgba(C.blue, 0.5)); band.addColorStop(0.5, rgba('#46beff', 0.78 + S.energy * 0.22)); band.addColorStop(1, rgba(C.blue, 0.42));
+    band.addColorStop(0, rgba(C.blue, 0.5)); band.addColorStop(0.5, rgba(C.hi, 0.78 + S.energy * 0.22)); band.addColorStop(1, rgba(C.blue, 0.42));
     g.beginPath(); g.arc(0, 0, r1, A0, A1); g.arc(0, 0, r0, A1, A0, true); g.closePath();
     g.fillStyle = band; g.shadowBlur = 26 + S.energy * 34; g.shadowColor = C.blue; g.fill(); g.shadowBlur = 0;
     // inner bevel lines inside each segment
-    g.strokeStyle = 'rgba(1,5,9,.78)'; g.lineWidth = 2.2;
+    g.strokeStyle = rgba(C.bg, .78); g.lineWidth = 2.2;
     for (let a = A0; a <= A1 + 1e-6; a += rad(7.5)) { g.beginPath(); g.moveTo(...P(a, r0)); g.lineTo(...P(a, r1)); g.stroke(); }
-    arc(g, (r0 + r1) / 2 + R * 0.035, A0, A1, 1, 'rgba(200,245,255,.18)');
+    arc(g, (r0 + r1) / 2 + R * 0.035, A0, A1, 1, rgba(C.pale, .18));
     // sweep highlight
     if (S.heat > 0.05) {
       const sa = A0 + ((s * 0.9 * sp) % 1) * (A1 - A0), len = rad(24);
       const gr = g.createConicGradient(sa - len, 0, 0);
-      gr.addColorStop(0, 'rgba(210,248,255,0)'); gr.addColorStop(len / TAU, `rgba(220,250,255,${0.7 * S.heat})`); gr.addColorStop(len / TAU + 0.001, 'rgba(0,0,0,0)');
+      gr.addColorStop(0, rgba(C.pale, 0)); gr.addColorStop(len / TAU, rgba(C.pale, 0.7 * S.heat)); gr.addColorStop(len / TAU + 0.001, 'rgba(0,0,0,0)');
       g.beginPath(); g.arc(0, 0, r1, sa - len, sa); g.arc(0, 0, r0, sa, sa - len, true); g.closePath(); g.fillStyle = gr; g.fill();
     }
     arc(g, r1 + 4, A0, A1, 1.5, C.cyan, 8);
@@ -184,11 +185,11 @@ function drawReactor(t) {
   // dark core + circuitry + radar sweep
   layer(g, 1, () => {
     const core = g.createRadialGradient(0, 0, 0, 0, 0, R * 0.58);
-    core.addColorStop(0, '#0c2a3b'); core.addColorStop(0.7, '#04121c'); core.addColorStop(1, '#01070c');
+    core.addColorStop(0, C.core0); core.addColorStop(0.7, C.core1); core.addColorStop(1, C.core2);
     g.fillStyle = core; g.beginPath(); g.arc(0, 0, R * 0.575, 0, TAU); g.fill();
     g.save(); g.beginPath(); g.arc(0, 0, R * 0.57, 0, TAU); g.clip();
     const sw = g.createConicGradient(s * 0.8 * sp, 0, 0);
-    sw.addColorStop(0, rgba(C.cyan, 0.22)); sw.addColorStop(0.12, 'rgba(53,214,255,0)'); sw.addColorStop(1, 'rgba(53,214,255,0)');
+    sw.addColorStop(0, rgba(C.cyan, 0.22)); sw.addColorStop(0.12, rgba(C.cyan, 0)); sw.addColorStop(1, rgba(C.cyan, 0));
     g.fillStyle = sw; g.fillRect(-R, -R, 2 * R, 2 * R);
     g.restore();
     g.save(); g.rotate(s * 0.2 * sp); g.globalAlpha = 0.4;
@@ -217,7 +218,7 @@ function drawReactor(t) {
       g.globalCompositeOperation = 'source-over';
     }
     g.shadowBlur = 20 + pulse * 12 + S.energy * 24; g.shadowColor = C.cyan;
-    const grad = g.createLinearGradient(0, -fs / 2, 0, fs / 2); grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#8fe3ff');
+    const grad = g.createLinearGradient(0, -fs / 2, 0, fs / 2); grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, C.glow);
     g.fillStyle = grad; g.fillText('J.A.R.V.I.S.', 0, 0); g.shadowBlur = 0;
     g.font = `${Math.max(9, R * 0.03)}px Consolas, monospace`; g.fillStyle = rgba(C.cyan, 0.7);
     g.fillText(S.mode === 'idle' ? 'ALL SYSTEMS NOMINAL' : S.mode === 'thinking' ? 'PROCESSING REQUEST' : S.mode === 'listening' ? 'LISTENING' : 'TRANSMITTING', 0, fs * 0.85);
