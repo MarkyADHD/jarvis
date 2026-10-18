@@ -10,7 +10,9 @@ function load() {
   asrP ??= (async () => {
     const { pipeline, env } = await import('@huggingface/transformers');
     env.cacheDir = path.join(process.env.LOCALAPPDATA || os.homedir(), 'jarvis-v3', 'models');
-    return pipeline('automatic-speech-recognition', MODEL, { dtype: 'q8' });
+    // Gaming: cap Whisper to a quarter of the logical cores (ORT defaults to every physical core), so a hands-free
+    // phrase mid-match doesn't spike the whole CPU. ponytail: fixed ratio; make it a setting if he wants faster/slower.
+    return pipeline('automatic-speech-recognition', MODEL, { dtype: 'q8', session_options: { intraOpNumThreads: Math.max(2, Math.floor(os.cpus().length / 4)) } });
   })().catch(e => { asrP = null; throw e; });
   return asrP;
 }

@@ -447,13 +447,18 @@ async function poll() {
   $('netChip').textContent = st.net[0] ? `NET ${st.net[0].ip}` : 'NET OFFLINE';
   drawSpark(); drawDisks();
 }
-(function tween() {
-  const k = ease((performance.now() - tweenAt) / 900);
-  const cpu = Math.round(lerp(tweenFrom.cpu, tweenTo.cpu, k)), mem = Math.round(lerp(tweenFrom.mem, tweenTo.mem, k));
-  $('cpuV').textContent = cpu; $('memV').textContent = mem; drawGauge('gCpu', cpu); drawGauge('gMem', mem);
+// Gauges only redraw while a tween is running (they used to repaint every frame, even hidden behind a game), at the reactor's frame budget.
+let tweenLast = 0;
+(function tween(t = 0) {
+  const age = performance.now() - tweenAt;
+  if (age < 1100 && anim !== 'off' && (anim === 'on' || t - tweenLast >= 100)) {
+    tweenLast = t; const k = ease(age / 900);
+    const cpu = Math.round(lerp(tweenFrom.cpu, tweenTo.cpu, k)), mem = Math.round(lerp(tweenFrom.mem, tweenTo.mem, k));
+    $('cpuV').textContent = cpu; $('memV').textContent = mem; drawGauge('gCpu', cpu); drawGauge('gMem', mem);
+  }
   requestAnimationFrame(tween);
 })();
-setInterval(poll, 1500); poll();
+setInterval(() => { if (anim !== 'off') poll(); }, 1500); poll();   // hidden/minimised: no stats work at all
 
 function tick() {
   const d = new Date();
@@ -464,7 +469,7 @@ setInterval(tick, 1000); tick();
 
 // hex stream: cosmetic telemetry noise, speeds up when busy
 setInterval(() => {
-  const el = $('hex'); if (!el.offsetHeight) return;
+  const el = $('hex'); if (!el.offsetHeight || anim !== 'on') return;   // only while he's actually looking
   const line = Array.from({ length: 6 }, () => (Math.random() * 0xffff | 0).toString(16).toUpperCase().padStart(4, '0')).join(' ');
   el.textContent = (line + '\n' + el.textContent).split('\n').slice(0, 30).join('\n');
 }, 220);

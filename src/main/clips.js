@@ -1,8 +1,11 @@
 // Clip Studio engine: probe, caption (local Whisper), and export 9:16 clips with FFmpeg.
 // FFmpeg is always called with an argument array (no shell), so file names can't inject commands.
-const { spawn, execFile } = require('child_process');
+const cp = require('child_process');
 const fs = require('fs');
 const os = require('os');
+// Gaming: FFmpeg/yt-dlp run below normal priority so a clip export ("clip that" mid-stream) never steals frames from the game.
+const low = p => { if (p.pid) try { os.setPriority(p.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch {} return p; };   // no pid = spawn failed; setPriority(undefined) would hit Jarvis itself
+const spawn = (...a) => low(cp.spawn(...a)), execFile = (...a) => low(cp.execFile(...a));
 const path = require('path');
 
 const W = 1080, H = 1920;
@@ -473,4 +476,4 @@ async function autoVod(url, asr, { count = 25, clipLen = 30, layout = 'split', f
   return { how, dir, clips: [...made.map(m => m.file), ...failed] };
 }
 
-module.exports = { autoVod, chatMoments, findMoments, spikes, cueScore, download, ytDlp, probe, buildArgs, toSrt, splitCaptions, caption, exportClip, outDir, LAYOUTS, CAPTION_STYLES, toAss, wordTimes, groupWords, describe, findFacecam, autoLayout, steadyFace, camAround, camRect, customFilter };
+module.exports = { low, autoVod, chatMoments, findMoments, spikes, cueScore, download, ytDlp, probe, buildArgs, toSrt, splitCaptions, caption, exportClip, outDir, LAYOUTS, CAPTION_STYLES, toAss, wordTimes, groupWords, describe, findFacecam, autoLayout, steadyFace, camAround, camRect, customFilter };

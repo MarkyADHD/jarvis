@@ -184,16 +184,18 @@ app.whenReady().then(() => {
   // Warm the Claude CLI at launch (like piper.start() above) so the first message of a session
   // doesn't pay its cold-start cost -- proc is already up by the time send() is first called.
   claude.resumed = !!claude.sessionId; claude.start();
-  // Now playing (Windows media session), polled while the window is visible.
+  // Now playing (Windows media session), polled only while the HUD is focused: a PowerShell every 8s behind a game is wasted CPU.
+  // Refreshed the moment he tabs back in.
   const npScript = path.join(root, 'src', 'tools', 'nowplaying.ps1').replace('app.asar', 'app.asar.unpacked');
   let npBusy = false;
-  setInterval(() => {
-    if (npBusy || !win?.isVisible()) return; npBusy = true;
+  const nowPlaying = () => {
+    if (npBusy || !win?.isFocused()) return; npBusy = true;
     require('child_process').execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', npScript], { windowsHide: true, timeout: 8000 }, (err, out) => {
       npBusy = false; let np = {}; try { np = JSON.parse(String(out).trim() || '{}'); } catch {}
       win?.webContents.send('nowplaying', np);
     });
-  }, 8000);
+  };
+  setInterval(nowPlaying, 8000); app.on('browser-window-focus', (_e, w) => { if (w === win) nowPlaying(); });
   // barehands ring mirrors Jarvis (thinking while working, idle when done); harmless if the board isn't running.
   const ring = s => fs.writeFile(path.join(root, 'barehands', 'state', 'state'), s, () => {});
   claude.on('tool', t => { ring('thinking'); win?.webContents.send('tool', t); });
