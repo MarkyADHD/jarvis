@@ -122,6 +122,9 @@ app.whenReady().then(() => {
       const from = path.join(root, 'src', d), to = path.join(ws, 'src', d); fs.mkdirSync(to, { recursive: true });
       for (const f of fs.readdirSync(from)) if (/\.(js|ps1)$/.test(f)) fs.copyFileSync(path.join(from, f), path.join(to, f));
     }
+    // Skills (.claude/skills, shipped as resources/skills) so the installed brain has them too.
+    const skills = path.join(process.resourcesPath, 'skills');
+    if (fs.existsSync(skills)) fs.cpSync(skills, path.join(ws, '.claude', 'skills'), { recursive: true });
     claude.cwd = ws;
   }
   // Legacy Python memory locations (read-only import).

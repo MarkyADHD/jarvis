@@ -48,6 +48,10 @@
         ]
       },
       {
+        "from": ".claude/skills",
+        "to": "skills"
+      },
+      {
         "from": "jarvis_icon.ico",
         "to": "jarvis_icon.ico"
       },
