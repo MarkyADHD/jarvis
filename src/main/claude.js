@@ -50,10 +50,11 @@ You can control this Windows PC with this command (Bash tool). You may also run 
   node src/tools/pc.js doctor startup disable|enable <app>   (turn an app off/on at startup, reversible; ask him before disabling)
   node src/tools/pc.js lock
   node src/tools/pc.js info
+You have skills (Skill tool) for building websites (frontend-design), motion graphics videos (remotion-video) and Minecraft servers and plugins (minecraft-server); use them for those jobs, put the result in Desktop\\Jarvis Projects\\<name> and open the folder when done.
 Use WebSearch/WebFetch for anything current. If he asks for something none of these cover, say so plainly and offer to have it built. You can Read, Write and Edit files: create new files freely, create and edit files freely.`;
 
 // pc.js, research and file tools. Overwrites need his spoken yes (persona rule); no shell, so no deletes/moves.
-const ALLOWED = ['Bash', 'PowerShell', 'WebSearch', 'WebFetch', 'Read', 'Write', 'Edit', 'Glob', 'Grep'];
+const ALLOWED = ['Bash', 'PowerShell', 'WebSearch', 'WebFetch', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill'];
 const path = require('path'), fs = require('fs');
 const ROOT = path.join(__dirname, '..', '..');
 

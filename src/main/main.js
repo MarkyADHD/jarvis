@@ -53,8 +53,8 @@ function createWindow() {
     console.log('[debug]', await win.webContents.executeJavaScript('JSON.stringify({on:document.body.className, boot:document.getElementById(\"boot\").className, modal:document.getElementById(\"setModal\").hidden, w:innerWidth, h:innerHeight, top:(e=>e&&(e.id||e.tagName)+\".\"+e.className)(document.elementFromPoint(innerWidth/2,innerHeight/2)), topOp:getComputedStyle(document.getElementById(\"top\")).opacity, bodyDisp:getComputedStyle(document.body).display, vis:document.visibilityState, modalDisp:getComputedStyle(document.getElementById(\"setModal\")).display})'));
   }, +process.env.JARVIS_DEBUG_SNAP_MS || 9000);
   win.on('close', e => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
-  // Gaming: tell the HUD to stop animating when hidden/minimised and slow down when unfocused (throttling itself stays off, see black-HUD note).
-  for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['blur', 'slow'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', s));   // the event itself says visible/hidden; isVisible() lags inside 'show', which left the HUD stuck 'off' (frozen black reactor)
+  // Gaming: tell the HUD to stop animating when hidden/minimised; full speed whenever visible, focused or not (throttling itself stays off, see black-HUD note).
+  for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', s));   // the event itself says visible/hidden; isVisible() lags inside 'show', which left the HUD stuck 'off' (frozen black reactor)
   win.on('focus', () => showOverlay(null));
   // Black-HUD safety net: log why, then reload. Covers renderer/GPU crashes, sleep/display changes, and a silently stalled render loop.
   const logFile = path.join(app.getPath('userData'), 'data', 'hud-recovery.log');
@@ -79,7 +79,7 @@ function createWindow() {
   let lastF = -1, blankN = 0;   // watchdog: hud.js stamps window.__f every frame; a visible window whose stamp stops moving is black
   setInterval(async () => {
     if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) return;
-    win.webContents.send('anim', win.isFocused() ? 'on' : 'slow');   // resync, in case an event was missed
+    win.webContents.send('anim', 'on');   // resync, in case an event was missed
     const f = await win.webContents.executeJavaScript('window.__f').catch(() => null);
     if (f != null && f === lastF) recover('render loop stalled'); lastF = f;
     // Black-but-looping case: frames tick but the reactor canvas is empty once the HUD says it has booted.
@@ -122,6 +122,9 @@ app.whenReady().then(() => {
       const from = path.join(root, 'src', d), to = path.join(ws, 'src', d); fs.mkdirSync(to, { recursive: true });
       for (const f of fs.readdirSync(from)) if (/\.(js|ps1)$/.test(f)) fs.copyFileSync(path.join(from, f), path.join(to, f));
     }
+    // Skills (.claude/skills, shipped as resources/skills) so the installed brain has them too.
+    const skills = path.join(process.resourcesPath, 'skills');
+    if (fs.existsSync(skills)) fs.cpSync(skills, path.join(ws, '.claude', 'skills'), { recursive: true });
     claude.cwd = ws;
   }
   // Legacy Python memory locations (read-only import).
@@ -184,16 +187,18 @@ app.whenReady().then(() => {
   // Warm the Claude CLI at launch (like piper.start() above) so the first message of a session
   // doesn't pay its cold-start cost -- proc is already up by the time send() is first called.
   claude.resumed = !!claude.sessionId; claude.start();
-  // Now playing (Windows media session), polled while the window is visible.
+  // Now playing (Windows media session), polled only while the HUD is focused: a PowerShell every 8s behind a game is wasted CPU.
+  // Refreshed the moment he tabs back in.
   const npScript = path.join(root, 'src', 'tools', 'nowplaying.ps1').replace('app.asar', 'app.asar.unpacked');
   let npBusy = false;
-  setInterval(() => {
-    if (npBusy || !win?.isVisible()) return; npBusy = true;
+  const nowPlaying = () => {
+    if (npBusy || !win?.isFocused()) return; npBusy = true;
     require('child_process').execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', npScript], { windowsHide: true, timeout: 8000 }, (err, out) => {
       npBusy = false; let np = {}; try { np = JSON.parse(String(out).trim() || '{}'); } catch {}
       win?.webContents.send('nowplaying', np);
     });
-  }, 8000);
+  };
+  setInterval(nowPlaying, 8000); app.on('browser-window-focus', (_e, w) => { if (w === win) nowPlaying(); });
   // barehands ring mirrors Jarvis (thinking while working, idle when done); harmless if the board isn't running.
   const ring = s => fs.writeFile(path.join(root, 'barehands', 'state', 'state'), s, () => {});
   claude.on('tool', t => { ring('thinking'); win?.webContents.send('tool', t); });
@@ -246,6 +251,8 @@ app.whenReady().then(() => {
   const twitch = new Twitch(dataDir, () => ({ id: readSet().twitchClientId || '', secret: loadSecret(twSecretFile)?.secret || '' }));
   const nanoleaf = new Nanoleaf(dataDir, () => (readSet().nanoleafIp || '').trim());
   ipcMain.handle('connect:nanoleaf', async () => { try { return { msg: await nanoleaf.pair() }; } catch (e) { return { error: e.message }; } });
+  // Pair Key Light: scan the LAN for Elgato lights (pc.js light find) and save them where pc.js reads them.
+  ipcMain.handle('connect:keylight', async () => { try { return { msg: await require('../tools/pc').run('light', 'find') }; } catch (e) { return { error: e.message }; } });
   // Whole-VOD autopilot runs in the background; the result arrives as a notification.
   let vodBusy = false;
   // Custom layouts (Clip Studio's layout editor): { default: name|null, layouts: [{ name, bg, captionY, panels }] }.
