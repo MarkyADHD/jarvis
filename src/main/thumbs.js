@@ -20,7 +20,7 @@ function wrapTitle(title) {
 
 function run(args) {
   return new Promise((ok, fail) => {
-    const p = spawn('ffmpeg', args, { windowsHide: true }); let err = '';
+    const p = require('./clips').low(spawn('ffmpeg', args, { windowsHide: true })); let err = '';
     p.stderr.on('data', d => { err = (err + d).slice(-400); });
     p.on('close', c => c ? fail(new Error('Thumbnail failed: ' + err.trim().split('\n').pop())) : ok());
   });

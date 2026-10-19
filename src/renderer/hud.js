@@ -3,7 +3,7 @@
 const $ = id => document.getElementById(id);
 const TAU = Math.PI * 2, rad = d => d * Math.PI / 180, lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v)), ease = t => 1 - Math.pow(1 - clamp(t), 3);
-const C = { cyan: '#35d6ff', cyan2: '#7fe7ff', blue: '#2a9fe0', amber: '#ffa928', gold: '#ffd23f', red: '#ff4d5e', white: '#eafcff' };
+const C = { red: '#ff4d5e' }; applyTheme(C);   // the rest of the palette comes from theme.js
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; };
 
 // ---------- shared state ----------
@@ -49,7 +49,7 @@ function buildHex(w, h) {
   const s = 26, hw = Math.sqrt(3) * s, d = devicePixelRatio || 1;
   hexCache.width = (w + 120) * d; hexCache.height = (h + 120) * d;
   const g = hexCache.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0);
-  g.strokeStyle = 'rgba(53,214,255,.055)'; g.lineWidth = 1; hexCells = [];
+  g.strokeStyle = rgba(C.cyan, .055); g.lineWidth = 1; hexCells = [];
   for (let row = 0, y = 0; y < h + 120; row++, y += s * 1.5)
     for (let x = row % 2 ? hw / 2 : 0; x < w + 120; x += hw) {
       hexCells.push([x, y]); g.beginPath();
@@ -63,7 +63,7 @@ function drawBg(t) {
   if (bg._dirty) { buildHex(w, h); bg._dirty = false; }
   g.clearRect(0, 0, w, h);
   const glow = g.createRadialGradient(w / 2, h * 0.45, 0, w / 2, h * 0.45, Math.max(w, h) * 0.6);
-  glow.addColorStop(0, `rgba(18,95,140,${0.35 + S.energy * 0.2})`); glow.addColorStop(1, 'rgba(1,5,9,0)');
+  glow.addColorStop(0, rgba(C.deep, 0.35 + S.energy * 0.2)); glow.addColorStop(1, rgba(C.bg, 0));
   g.fillStyle = glow; g.fillRect(0, 0, w, h);
   const ox = -60 - S.px * 30, oy = -60 - S.py * 30;
   g.drawImage(hexCache, ox, oy, hexCache.width / (devicePixelRatio || 1), hexCache.height / (devicePixelRatio || 1));
@@ -73,14 +73,14 @@ function drawBg(t) {
   for (const l of lit) {
     const [x, y] = l.c; g.beginPath();
     for (let k = 0; k < 6; k++) { const a = rad(60 * k + 30); g.lineTo(x + ox + Math.cos(a) * 25, y + oy + Math.sin(a) * 25); }
-    g.closePath(); g.fillStyle = `rgba(53,214,255,${l.life * 0.08})`; g.fill();
-    g.strokeStyle = `rgba(53,214,255,${l.life * 0.35})`; g.stroke();
+    g.closePath(); g.fillStyle = rgba(C.cyan, l.life * 0.08); g.fill();
+    g.strokeStyle = rgba(C.cyan, l.life * 0.35); g.stroke();
   }
   g.globalCompositeOperation = 'lighter';
   for (const p of dust) {
     p.y -= p.v * (1 + S.heat * 2); p.x += Math.sin(t / 2000 + p.a * 10) * 0.15;
     if (p.y < -5) { p.y = h + 5; p.x = Math.random() * w; }
-    g.fillStyle = `rgba(127,231,255,${0.25 + 0.25 * Math.sin(t / 700 + p.a * 20)})`;
+    g.fillStyle = rgba(C.cyan2, 0.25 + 0.25 * Math.sin(t / 700 + p.a * 20));
     g.beginPath(); g.arc(p.x - S.px * 12, p.y - S.py * 12, p.r, 0, TAU); g.fill();
   }
   g.globalCompositeOperation = 'source-over';
@@ -161,18 +161,18 @@ function drawReactor(t) {
   layer(g, 2, () => {
     g.save(); g.rotate(Math.sin(s * 0.15 * sp) * 0.08 + S.heat * s * 0.3);
     const band = g.createRadialGradient(0, 0, r0, 0, 0, r1);
-    band.addColorStop(0, rgba(C.blue, 0.5)); band.addColorStop(0.5, rgba('#46beff', 0.78 + S.energy * 0.22)); band.addColorStop(1, rgba(C.blue, 0.42));
+    band.addColorStop(0, rgba(C.blue, 0.5)); band.addColorStop(0.5, rgba(C.hi, 0.78 + S.energy * 0.22)); band.addColorStop(1, rgba(C.blue, 0.42));
     g.beginPath(); g.arc(0, 0, r1, A0, A1); g.arc(0, 0, r0, A1, A0, true); g.closePath();
     g.fillStyle = band; g.shadowBlur = 26 + S.energy * 34; g.shadowColor = C.blue; g.fill(); g.shadowBlur = 0;
     // inner bevel lines inside each segment
-    g.strokeStyle = 'rgba(1,5,9,.78)'; g.lineWidth = 2.2;
+    g.strokeStyle = rgba(C.bg, .78); g.lineWidth = 2.2;
     for (let a = A0; a <= A1 + 1e-6; a += rad(7.5)) { g.beginPath(); g.moveTo(...P(a, r0)); g.lineTo(...P(a, r1)); g.stroke(); }
-    arc(g, (r0 + r1) / 2 + R * 0.035, A0, A1, 1, 'rgba(200,245,255,.18)');
+    arc(g, (r0 + r1) / 2 + R * 0.035, A0, A1, 1, rgba(C.pale, .18));
     // sweep highlight
     if (S.heat > 0.05) {
       const sa = A0 + ((s * 0.9 * sp) % 1) * (A1 - A0), len = rad(24);
       const gr = g.createConicGradient(sa - len, 0, 0);
-      gr.addColorStop(0, 'rgba(210,248,255,0)'); gr.addColorStop(len / TAU, `rgba(220,250,255,${0.7 * S.heat})`); gr.addColorStop(len / TAU + 0.001, 'rgba(0,0,0,0)');
+      gr.addColorStop(0, rgba(C.pale, 0)); gr.addColorStop(len / TAU, rgba(C.pale, 0.7 * S.heat)); gr.addColorStop(len / TAU + 0.001, 'rgba(0,0,0,0)');
       g.beginPath(); g.arc(0, 0, r1, sa - len, sa); g.arc(0, 0, r0, sa, sa - len, true); g.closePath(); g.fillStyle = gr; g.fill();
     }
     arc(g, r1 + 4, A0, A1, 1.5, C.cyan, 8);
@@ -244,11 +244,11 @@ function drawReactor(t) {
   // dark core + circuitry + radar sweep
   layer(g, 1, () => {
     const core = g.createRadialGradient(0, 0, 0, 0, 0, R * 0.58);
-    core.addColorStop(0, '#0c2a3b'); core.addColorStop(0.7, '#04121c'); core.addColorStop(1, '#01070c');
+    core.addColorStop(0, C.core0); core.addColorStop(0.7, C.core1); core.addColorStop(1, C.core2);
     g.fillStyle = core; g.beginPath(); g.arc(0, 0, R * 0.575, 0, TAU); g.fill();
     g.save(); g.beginPath(); g.arc(0, 0, R * 0.57, 0, TAU); g.clip();
     const sw = g.createConicGradient(s * 0.8 * sp, 0, 0);
-    sw.addColorStop(0, rgba(C.cyan, 0.22)); sw.addColorStop(0.12, 'rgba(53,214,255,0)'); sw.addColorStop(1, 'rgba(53,214,255,0)');
+    sw.addColorStop(0, rgba(C.cyan, 0.22)); sw.addColorStop(0.12, rgba(C.cyan, 0)); sw.addColorStop(1, rgba(C.cyan, 0));
     g.fillStyle = sw; g.fillRect(-R, -R, 2 * R, 2 * R);
     g.restore();
     g.save(); g.rotate(s * 0.2 * sp); g.globalAlpha = 0.4;
@@ -277,7 +277,7 @@ function drawReactor(t) {
       g.globalCompositeOperation = 'source-over';
     }
     g.shadowBlur = 20 + pulse * 12 + S.energy * 24; g.shadowColor = C.cyan;
-    const grad = g.createLinearGradient(0, -fs / 2, 0, fs / 2); grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#8fe3ff');
+    const grad = g.createLinearGradient(0, -fs / 2, 0, fs / 2); grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, C.glow);
     g.fillStyle = grad; g.fillText('J.A.R.V.I.S.', 0, 0); g.shadowBlur = 0;
     g.font = `${Math.max(9, R * 0.03)}px Consolas, monospace`; g.fillStyle = rgba(C.cyan, 0.7);
     g.fillText(S.mode === 'idle' ? 'ALL SYSTEMS NOMINAL' : S.mode === 'thinking' ? 'PROCESSING REQUEST' : S.mode === 'listening' ? 'LISTENING' : 'TRANSMITTING', 0, fs * 0.85);
@@ -374,7 +374,7 @@ function drawRadar(t) {
   for (let i = 0; i < 72; i++) { const a = i * TAU / 72; g.beginPath(); g.moveTo(...P(a, R)); g.lineTo(...P(a, R - (i % 6 ? 3 : 7))); g.stroke(); }
   const sa = (t / 1000 * (1.2 + S.heat * 2)) % TAU;
   const sw = g.createConicGradient(sa - 1.2, 0, 0);
-  sw.addColorStop(0, 'rgba(53,214,255,0)'); sw.addColorStop(1.2 / TAU, rgba(C.cyan, 0.35)); sw.addColorStop(1.2 / TAU + 0.001, 'rgba(0,0,0,0)');
+  sw.addColorStop(0, rgba(C.cyan, 0)); sw.addColorStop(1.2 / TAU, rgba(C.cyan, 0.35)); sw.addColorStop(1.2 / TAU + 0.001, 'rgba(0,0,0,0)');
   g.fillStyle = sw; g.beginPath(); g.arc(0, 0, R, 0, TAU); g.fill();
   g.strokeStyle = C.cyan; g.lineWidth = 1.5; g.shadowBlur = 8; g.shadowColor = C.cyan;
   g.beginPath(); g.moveTo(0, 0); g.lineTo(...P(sa, R)); g.stroke(); g.shadowBlur = 0;
@@ -386,7 +386,7 @@ function drawRadar(t) {
     const diff = ((sa - a) % TAU + TAU) % TAU; if (diff < 0.08) blips[i] = 1;
     blips[i] *= 0.985;
     const col = S.coresS[i] > 80 ? C.red : S.coresS[i] > 50 ? C.amber : C.cyan;
-    g.fillStyle = rgba(col === C.cyan ? '#35d6ff' : col, 0.2 + blips[i] * 0.8); g.shadowBlur = 10 * blips[i]; g.shadowColor = col;
+    g.fillStyle = rgba(col, 0.2 + blips[i] * 0.8); g.shadowBlur = 10 * blips[i]; g.shadowColor = col;
     g.beginPath(); g.arc(...P(a, R * d), 2.5 + blips[i] * 1.5, 0, TAU); g.fill(); g.shadowBlur = 0;
   }
   g.restore();
@@ -422,12 +422,11 @@ function drawFx() {
 }
 
 // ---------- main loop ----------
-let anim = 'on', lastT = 0;
+let anim = 'on';
 jarvis.onAnim(a => { anim = a; });
 function frame(t) {
   window.__f = t;
-  if (anim === 'off' || (anim === 'slow' && t - lastT < 100)) return requestAnimationFrame(frame);   // 0 / 10 fps while gaming
-  lastT = t;
+  if (anim === 'off') return requestAnimationFrame(frame);   // paused while hidden/minimised (gaming)
   drawBg(t); drawReactor(t); drawRadar(t); drawClockRing(); drawCores(); drawFx();
   requestAnimationFrame(frame);
 }
@@ -447,13 +446,17 @@ async function poll() {
   $('netChip').textContent = st.net[0] ? `NET ${st.net[0].ip}` : 'NET OFFLINE';
   drawSpark(); drawDisks();
 }
+// Gauges only redraw while a tween is running (they used to repaint every frame, even hidden behind a game).
 (function tween() {
-  const k = ease((performance.now() - tweenAt) / 900);
-  const cpu = Math.round(lerp(tweenFrom.cpu, tweenTo.cpu, k)), mem = Math.round(lerp(tweenFrom.mem, tweenTo.mem, k));
-  $('cpuV').textContent = cpu; $('memV').textContent = mem; drawGauge('gCpu', cpu); drawGauge('gMem', mem);
+  const age = performance.now() - tweenAt;
+  if (age < 1100 && anim === 'on') {
+    const k = ease(age / 900);
+    const cpu = Math.round(lerp(tweenFrom.cpu, tweenTo.cpu, k)), mem = Math.round(lerp(tweenFrom.mem, tweenTo.mem, k));
+    $('cpuV').textContent = cpu; $('memV').textContent = mem; drawGauge('gCpu', cpu); drawGauge('gMem', mem);
+  }
   requestAnimationFrame(tween);
 })();
-setInterval(poll, 1500); poll();
+setInterval(() => { if (anim !== 'off') poll(); }, 1500); poll();   // hidden/minimised: no stats work at all
 
 function tick() {
   const d = new Date();
@@ -464,7 +467,7 @@ setInterval(tick, 1000); tick();
 
 // hex stream: cosmetic telemetry noise, speeds up when busy
 setInterval(() => {
-  const el = $('hex'); if (!el.offsetHeight) return;
+  const el = $('hex'); if (!el.offsetHeight || anim !== 'on') return;   // only while he's actually looking
   const line = Array.from({ length: 6 }, () => (Math.random() * 0xffff | 0).toString(16).toUpperCase().padStart(4, '0')).join(' ');
   el.textContent = (line + '\n' + el.textContent).split('\n').slice(0, 30).join('\n');
 }, 220);
@@ -788,6 +791,7 @@ const Settings = (() => {
     $('sEngine').textContent = s.engine === 'elevenlabs' ? 'using ElevenLabs' : s.engine === 'piper' ? 'using local voice' : 'no voice available';
     $('sPtt').textContent = s.ptt ? 'On' : 'Off'; $('sPttKey').value = s.pttKey;
     $('sVoice').textContent = voiceOn ? 'On' : 'Off'; $('sHf').textContent = HandsFree.active() ? 'On' : 'Off';
+    $('sTheme').value = document.documentElement.classList.contains('vice') ? 'vice' : 'default';
     $('sBrain').value = s.brain; $('sLocalUrl').value = s.localUrl; brain = s; scan();
   }
   // Local brain: list every model the local AI apps on this PC report; picking one saves it straight away.
@@ -803,6 +807,10 @@ const Settings = (() => {
     $('sBrainState').textContent = found.length ? `${found.length} local model(s) found` : 'no local AI app running (Ollama, LM Studio...)';
   }
   $('sScan').onclick = scan;
+  $('sTheme').onchange = () => {
+    try { localStorage.setItem('jarvis.theme', $('sTheme').value); } catch {}
+    applyTheme(C, $('sTheme').value); bg._dirty = true;   // hex grid is cached, so rebuild it in the new colour
+  };
   $('sBrain').onchange = async () => { await jarvis.setSettings({ brain: $('sBrain').value }); msg($('sBrain').value === 'local' ? 'Using the local model for everything.' : 'Using Claude, local model as backup.'); };
   $('sModel').onchange = async () => {
     const f = $('sModel').value ? JSON.parse($('sModel').value) : { url: '', model: '' };
@@ -830,8 +838,8 @@ const Settings = (() => {
     msg('Saved.'); showEngine(r.engine); refresh();
   };
   $('sClearKey').onclick = async () => { const r = await jarvis.setSettings({ clearKey: true }); msg('Key removed.'); showEngine(r.engine); refresh(); };
-  for (const [btn, which] of [['sSpConn', 'spotify'], ['sTwConn', 'twitch'], ['sNlPair', 'nanoleaf']]) $(btn).onclick = async () => {
-    await $('sSave').onclick(); msg('Opening ' + which + ' login…');
+  for (const [btn, which] of [['sSpConn', 'spotify'], ['sTwConn', 'twitch'], ['sNlPair', 'nanoleaf'], ['sKlPair', 'keylight']]) $(btn).onclick = async () => {
+    await $('sSave').onclick(); msg(which === 'keylight' ? 'Searching the network for Key Lights…' : 'Opening ' + which + ' login…');
     const r = await jarvis.connect(which); r.error ? msg(r.error, true) : msg(r.msg); refresh();
   };
   return { refresh };
