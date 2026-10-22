@@ -342,6 +342,8 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
   <div class="srow"><label>Push-to-talk</label><button type="button" id="sPtt"></button><input id="sPttKey" placeholder="Home" title="Click, then press a key"><small>hold to talk, release to send</small></div>
   <div class="srow"><label>Home city</label><input id="sCity" placeholder="e.g. Manchester"><small>weather and briefings</small></div>
   <div class="srow"><label>Brain</label><select id="sBrain"><option value="claude">Claude, local model as backup</option><option value="local">Local model only</option></select><small id="sBrainState"></small></div>
+  <div class="srow"><label>Claude model</label><select id="sClaudeModel"><option value="">Default</option><option value="opus">Opus (best for coding)</option><option value="sonnet">Sonnet (balanced)</option><option value="haiku">Haiku (fastest)</option><option value="fable">Fable</option></select>
+    <select id="sEffort"><option value="">Default effort</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option></select></div>
   <div class="srow"><label>Local model</label><select id="sModel"></select><button type="button" id="sScan">Scan PC</button></div>
   <div class="srow"><label>Model server</label><input id="sLocalUrl" placeholder="Ollama, LM Studio or any server ending in /v1"><small>found automatically; type one here and Scan</small></div>
   <div class="srow"><label>ElevenLabs voice ID</label><input id="sVoiceId" placeholder="voice id"></div>

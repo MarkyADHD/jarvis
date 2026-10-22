@@ -792,7 +792,7 @@ const Settings = (() => {
     $('sPtt').textContent = s.ptt ? 'On' : 'Off'; $('sPttKey').value = s.pttKey;
     $('sVoice').textContent = voiceOn ? 'On' : 'Off'; $('sHf').textContent = HandsFree.active() ? 'On' : 'Off';
     $('sTheme').value = document.documentElement.classList.contains('vice') ? 'vice' : 'default';
-    $('sBrain').value = s.brain; $('sLocalUrl').value = s.localUrl; brain = s; scan();
+    $('sBrain').value = s.brain; $('sClaudeModel').value = s.claudeModel; $('sEffort').value = s.claudeEffort; $('sLocalUrl').value = s.localUrl; brain = s; scan();
   }
   // Local brain: list every model the local AI apps on this PC report; picking one saves it straight away.
   let brain = {};
@@ -812,6 +812,10 @@ const Settings = (() => {
     applyTheme(C, $('sTheme').value); bg._dirty = true;   // hex grid is cached, so rebuild it in the new colour
   };
   $('sBrain').onchange = async () => { await jarvis.setSettings({ brain: $('sBrain').value }); msg($('sBrain').value === 'local' ? 'Using the local model for everything.' : 'Using Claude, local model as backup.'); };
+  $('sClaudeModel').onchange = $('sEffort').onchange = async () => {
+    const r = await jarvis.setSettings({ claudeModel: $('sClaudeModel').value, claudeEffort: $('sEffort').value });
+    msg(r?.error || `Claude: ${$('sClaudeModel').selectedOptions[0].text}, ${$('sEffort').selectedOptions[0].text.toLowerCase()}.`, !!r?.error);
+  };
   $('sModel').onchange = async () => {
     const f = $('sModel').value ? JSON.parse($('sModel').value) : { url: '', model: '' };
     const r = await jarvis.setSettings({ localUrl: f.url, localModel: f.model });
