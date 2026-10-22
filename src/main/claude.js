@@ -84,6 +84,8 @@ class Claude extends EventEmitter {
       '--include-partial-messages', '--append-system-prompt', PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : ''), '--allowedTools', ...ALLOWED];
     const site = require('./vault').website(); if (site) args.push('--add-dir', site);   // business manager: his website folder
     const q = a => (this.shell ? JSON.stringify(a.replace(/\r?\n/g, ' ')) : a);   // only the cmd.exe fallback needs quoting
+    if (this.model) args.push('--model', this.model);     // Settings > Claude model / effort ('' = Claude Code's default)
+    if (this.effort) args.push('--effort', this.effort);
     if (this.sessionId) args.push('--resume', this.sessionId);
     this.proc = spawn(this.bin, args.map(q), { cwd: this.cwd || ROOT, stdio: ['pipe', 'pipe', 'pipe'], shell: this.shell, windowsHide: true });
     let buf = '';

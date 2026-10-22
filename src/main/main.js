@@ -184,9 +184,6 @@ app.whenReady().then(() => {
   const sessFile = path.join(app.getPath('userData'), 'data', 'claude-session.txt');
   try { claude.sessionId = fs.readFileSync(sessFile, 'utf8').trim() || null; } catch {}
   claude.on('done', () => { if (claude.sessionId) fs.writeFile(sessFile, claude.sessionId, () => {}); });
-  // Warm the Claude CLI at launch (like piper.start() above) so the first message of a session
-  // doesn't pay its cold-start cost -- proc is already up by the time send() is first called.
-  claude.resumed = !!claude.sessionId; claude.start();
   // Now playing (Windows media session), polled only while the HUD is focused: a PowerShell every 8s behind a game is wasted CPU.
   // Refreshed the moment he tabs back in.
   const npScript = path.join(root, 'src', 'tools', 'nowplaying.ps1').replace('app.asar', 'app.asar.unpacked');
@@ -241,9 +238,17 @@ app.whenReady().then(() => {
     if (s.city) process.env.JARVIS_CITY = s.city;
     if (s.voiceId) { speech.eleven.voiceId = s.voiceId; speech.eleven.enabled = !process.env.JARVIS_NO_ELEVENLABS; }
     require('./local').configure({ url: s.localUrl, model: s.localModel }); claude.localOnly = s.brain === 'local';
+    const model = s.claudeModel || '', effort = s.claudeEffort || '';
+    if (model !== (claude.model || '') || effort !== (claude.effort || '')) {   // new model/effort: respawn the warm CLI, same conversation
+      Object.assign(claude, { model, effort });
+      if (claude.proc && !claude.busy) { claude.cancel(); claude.resumed = !!claude.sessionId; claude.start(); }
+    }
   };
   speech.eleven.keyStore = () => { try { return safeStorage.decryptString(fs.readFileSync(keyFile)); } catch { return ''; } };
   applySet(readSet());
+  // Warm the Claude CLI at launch, after applySet so it gets the chosen model/effort, so the first message of a session
+  // doesn't pay its cold-start cost -- proc is already up by the time send() is first called.
+  claude.resumed = !!claude.sessionId; claude.start();
   // Spotify + Twitch: tokens encrypted in dataDir; pc.js reaches them through the file bridge.
   const { loadSecret, saveSecret } = require('./oauth');
   const twSecretFile = path.join(dataDir, 'twitch.secret');
@@ -345,7 +350,7 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:get', () => { const s = readSet(); return { city: s.city || '', voiceId: speech.eleven.voiceId || '', hasKey: fs.existsSync(keyFile), engine: speech.engine(),
     spotifyClientId: s.spotifyClientId || '', spotifyConnected: spotify.connected(), twitchClientId: s.twitchClientId || '', twitchHasSecret: fs.existsSync(twSecretFile), twitchConnected: twitch.connected(),
     discord: s.discord || {}, nanoleafIp: s.nanoleafIp || '', nanoleafPaired: nanoleaf.connected(), ptt: !!s.ptt, pttKey: s.pttKey || 'Home',
-    brain: s.brain || 'claude', localUrl: s.localUrl || '', localModel: s.localModel || '' }; });
+    brain: s.brain || 'claude', claudeModel: s.claudeModel || '', claudeEffort: s.claudeEffort || '', localUrl: s.localUrl || '', localModel: s.localModel || '' }; });
   ipcMain.handle('local:models', (_e, extra) => require('./local').models(typeof extra === 'string' ? extra.trim() : ''));
   ipcMain.handle('settings:set', (_e, s = {}) => {
     const next = readSet();
@@ -355,6 +360,8 @@ app.whenReady().then(() => {
       next.voiceId = s.voiceId.trim();
     }
     if (['claude', 'local'].includes(s.brain)) next.brain = s.brain;
+    if (typeof s.claudeModel === 'string' && /^[\w.\[\]-]{0,60}$/.test(s.claudeModel)) next.claudeModel = s.claudeModel;
+    if (['', 'low', 'medium', 'high', 'xhigh', 'max'].includes(s.claudeEffort)) next.claudeEffort = s.claudeEffort;
     if (typeof s.localUrl === 'string') {   // '' = back to the default (Ollama, qwen3:8b)
       if (s.localUrl && !/^https?:\/\/\S{1,200}$/.test(s.localUrl.trim())) return { error: 'That server address should start with http://' };
       next.localUrl = s.localUrl.trim(); next.localModel = String(s.localModel || '').replace(/[\x00-\x1f]/g, '').slice(0, 200);
