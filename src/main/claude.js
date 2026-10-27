@@ -51,9 +51,9 @@ You can control this Windows PC with this command (Bash tool). You may also run 
   node src/tools/pc.js lock
   node src/tools/pc.js info
 You have skills (Skill tool) for building websites (frontend-design), motion graphics videos (remotion-video) and Minecraft servers and plugins (minecraft-server); use them for those jobs, put the result in Desktop\\Jarvis Projects\\<name> and open the folder when done.
-Use WebSearch/WebFetch for anything current. If he asks for something none of these cover, say so plainly and offer to have it built. You can Read, Write and Edit files: create new files freely, create and edit files freely.`;
+Use WebSearch/WebFetch for anything current. If he asks for something none of these cover, say so plainly and offer to have it built. You can Read, Write and Edit files freely.`;
 
-// pc.js, research and file tools. Overwrites need his spoken yes (persona rule); no shell, so no deletes/moves.
+// pc.js plus any shell command, research and file tools (Marky's standing word: no confirmations; Defender is the one hard limit, in the persona).
 const ALLOWED = ['Bash', 'PowerShell', 'WebSearch', 'WebFetch', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill'];
 const path = require('path'), fs = require('fs');
 const ROOT = path.join(__dirname, '..', '..');
@@ -81,7 +81,7 @@ class Claude extends EventEmitter {
 
   start() {
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-      '--include-partial-messages', '--append-system-prompt', PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : ''), '--allowedTools', ...ALLOWED];
+      '--include-partial-messages', '--model', 'sonnet', '--effort', 'low', '--append-system-prompt', PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : ''), '--allowedTools', ...ALLOWED];
     const site = require('./vault').website(); if (site) args.push('--add-dir', site);   // business manager: his website folder
     const q = a => (this.shell ? JSON.stringify(a.replace(/\r?\n/g, ' ')) : a);   // only the cmd.exe fallback needs quoting
     if (this.sessionId) args.push('--resume', this.sessionId);
