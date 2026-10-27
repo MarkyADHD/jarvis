@@ -138,9 +138,9 @@ async function weather(place) {
   const p = (place || process.env.JARVIS_CITY) ? await geocode(place || process.env.JARVIS_CITY) : await here();
   const w = await getJson(`https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&forecast_days=2&timezone=auto`);
   const c = w.current, d = w.daily;
-  return `${p.name}: now ${Math.round(c.temperature_2m)}Â°C (feels ${Math.round(c.apparent_temperature)}Â°C), ${WMO[c.weather_code] || 'code ' + c.weather_code}, wind ${Math.round(c.wind_speed_10m)} km/h, humidity ${c.relative_humidity_2m}%. ` +
-    `Today ${Math.round(d.temperature_2m_min[0])}â€“${Math.round(d.temperature_2m_max[0])}Â°C, ${d.precipitation_probability_max[0]}% rain. ` +
-    `Tomorrow ${Math.round(d.temperature_2m_min[1])}â€“${Math.round(d.temperature_2m_max[1])}Â°C, ${WMO[d.weather_code[1]] || ''}, ${d.precipitation_probability_max[1]}% rain.`;
+  return `${p.name}: now ${Math.round(c.temperature_2m)}°C (feels ${Math.round(c.apparent_temperature)}°C), ${WMO[c.weather_code] || 'code ' + c.weather_code}, wind ${Math.round(c.wind_speed_10m)} km/h, humidity ${c.relative_humidity_2m}%. ` +
+    `Today ${Math.round(d.temperature_2m_min[0])} to ${Math.round(d.temperature_2m_max[0])}°C, ${d.precipitation_probability_max[0]}% rain. ` +
+    `Tomorrow ${Math.round(d.temperature_2m_min[1])} to ${Math.round(d.temperature_2m_max[1])}°C, ${WMO[d.weather_code[1]] || ''}, ${d.precipitation_probability_max[1]}% rain.`;
 }
 async function worldTime(place) {
   const now = new Date();
