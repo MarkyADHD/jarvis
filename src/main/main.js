@@ -130,7 +130,8 @@ app.whenReady().then(() => {
   // Legacy Python memory locations (read-only import).
   db.importLegacy(['E:/JarvisMemory/jarvis_memory.jsonl', 'E:/JarvisMemory/jarvis_long_memory_v2.jsonl', 'C:/AI-Agent/JarvisMemory/jarvis_long_memory_v2.jsonl']);
   // Memories now live in the markdown vault; move memories.jsonl over once (backed up first).
-  vault.migrate(path.join(app.getPath('userData'), 'data', 'memories.jsonl'));
+  // Vault lives on E:; if that drive is unplugged, mkdir throws and would kill startup before the window/tray exist.
+  try { vault.migrate(path.join(app.getPath('userData'), 'data', 'memories.jsonl')); } catch (e) { console.error('[jarvis] memory vault unavailable:', e.message); }
 
   // Voice: each finished sentence is synthesised immediately (in parallel) and sent to the
   // renderer strictly in order, so first audio starts while Claude is still writing.

@@ -81,7 +81,7 @@ class Claude extends EventEmitter {
 
   start() {
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-      '--include-partial-messages', '--append-system-prompt', PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : ''), '--allowedTools', ...ALLOWED];
+      '--include-partial-messages', '--model', 'sonnet', '--effort', 'low', '--append-system-prompt', PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : ''), '--allowedTools', ...ALLOWED];
     const site = require('./vault').website(); if (site) args.push('--add-dir', site);   // business manager: his website folder
     const q = a => (this.shell ? JSON.stringify(a.replace(/\r?\n/g, ' ')) : a);   // only the cmd.exe fallback needs quoting
     if (this.sessionId) args.push('--resume', this.sessionId);
