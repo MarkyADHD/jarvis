@@ -800,6 +800,7 @@ const Settings = (() => {
     $('sDcMute').value = s.discord.mute || ''; $('sDcDeaf').value = s.discord.deafen || ''; $('sDcLeave').value = s.discord.leave || '';
     $('sEngine').textContent = s.engine === 'elevenlabs' ? 'using ElevenLabs' : s.engine === 'piper' ? 'using local voice' : 'no voice available';
     $('sPtt').textContent = s.ptt ? 'On' : 'Off'; $('sPttKey').value = s.pttKey;
+    $('sStt').value = s.stt; $('sSttState').textContent = s.sttEngine === 'loading' ? 'loading (first time downloads the model)…' : s.sttEngine;
     $('sVoice').textContent = voiceOn ? 'On' : 'Off'; $('sHf').textContent = HandsFree.active() ? 'On' : 'Off';
     $('sTheme').value = document.documentElement.classList.contains('vice') ? 'vice' : 'default';
     $('sBrain').value = s.brain; $('sLocalUrl').value = s.localUrl; brain = s; scan();
@@ -821,6 +822,7 @@ const Settings = (() => {
     try { localStorage.setItem('jarvis.theme', $('sTheme').value); } catch {}
     applyTheme(C, $('sTheme').value); bg._dirty = true;   // hex grid is cached, so rebuild it in the new colour
   };
+  $('sStt').onchange = async () => { await jarvis.setSettings({ stt: $('sStt').value }); msg('Switching speech recognition, ready in a few seconds.'); refresh(); };
   $('sBrain').onchange = async () => { await jarvis.setSettings({ brain: $('sBrain').value }); msg($('sBrain').value === 'local' ? 'Using the local model for everything.' : 'Using Claude, local model as backup.'); };
   $('sModel').onchange = async () => {
     const f = $('sModel').value ? JSON.parse($('sModel').value) : { url: '', model: '' };

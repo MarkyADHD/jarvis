@@ -341,6 +341,7 @@ body.private #mems,body.private #log,body.private #npPanel .npt{filter:blur(7px)
   <div class="srow"><label>Voice</label><button type="button" id="sVoice"></button><small id="sEngine"></small></div>
   <div class="srow"><label>Hands-free</label><button type="button" id="sHf"></button><small>say "Jarvis ..."</small></div>
   <div class="srow"><label>Push-to-talk</label><button type="button" id="sPtt"></button><input id="sPttKey" placeholder="Home" title="Click, then press a key"><small>hold to talk, release to send</small></div>
+  <div class="srow"><label>Speech recognition</label><select id="sStt"><option value="cpu">CPU (fastest on most PCs)</option><option value="gpu">GPU (falls back to CPU)</option></select><small id="sSttState"></small></div>
   <div class="srow"><label>Home city</label><input id="sCity" placeholder="e.g. Manchester"><small>weather and briefings</small></div>
   <div class="srow"><label>Brain</label><select id="sBrain"><option value="claude">Claude, local model as backup</option><option value="local">Local model only</option></select><small id="sBrainState"></small></div>
   <div class="srow"><label>Local model</label><select id="sModel"></select><button type="button" id="sScan">Scan PC</button></div>

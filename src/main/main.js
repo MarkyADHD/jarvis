@@ -247,6 +247,7 @@ app.whenReady().then(() => {
     if (s.city) process.env.JARVIS_CITY = s.city;
     if (s.voiceId) { speech.eleven.voiceId = s.voiceId; speech.eleven.enabled = !process.env.JARVIS_NO_ELEVENLABS; }
     require('./local').configure({ url: s.localUrl, model: s.localModel }); claude.localOnly = s.brain === 'local';
+    stt.setMode(s.stt);
   };
   speech.eleven.keyStore = () => { try { return safeStorage.decryptString(fs.readFileSync(keyFile)); } catch { return ''; } };
   applySet(readSet());
@@ -351,7 +352,7 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:get', () => { const s = readSet(); return { city: s.city || '', voiceId: speech.eleven.voiceId || '', hasKey: fs.existsSync(keyFile), engine: speech.engine(),
     spotifyClientId: s.spotifyClientId || '', spotifyConnected: spotify.connected(), twitchClientId: s.twitchClientId || '', twitchHasSecret: fs.existsSync(twSecretFile), twitchConnected: twitch.connected(),
     discord: s.discord || {}, nanoleafIp: s.nanoleafIp || '', nanoleafPaired: nanoleaf.connected(), ptt: !!s.ptt, pttKey: s.pttKey || 'Home',
-    brain: s.brain || 'claude', localUrl: s.localUrl || '', localModel: s.localModel || '' }; });
+    brain: s.brain || 'claude', localUrl: s.localUrl || '', localModel: s.localModel || '', stt: s.stt || 'cpu', sttEngine: stt.engine() }; });
   ipcMain.handle('local:models', (_e, extra) => require('./local').models(typeof extra === 'string' ? extra.trim() : ''));
   ipcMain.handle('settings:set', (_e, s = {}) => {
     const next = readSet();
@@ -361,6 +362,7 @@ app.whenReady().then(() => {
       next.voiceId = s.voiceId.trim();
     }
     if (['claude', 'local'].includes(s.brain)) next.brain = s.brain;
+    if (['gpu', 'cpu'].includes(s.stt)) next.stt = s.stt;
     if (typeof s.localUrl === 'string') {   // '' = back to the default (Ollama, qwen3:8b)
       if (s.localUrl && !/^https?:\/\/\S{1,200}$/.test(s.localUrl.trim())) return { error: 'That server address should start with http://' };
       next.localUrl = s.localUrl.trim(); next.localModel = String(s.localModel || '').replace(/[\x00-\x1f]/g, '').slice(0, 200);
@@ -422,7 +424,7 @@ app.whenReady().then(() => {
     try { return { text: await stt.transcribe(pcm instanceof Float32Array ? pcm : new Float32Array(pcm)) }; }
     catch (e) { return { error: String(e.message || e) }; }
   });
-  setTimeout(() => stt.load().then(() => console.log('[jarvis] hearing ready'), e => console.error('[jarvis] hearing failed:', e.message)), 4000);   // warm the model in the background
+  setTimeout(() => stt.voice().then(v => console.log('[jarvis] hearing ready:', v.name), e => console.error('[jarvis] hearing failed:', e.message)), 4000);   // warm the model in the background
   globalShortcut.register('Control+Shift+Space', () => { show(); win.webContents.send('ptt'); });
   // Push-to-talk: globalShortcut has no key-up, so the renderer treats the key's auto-repeat as "still held".
   // ponytail: repeat-based hold detection; swap for a native key hook (uiohook-napi) if release lag bugs him.
