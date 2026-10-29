@@ -98,6 +98,7 @@ class Claude extends EventEmitter {
     this.proc.stderr.on('data', d => { err = (err + d).slice(-400); });
     const me = this.proc;
     me.on('exit', code => {
+      this.emit('tasks', []);   // its background jobs died with it
       if (this.proc === me) this.proc = null;
       if (this.busy && this.proc === null) {          // died mid-turn: report, and drop a session that may be stale
         this.busy = false; this.sessionId = null;
@@ -113,6 +114,7 @@ class Claude extends EventEmitter {
     if (m.type === 'stream_event') clearTimeout(this.hang);
     if (m.type === 'stream_event' && m.event?.delta?.type === 'text_delta') { this.streamed = true; this.emit('delta', m.event.delta.text); }
     if (m.type === 'assistant') for (const c of m.message?.content || []) if (c.type === 'tool_use') this.emit('tool', { name: c.name, input: c.input });
+    if (m.type === 'system' && m.subtype === 'background_tasks_changed') this.emit('tasks', (m.tasks || []).map(t => t.description || 'Background task'));   // jobs still running after he's answered
     if (m.type === 'result') {
       // A resumed session that no longer exists fails on its first turn: start fresh and retry once, silently.
       if (m.is_error && this.resumed && this.lastText != null && !this.streamed) {   // never after text was already spoken

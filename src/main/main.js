@@ -203,6 +203,11 @@ app.whenReady().then(() => {
   // barehands ring mirrors Jarvis (thinking while working, idle when done); harmless if the board isn't running.
   const ring = s => fs.writeFile(path.join(root, 'barehands', 'state', 'state'), s, () => {});
   claude.on('tool', t => { ring('thinking'); win?.webContents.send('tool', t); });
+  // Work still running after the reply (Claude's background jobs + the app's own clip jobs) -> HUD "WORKING" light.
+  let claudeWork = [];
+  const appWork = [], workNow = () => [...claudeWork, ...appWork], work = () => win?.webContents.send('work', workNow());
+  const job = (label, p) => { appWork.push(label); work(); return p.finally(() => { appWork.splice(appWork.indexOf(label), 1); work(); }); };
+  claude.on('tasks', t => { claudeWork = t; work(); });
   let reply = '';
   claude.on('delta', t => { reply += t; sentences.push(t); win?.webContents.send('delta', t); });
   claude.on('done', r => {
@@ -219,7 +224,7 @@ app.whenReady().then(() => {
     return handlers[ch]({ sender: null }, ...args);
   } });
 
-  ipcMain.handle('status', () => ({ claude: claude.status(), memories: vault.all().length }));
+  ipcMain.handle('status', () => ({ claude: claude.status(), memories: vault.all().length, work: workNow() }));
   let prev = cpuTimes();
   ipcMain.handle('stats', () => {
     const now = cpuTimes(), busy = now.busy - prev.busy, total = now.total - prev.total;
@@ -269,12 +274,12 @@ app.whenReady().then(() => {
     if (layoutName && !lay) return `No saved layout called "${layoutName}", sir. Saved: ${readLayouts().layouts.map(x => x.name).join(', ') || 'none yet'}.`;
     if (vodBusy) return 'Already clipping a VOD, sir.';
     vodBusy = true;
-    stt.load().catch(() => null)                                  // no Whisper model = clips without subtitles
+    job('Clipping a VOD', stt.load().catch(() => null)            // no Whisper model = clips without subtitles
       .then(asr => clips.autoVod(url, asr, { count: Math.min(25, +count || 25), facecam: readSet().facecam, captionStyle: style || 'bold', ...lay,
         onProgress: (p, s) => win?.webContents.send('clips:status', { p, s }) }))
       .then(r => { const ok = r.clips.filter(c => !c.startsWith('FAILED')).length;
         new Notification({ title: 'Jarvis VOD clips', body: `${ok} of ${r.clips.length} clips ranked by virality, with titles and hashtags in clips.txt (picked by ${r.how}).` }).show(); shell.openPath(r.dir); },
-        e => new Notification({ title: 'Jarvis VOD clips', body: 'VOD clipping failed: ' + e.message }).show())
+        e => new Notification({ title: 'Jarvis VOD clips', body: 'VOD clipping failed: ' + e.message }).show()))
       .finally(() => { vodBusy = false; });
     return 'Clipping the VOD in the background, up to 25 clips into Desktop\\Jarvis Clips. A notification lands when done.';
   };
@@ -282,7 +287,7 @@ app.whenReady().then(() => {
   const clipThat = async () => {
     const made = await twitch.clip();                                       // throws if Twitch isn't connected / offline
     const link = /(https:\/\/clips\.twitch\.tv\/\S+)/.exec(made)[1];
-    (async () => {
+    job('Making the clip', (async () => {
       let file;
       for (let i = 0; i < 8 && !file; i++) {                                // Twitch needs ~15-30s to process a new clip
         await new Promise(r => setTimeout(r, 8000));
@@ -295,7 +300,7 @@ app.whenReady().then(() => {
       fs.unlink(file, () => {});
       new Notification({ title: 'Jarvis clip', body: 'Clipped and made vertical: ' + path.basename(out) }).show();
       shell.showItemInFolder(out);
-    })().catch(e => new Notification({ title: 'Jarvis clip', body: 'Clip that failed: ' + e.message }).show());
+    })()).catch(e => new Notification({ title: 'Jarvis clip', body: 'Clip that failed: ' + e.message }).show());
     return `Clipped it on Twitch (${link}). The vertical, captioned version lands in Jarvis Clips in about a minute.`;
   };
   // barehands (Jared Rhodenizer, AGPL-3.0, in barehands/): its own window, only when asked for.

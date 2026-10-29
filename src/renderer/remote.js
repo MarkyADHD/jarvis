@@ -32,7 +32,7 @@
     quick: call('pc:quick'), core: () => {},
     onAudio: on('audio'), onTool: on('tool'), onReminder: on('reminder'), onUi: on('ui'), onNowPlaying: on('nowplaying'),
     onNotice: on('notice'), onTwitch: on('twitch'), onPtt: on('ptt'), onAnim: on('anim'), onPttHold: on('ptt-hold'),
-    onDelta: on('delta'), onCore: on('core'), onDone: on('done'),
+    onDelta: on('delta'), onCore: on('core'), onDone: on('done'), onWork: on('work'),
     clips: {
       pick: call('clips:pick'), caption: call('clips:caption'), export: call('clips:export'), facecam: call('clips:facecam'),
       layouts: call('layouts:get'), saveLayouts: call('layouts:save'), reveal: call('clips:reveal'), moments: call('clips:moments'),

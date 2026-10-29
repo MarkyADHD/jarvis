@@ -49,3 +49,11 @@ test('local brain finds models on an OpenAI-compatible server and talks its form
     assert.equal(tc.tool_calls[0].function.arguments, '{"args":"weather"}');
   } finally { local.configure({}); srv.close(); }
 });
+
+test('background jobs are reported while running and cleared when done', () => {
+  const c = new Claude(), seen = [];
+  c.on('tasks', t => seen.push(t));
+  c.handle('{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","description":"Exporting the 3D model"}]}');
+  c.handle('{"type":"system","subtype":"background_tasks_changed","tasks":[]}');
+  assert.deepEqual(seen, [['Exporting the 3D model'], []]);
+});

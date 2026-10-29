@@ -13,11 +13,21 @@ const S = {
   status: null, memories: [], cpuHist: Array(90).fill(0),
   mx: 0, my: 0, px: 0, py: 0,                 // mouse target + smoothed parallax
   booted: false, bootAt: 0, glitch: 0,
+  work: [],                                   // jobs still running in the background (main.js 'work')
 };
 function setMode(m, label) {
+  if (m === 'idle' && S.work.length) label = 'Still working';
   S.mode = m; $('stateLbl').textContent = label; $('sess').textContent = m.toUpperCase();
   if (m !== 'idle') S.glitch = 0.4;
 }
+// WORKING light: shown while any background job runs, even after he's had his answer.
+function showWork(w = []) {
+  S.work = w; const chip = $('workChip');
+  chip.hidden = !w.length; chip.title = w.join('\n');
+  chip.querySelector('span').textContent = w.length > 1 ? `WORKING · ${w.length} TASKS` : 'WORKING';
+  if (S.mode === 'idle') setMode('idle', 'Standing by');
+}
+jarvis.onWork(showWork);
 // Feed the voice overlay (main decides whether it shows): mode + live level while listening/speaking.
 let coreLive = false;
 setInterval(() => {
@@ -183,7 +193,7 @@ function drawReactor(t) {
     const n = 5;
     for (let i = 0; i < n; i++) {
       const a = rad(-112 + i * 11), rr = (r0 + r1) / 2;
-      const on = S.heat > 0.1 ? (Math.floor(s * 8) % n === i ? 1 : 0.35) : 0.65 + 0.35 * pulse;
+      const on = S.heat > 0.1 || S.work.length ? (Math.floor(s * 8) % n === i ? 1 : 0.35) : 0.65 + 0.35 * pulse;
       g.globalAlpha = on; g.fillStyle = C.gold; g.shadowBlur = 12; g.shadowColor = C.gold;
       g.beginPath(); g.arc(...P(a, rr), 3.4, 0, TAU); g.fill(); g.shadowBlur = 0; g.globalAlpha = 1;
     }
@@ -280,7 +290,7 @@ function drawReactor(t) {
     const grad = g.createLinearGradient(0, -fs / 2, 0, fs / 2); grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, C.glow);
     g.fillStyle = grad; g.fillText('J.A.R.V.I.S.', 0, 0); g.shadowBlur = 0;
     g.font = `${Math.max(9, R * 0.03)}px Consolas, monospace`; g.fillStyle = rgba(C.cyan, 0.7);
-    g.fillText(S.mode === 'idle' ? 'ALL SYSTEMS NOMINAL' : S.mode === 'thinking' ? 'PROCESSING REQUEST' : S.mode === 'listening' ? 'LISTENING' : 'TRANSMITTING', 0, fs * 0.85);
+    g.fillText(S.mode === 'idle' ? (S.work.length ? 'BACKGROUND TASK RUNNING' : 'ALL SYSTEMS NOMINAL') : S.mode === 'thinking' ? 'PROCESSING REQUEST' : S.mode === 'listening' ? 'LISTENING' : 'TRANSMITTING', 0, fs * 0.85);
   });
 
   // callouts with leader lines (real values)
@@ -549,7 +559,7 @@ addEventListener('keydown', e => { if (e.key === 'Escape') { jarvis.cancel(); Vo
   const line = (txt, ok) => { const d = document.createElement('div'); d.innerHTML = ''; d.textContent = '> ' + txt + ' '; if (ok) { const s = document.createElement('span'); s.className = 'ok'; s.textContent = ok; d.append(s); } logEl.append(d); };
   const steps = [
     ['INITIALISING STARK INTERFACE', async () => 'OK'],
-    ['ESTABLISHING NEURAL LINK', async () => { S.status = await jarvis.status(); return S.status.claude.connected ? `CLAUDE ${S.status.claude.version}` : 'FAILED'; }],
+    ['ESTABLISHING NEURAL LINK', async () => { S.status = await jarvis.status(); showWork(S.status.work); return S.status.claude.connected ? `CLAUDE ${S.status.claude.version}` : 'FAILED'; }],
     ['MOUNTING MEMORY CORE', async () => { S.memories = await jarvis.memories(); return `${S.memories.length} ENGRAMS`; }],
     ['SCANNING HOST SYSTEMS', async () => { const s = await jarvis.stats(); return `${s.host} · ${s.cores.length} CORES · ${s.memGB} GB`; }],
     ['RESTORING COMMS LOG', async () => { const h = await jarvis.history(); h.forEach(m => add(m.role, m.text, m.at || m.ts)); return `${h.length} MESSAGES`; }],

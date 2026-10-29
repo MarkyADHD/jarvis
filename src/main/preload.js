@@ -42,4 +42,5 @@ contextBridge.exposeInMainWorld('jarvis', {
   core: c => ipcRenderer.send('core', c),
   onCore: f => ipcRenderer.on('core', (_e, c) => f(c)),
   onDone: f => ipcRenderer.on('done', (_e, r) => f(r)),
+  onWork: f => ipcRenderer.on('work', (_e, w) => f(w)),
 });
