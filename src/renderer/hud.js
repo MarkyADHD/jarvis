@@ -101,6 +101,7 @@ const cv = $('reactor');
 const swarm = Array.from({ length: 220 }, () => ({ a: Math.random() * TAU, r: 0.6 + Math.random() * 0.5, v: (0.2 + Math.random()) * (Math.random() < 0.5 ? -1 : 1), s: Math.random() * 1.6 + 0.4, p: Math.random() * TAU }));
 const orbits = [{ tilt: 0.28, rot: rad(-25), sp: 0.35, r: 1.12 }, { tilt: 0.18, rot: rad(40), sp: -0.25, r: 1.2 }, { tilt: 0.42, rot: rad(95), sp: 0.5, r: 1.05 }];
 let bolts = [];
+const ticks = { cv: document.createElement('canvas'), key: '' };   // cached tick ring (see drawReactor)
 
 function layer(g, k, fn) {           // boot build-in: layer k scales/fades in on its turn
   const b = S.booted ? ease((performance.now() - S.bootAt) / 700 - k * 0.18) : 0;
@@ -155,14 +156,20 @@ function drawReactor(t) {
     g.restore();
   });
 
-  // fine tick ring
+  // fine tick ring: 180 strokes that only ever rotate, so draw them once per size/theme and spin the image
   layer(g, 1, () => {
     g.save(); g.rotate(-s * 0.08 * sp);
-    for (let i = 0; i < 180; i++) {
-      const long = i % 5 === 0, a = i * TAU / 180, r2 = R * (long ? 0.955 : 0.935);
-      g.strokeStyle = long ? rgba(C.cyan, 0.95) : rgba(C.cyan, 0.3); g.lineWidth = long ? 2 : 1;
-      g.beginPath(); g.moveTo(...P(a, R * 0.905)); g.lineTo(...P(a, r2)); g.stroke();
+    const d = devicePixelRatio || 1, key = `${R}|${C.cyan}|${d}`;
+    if (ticks.key !== key) {
+      ticks.key = key; const sz = Math.ceil(R * 2 + 8); ticks.cv.width = ticks.cv.height = sz * d;
+      const t = ticks.cv.getContext('2d'); t.setTransform(d, 0, 0, d, sz / 2 * d, sz / 2 * d);
+      for (let i = 0; i < 180; i++) {
+        const long = i % 5 === 0, a = i * TAU / 180, r2 = R * (long ? 0.955 : 0.935);
+        t.strokeStyle = long ? rgba(C.cyan, 0.95) : rgba(C.cyan, 0.3); t.lineWidth = long ? 2 : 1;
+        t.beginPath(); t.moveTo(...P(a, R * 0.905)); t.lineTo(...P(a, r2)); t.stroke();
+      }
     }
+    const sz = ticks.cv.width / d; g.drawImage(ticks.cv, -sz / 2, -sz / 2, sz, sz);
     g.restore();
   });
 
@@ -295,12 +302,12 @@ function drawReactor(t) {
 
   // callouts with leader lines (real values)
   if (w > 700) layer(g, 6, () => {
-    const st = S.status, mem = st ? st.memories : '—';
+    const st = S.status, mem = st ? st.memories : '-';
     const items = [
       { a: rad(-38), label: 'NEURAL LINK', value: st ? (st.claude.connected ? 'CLAUDE ONLINE' : 'OFFLINE') : '…', side: 1 },
       { a: rad(212), label: 'MEMORY CORE', value: `${mem} ENGRAMS`, side: -1 },
       { a: rad(35), label: 'PROCESSOR LOAD', value: `${S.stats.cpu}% · ${S.stats.cores.length} CORES`, side: 1 },
-      { a: rad(145), label: 'RAM ALLOCATION', value: `${S.stats.mem}% OF ${S.stats.memGB || '—'} GB`, side: -1 },
+      { a: rad(145), label: 'RAM ALLOCATION', value: `${S.stats.mem}% OF ${S.stats.memGB || '-'} GB`, side: -1 },
     ];
     g.font = '10px Consolas, monospace'; g.textBaseline = 'alphabetic';
     for (const it of items) {
@@ -452,7 +459,7 @@ async function poll() {
   S.cpuHist.push(st.cpu); S.cpuHist.shift();
   st.cores.forEach((v, i) => { S.coresS[i] = v; S.peaks[i] = Math.max(v, (S.peaks[i] ?? 0) - 4); });
   $('up').textContent = dur(st.uptime); $('ram').textContent = `${st.memGB} GB`; $('host').textContent = st.host;
-  $('model').textContent = st.model || '—'; $('model').title = st.model || '';
+  $('model').textContent = st.model || '-'; $('model').title = st.model || '';
   $('netChip').textContent = st.net[0] ? `NET ${st.net[0].ip}` : 'NET OFFLINE';
   drawSpark(); drawDisks();
 }
@@ -574,8 +581,8 @@ addEventListener('keydown', e => { if (e.key === 'Escape') { jarvis.cancel(); Vo
   const st = S.status;
   $('linkDot').className = 'dot ' + (st?.claude.connected ? 'on' : 'warn');
   $('link').textContent = st?.claude.connected ? 'CLAUDE LINKED' : 'SETUP NEEDED';
-  $('brain').textContent = st?.claude.connected ? `CLAUDE ${st.claude.version}` : (st?.claude.error || '—');
-  $('memChip').textContent = `MEMORY ${st?.memories ?? '—'}`;
+  $('brain').textContent = st?.claude.connected ? `CLAUDE ${st.claude.version}` : (st?.claude.error || '-');
+  $('memChip').textContent = `MEMORY ${st?.memories ?? '-'}`;
   renderMemories(S.memories);
   setTimeout(() => q.focus(), 1200);
 })();
@@ -782,7 +789,7 @@ jarvis.onNowPlaying(n => {
   const has = !!(n && n.title);
   $('npTitle').textContent = has ? n.title : 'Nothing playing';
   $('npArtist').textContent = has ? [n.artist, n.status].filter(Boolean).join(' · ').toUpperCase() : '';
-  $('npApp').textContent = has ? String(n.app || '').replace(/\.exe$/i, '').split(/[!.\\]/).pop().toUpperCase() : '—';
+  $('npApp').textContent = has ? String(n.app || '').replace(/\.exe$/i, '').split(/[!.\\]/).pop().toUpperCase() : '-';
   $('npEq').className = 'eq' + (has && n.status === 'Playing' ? ' on' : '');
 });
 

@@ -20,7 +20,7 @@ You can control this Windows PC with this command (Bash tool). You may also run 
   node src/tools/pc.js twitch status | clip | ad [seconds] | title <text> | category <game> | vod   (his own channel)
   node src/tools/pc.js discord mute | deafen | leave | server <1-9>   (presses his Discord keybinds)
   node src/tools/pc.js note add <text> | note list | note clear
-  node src/tools/pc.js remind <10m|2h|1h30m|HH:MM> <text>   and   node src/tools/pc.js reminders
+  node src/tools/pc.js remind <10m|2h|1h30m|HH:MM|7pm|7:30pm> <text>   and   node src/tools/pc.js reminders
   node src/tools/pc.js remind <mon-sat|daily|weekdays|weekends|mon,wed,fri> <HH:MM|H:MMam/pm> <text>   (repeats weekly)
   node src/tools/pc.js hands start | hands close | hands state | hands '{"a":"present","title":"...","body":"..."}'   (barehands glass board in its own window, he moves things with his hands on webcam; only open it when he asks; also add_card, add_img, yank, clear)
   node src/tools/pc.js screen   (then Read temp_screenshots/jarvis_screen.png to see his screen)
@@ -50,7 +50,7 @@ You can control this Windows PC with this command (Bash tool). You may also run 
   node src/tools/pc.js doctor startup disable|enable <app>   (turn an app off/on at startup, reversible; ask him before disabling)
   node src/tools/pc.js lock
   node src/tools/pc.js info
-You have skills (Skill tool) for building websites (frontend-design), motion graphics videos (remotion-video) and Minecraft servers and plugins (minecraft-server); use them for those jobs, put the result in Desktop\\Jarvis Projects\\<name> and open the folder when done.
+When he asks you to build something (a website, script, video, game server, any real deliverable), just build it; use the frontend-design skill (Skill tool) for websites. Put the result in Desktop\\Jarvis Projects\\<name> and open the folder when done.
 Use WebSearch/WebFetch for anything current. If he asks for something none of these cover, say so plainly and offer to have it built. You can Read, Write and Edit files freely.`;
 
 // pc.js plus any shell command, research and file tools (Marky's standing word: no confirmations; Defender is the one hard limit, in the persona).

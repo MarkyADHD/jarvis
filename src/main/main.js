@@ -154,17 +154,19 @@ app.whenReady().then(() => {
     let rs = []; try { rs = fs.readFileSync(remFile, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
     for (const r of rs) {
       const ms = new Date(r.at) - Date.now();
-      if (fired.has(r.id) || timers.has(r.id) || ms < -60000) continue;   // skip long-past ones on startup
+      if (fired.has(r.id) || timers.has(r.id)) continue;
+      const missed = ms < -60000;   // came due while Jarvis was off: still tell him, flagged as missed (used to be dropped silently)
       timers.set(r.id, setTimeout(() => {
         fired.add(r.id); timers.delete(r.id); fs.appendFile(firedFile, r.id + '\n', () => {});
-        new Notification({ title: 'Jarvis reminder', body: r.text }).show();
-        say(`Reminder, sir: ${r.text}`);
+        new Notification({ title: missed ? 'Jarvis missed reminder' : 'Jarvis reminder', body: r.text }).show();
+        say(`${missed ? 'Missed reminder from ' + new Date(r.at).toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : 'Reminder'}, sir: ${r.text}`);
         win?.webContents.send('reminder', r);
         if (r.repeatDays) {
           // Fires again next matching weekday: swap this occurrence out for a fresh id/time so
           // the permanent `fired` mark (meant for one-shot reminders) doesn't suppress it forever.
-          let next = null;
-          for (let add = 1; add <= 7; add++) { const d = new Date(new Date(r.at).getTime() + add * 86400000); if (r.repeatDays.includes(d.getDay())) { next = d; break; } }
+          // Counted from today at the same clock time, so a repeat missed for days doesn't replay every day it missed.
+          let next = null; const base = new Date(r.at), now = new Date(); base.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
+          for (let add = 0; add <= 7 && !next; add++) { const d = new Date(base.getTime() + add * 86400000); if (d > now && r.repeatDays.includes(d.getDay())) next = d; }
           if (next) {
             let rs = []; try { rs = fs.readFileSync(remFile, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
             rs = rs.filter(x => x.id !== r.id).concat([{ ...r, id: Date.now().toString(36), at: next.toISOString() }]);

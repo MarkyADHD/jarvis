@@ -76,10 +76,13 @@ const DATA = path.join(process.env.APPDATA || os.homedir(), 'jarvis', 'data');
 const file = n => (fs.mkdirSync(DATA, { recursive: true }), path.join(DATA, n));
 const readJsonl = n => { try { return fs.readFileSync(file(n), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch { return []; } };
 
-// '10m', '2h', '1h30m', '90s' -> ms from now; 'HH:MM' -> next occurrence today/tomorrow.
+// '10m', '2h', '1h30m', '90s' -> ms from now; 'HH:MM', '7pm', '7:30pm' -> next occurrence today/tomorrow.
 function whenMs(spec, now = new Date()) {
-  const hm = /^(\d{1,2}):(\d{2})$/.exec(spec);
-  if (hm) { const t = new Date(now); t.setHours(+hm[1], +hm[2], 0, 0); if (t <= now) t.setDate(t.getDate() + 1); return t - now; }
+  const hm = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(spec);
+  if (hm && (hm[2] || hm[3])) {
+    let h = +hm[1]; if (hm[3]) { h %= 12; if (/pm/i.test(hm[3])) h += 12; }
+    const t = new Date(now); t.setHours(h, +(hm[2] || 0), 0, 0); if (t <= now) t.setDate(t.getDate() + 1); return t - now;
+  }
   if (!/^(\d+\s*[hms]\s*)+$/.test(spec)) return null;
   let ms = 0; for (const m of spec.matchAll(/(\d+)\s*([hms])/g)) ms += +m[1] * { h: 3600e3, m: 60e3, s: 1e3 }[m[2]];
   return ms;
