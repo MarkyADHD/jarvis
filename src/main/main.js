@@ -14,6 +14,8 @@ const { Spotify } = require('./spotify');
 const { Twitch } = require('./twitch');
 const { Nanoleaf } = require('./nanoleaf');
 
+// Dev: JARVIS_USER_DATA=<dir> runs a second, separate copy (own settings and lock) beside the live one, e.g. to measure the HUD.
+if (process.env.JARVIS_USER_DATA) app.setPath('userData', process.env.JARVIS_USER_DATA);
 if (!app.requestSingleInstanceLock()) app.quit();
 // Windows' native occlusion check sometimes marks the window 'hidden' while it's on screen (e.g. after a display
 // change), and Chromium then stops painting: a black HUD. Turn it off and never throttle the HUD.
