@@ -26,6 +26,7 @@ const root = path.join(__dirname, '..', '..');
 // Installed build: code lives in a read-only app.asar, voice files ship in resources/.
 const res = app.isPackaged ? process.resourcesPath : root;
 let win, tray, db;
+const recoverLog = why => { try { fs.appendFileSync(path.join(app.getPath('userData'), 'data', 'hud-recovery.log'), new Date().toISOString() + ' ' + why + '\n'); } catch {} };
 const claude = new Claude();
 // Phone access (src/main/phone.js) calls the same handlers the HUD uses, so remember them as they're registered.
 const handlers = {}; const ipcHandle = ipcMain.handle.bind(ipcMain);
@@ -59,9 +60,8 @@ function createWindow() {
   for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', s));   // the event itself says visible/hidden; isVisible() lags inside 'show', which left the HUD stuck 'off' (frozen black reactor)
   win.on('focus', () => showOverlay(null));
   // Black-HUD safety net: log why, then reload. Covers renderer/GPU crashes, sleep/display changes, and a silently stalled render loop.
-  const logFile = path.join(app.getPath('userData'), 'data', 'hud-recovery.log');
   let lastRecover = 0;   // display changes fire in bursts (4 in 1s seen in the log): one reload per burst, not four
-  const recover = why => { if (Date.now() - lastRecover < 10000) return; lastRecover = Date.now(); try { fs.appendFileSync(logFile, new Date().toISOString() + ' ' + why + '\n'); } catch {} if (!win.isDestroyed()) win.webContents.reload(); };
+  const recover = why => { if (Date.now() - lastRecover < 10000) return; lastRecover = Date.now(); recoverLog(why); if (!win.isDestroyed()) win.webContents.reload(); };
   win.webContents.on('render-process-gone', (_e, d) => recover('renderer gone: ' + d.reason));
   app.on('child-process-gone', (_e, d) => { if (d.type === 'GPU') recover('gpu gone: ' + d.reason); });
   require('electron').powerMonitor.on('resume', () => setTimeout(() => recover('resume from sleep'), 3000));
@@ -229,8 +229,18 @@ app.whenReady().then(() => {
   } });
 
   ipcMain.handle('status', () => ({ claude: claude.status(), memories: vault.all().length, work: workNow() }));
+  // Stall detector (seen 2026-11-04: window fine, IPC fine, but every timer dead for hours: no reminders, no bridge, no
+  // Spotify/Twitch commands). Timers run on Node's loop, IPC on Chromium's, so the HUD's stats poll can spot the loop dying.
+  let beat = Date.now(), stalled = false;
+  setInterval(() => { beat = Date.now(); }, 1000);
+  const stallCheck = () => {
+    if (stalled || Date.now() - beat < 30000) return;
+    stalled = true; recoverLog('main loop stalled: timers silent ' + Math.round((Date.now() - beat) / 1000) + 's');
+    win?.webContents.send('notice', 'My background clock has stalled, sir: reminders, Spotify and Twitch commands are dead until you quit me from the tray and launch me again.');
+  };
   let prev = cpuTimes();
   ipcMain.handle('stats', () => {
+    stallCheck();
     const now = cpuTimes(), busy = now.busy - prev.busy, total = now.total - prev.total;
     const cores = now.cores.map((c, i) => { const p = prev.cores[i], t = c.total - p.total; return t ? Math.round(100 * (c.busy - p.busy) / t) : 0; });
     prev = now;
