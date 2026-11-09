@@ -8,6 +8,7 @@ const store = require('./store');
 const vault = require('./vault');
 const { Speech, Sentencer } = require('./voice');
 const stt = require('./stt');
+const { longTimeout } = require('./timer');
 const clips = require('./clips');
 const bridge = require('./bridge');
 const { Spotify } = require('./spotify');
@@ -114,6 +115,10 @@ function showOverlay(c) {
 ipcMain.on('core', (_e, c) => showOverlay(c && ['listening', 'thinking', 'speaking'].includes(c.mode) ? { mode: c.mode, energy: +c.energy || 0 } : null));
 
 app.on('second-instance', show);
+// A throw inside this setup used to vanish as an unhandled rejection, leaving a half-wired app (no bridge, no voice, no
+// tray) with nothing in any log. Everything lands in hud-recovery.log now.
+process.on('unhandledRejection', e => recoverLog('unhandled rejection: ' + (e?.stack || e)));
+process.on('uncaughtException', e => recoverLog('uncaught exception: ' + (e?.stack || e)));
 app.whenReady().then(() => {
   db = store.create(path.join(app.getPath('userData'), 'data'));
   // Claude runs in a real folder: the repo in dev, a workspace in AppData when installed (tool script copied out of the asar).
@@ -158,7 +163,7 @@ app.whenReady().then(() => {
       const ms = new Date(r.at) - Date.now();
       if (fired.has(r.id) || timers.has(r.id)) continue;
       const missed = ms < -60000;   // came due while Jarvis was off: still tell him, flagged as missed (used to be dropped silently)
-      timers.set(r.id, setTimeout(() => {
+      timers.set(r.id, true); longTimeout(() => {
         fired.add(r.id); timers.delete(r.id); fs.appendFile(firedFile, r.id + '\n', () => {});
         new Notification({ title: missed ? 'Jarvis missed reminder' : 'Jarvis reminder', body: r.text }).show();
         say(`${missed ? 'Missed reminder from ' + new Date(r.at).toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : 'Reminder'}, sir: ${r.text}`);
@@ -175,7 +180,7 @@ app.whenReady().then(() => {
             fs.writeFileSync(remFile, rs.map(x => JSON.stringify(x)).join('\n') + '\n');
           }
         }
-      }, Math.max(0, ms)));
+      }, ms);
     }
   };
   loadReminders(); fs.watchFile(remFile, { interval: 2000 }, loadReminders);
@@ -467,7 +472,8 @@ app.whenReady().then(() => {
   ]));
   tray.on('click', show);
   createWindow();
-});
+  recoverLog('started ' + require('../../package.json').version + (process.argv.slice(1).join(' ') ? ' ' + process.argv.slice(1).join(' ') : ''));
+}).catch(e => recoverLog('startup failed: ' + (e?.stack || e)));
 function cpuTimes() {
   let busy = 0, total = 0; const cores = [];
   for (const c of os.cpus()) {

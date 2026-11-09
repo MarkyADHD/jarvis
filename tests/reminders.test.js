@@ -16,3 +16,14 @@ test('reminder times parse durations, HH:MM and am/pm', () => {
   assert.strictEqual(whenMs('7', now), null);               // bare number is neither a time nor a duration
   assert.strictEqual(whenMs('soon', now), null);
 });
+
+// Issue #7: setTimeout clamps delays over ~24.8 days to 1 ms, so long reminders fired at once.
+const { longTimeout } = require('../src/main/timer');
+test('a reminder 40 days out waits for its time', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const DAY = 86400000;
+  let fired = 0; longTimeout(() => fired++, 40 * DAY);
+  t.mock.timers.tick(30 * DAY); assert.strictEqual(fired, 0);
+  t.mock.timers.tick(10 * DAY); assert.strictEqual(fired, 1);
+  let soon = 0; longTimeout(() => soon++, 5000); t.mock.timers.tick(5000); assert.strictEqual(soon, 1);
+});
