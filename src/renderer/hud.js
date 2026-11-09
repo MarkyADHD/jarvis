@@ -39,8 +39,10 @@ setInterval(() => {
 addEventListener('mousemove', e => { S.mx = e.clientX / innerWidth - 0.5; S.my = e.clientY / innerHeight - 0.5; });
 
 // ---------- canvas helpers ----------
+// Pixel budget: a canvas gets at most ~1.4 MP of backing store. Windowed, nothing changes (the reactor is 0.9 MP at 175 %
+// scaling); maximised on 4K the reactor would be 3 MP and every glow (shadowBlur) is paid per pixel, which is what made it lag.
 function fit(cv) {
-  const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1, W = Math.round(r.width * d), H = Math.round(r.height * d);
+  const r = cv.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, Math.max(1, Math.sqrt(1.4e6 / Math.max(1, r.width * r.height)))), W = Math.round(r.width * d), H = Math.round(r.height * d);
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; cv._dirty = true; }
   const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0);
   return { g, w: r.width, h: r.height };
@@ -439,11 +441,13 @@ function drawFx() {
 }
 
 // ---------- main loop ----------
-let anim = 'on';
+let anim = 'on', lastDraw = 0;
 jarvis.onAnim(a => { anim = a; });
 function frame(t) {
   window.__f = t;
   if (anim === 'off') return requestAnimationFrame(frame);   // paused while hidden/minimised (gaming)
+  if (t - lastDraw < 13) return requestAnimationFrame(frame);   // ~60 fps on 240 Hz, 72 on 144 Hz: the glows are GPU-heavy and gain nothing above this
+  lastDraw = t;
   drawBg(t); drawReactor(t); drawRadar(t); drawClockRing(); drawCores(); drawFx();
   requestAnimationFrame(frame);
 }

@@ -8,12 +8,15 @@ const store = require('./store');
 const vault = require('./vault');
 const { Speech, Sentencer } = require('./voice');
 const stt = require('./stt');
+const { longTimeout } = require('./timer');
 const clips = require('./clips');
 const bridge = require('./bridge');
 const { Spotify } = require('./spotify');
 const { Twitch } = require('./twitch');
 const { Nanoleaf } = require('./nanoleaf');
 
+// Dev: JARVIS_USER_DATA=<dir> runs a second, separate copy (own settings and lock) beside the live one, e.g. to measure the HUD.
+if (process.env.JARVIS_USER_DATA) app.setPath('userData', process.env.JARVIS_USER_DATA);
 if (!app.requestSingleInstanceLock()) app.quit();
 // Windows' native occlusion check sometimes marks the window 'hidden' while it's on screen (e.g. after a display
 // change), and Chromium then stops painting: a black HUD. Turn it off and never throttle the HUD.
@@ -24,6 +27,7 @@ const root = path.join(__dirname, '..', '..');
 // Installed build: code lives in a read-only app.asar, voice files ship in resources/.
 const res = app.isPackaged ? process.resourcesPath : root;
 let win, tray, db;
+const recoverLog = why => { try { fs.appendFileSync(path.join(app.getPath('userData'), 'data', 'hud-recovery.log'), new Date().toISOString() + ' ' + why + '\n'); } catch {} };
 const claude = new Claude();
 // Phone access (src/main/phone.js) calls the same handlers the HUD uses, so remember them as they're registered.
 const handlers = {}; const ipcHandle = ipcMain.handle.bind(ipcMain);
@@ -57,9 +61,8 @@ function createWindow() {
   for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', s));   // the event itself says visible/hidden; isVisible() lags inside 'show', which left the HUD stuck 'off' (frozen black reactor)
   win.on('focus', () => showOverlay(null));
   // Black-HUD safety net: log why, then reload. Covers renderer/GPU crashes, sleep/display changes, and a silently stalled render loop.
-  const logFile = path.join(app.getPath('userData'), 'data', 'hud-recovery.log');
   let lastRecover = 0;   // display changes fire in bursts (4 in 1s seen in the log): one reload per burst, not four
-  const recover = why => { if (Date.now() - lastRecover < 10000) return; lastRecover = Date.now(); try { fs.appendFileSync(logFile, new Date().toISOString() + ' ' + why + '\n'); } catch {} if (!win.isDestroyed()) win.webContents.reload(); };
+  const recover = why => { if (Date.now() - lastRecover < 10000) return; lastRecover = Date.now(); recoverLog(why); if (!win.isDestroyed()) win.webContents.reload(); };
   win.webContents.on('render-process-gone', (_e, d) => recover('renderer gone: ' + d.reason));
   app.on('child-process-gone', (_e, d) => { if (d.type === 'GPU') recover('gpu gone: ' + d.reason); });
   require('electron').powerMonitor.on('resume', () => setTimeout(() => recover('resume from sleep'), 3000));
@@ -112,6 +115,10 @@ function showOverlay(c) {
 ipcMain.on('core', (_e, c) => showOverlay(c && ['listening', 'thinking', 'speaking'].includes(c.mode) ? { mode: c.mode, energy: +c.energy || 0 } : null));
 
 app.on('second-instance', show);
+// A throw inside this setup used to vanish as an unhandled rejection, leaving a half-wired app (no bridge, no voice, no
+// tray) with nothing in any log. Everything lands in hud-recovery.log now.
+process.on('unhandledRejection', e => recoverLog('unhandled rejection: ' + (e?.stack || e)));
+process.on('uncaughtException', e => recoverLog('uncaught exception: ' + (e?.stack || e)));
 app.whenReady().then(() => {
   db = store.create(path.join(app.getPath('userData'), 'data'));
   // Claude runs in a real folder: the repo in dev, a workspace in AppData when installed (tool script copied out of the asar).
@@ -156,7 +163,7 @@ app.whenReady().then(() => {
       const ms = new Date(r.at) - Date.now();
       if (fired.has(r.id) || timers.has(r.id)) continue;
       const missed = ms < -60000;   // came due while Jarvis was off: still tell him, flagged as missed (used to be dropped silently)
-      timers.set(r.id, setTimeout(() => {
+      timers.set(r.id, true); longTimeout(() => {
         fired.add(r.id); timers.delete(r.id); fs.appendFile(firedFile, r.id + '\n', () => {});
         new Notification({ title: missed ? 'Jarvis missed reminder' : 'Jarvis reminder', body: r.text }).show();
         say(`${missed ? 'Missed reminder from ' + new Date(r.at).toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : 'Reminder'}, sir: ${r.text}`);
@@ -173,7 +180,7 @@ app.whenReady().then(() => {
             fs.writeFileSync(remFile, rs.map(x => JSON.stringify(x)).join('\n') + '\n');
           }
         }
-      }, Math.max(0, ms)));
+      }, ms);
     }
   };
   loadReminders(); fs.watchFile(remFile, { interval: 2000 }, loadReminders);
@@ -227,8 +234,18 @@ app.whenReady().then(() => {
   } });
 
   ipcMain.handle('status', () => ({ claude: claude.status(), memories: vault.all().length, work: workNow() }));
+  // Stall detector (seen 2026-11-04: window fine, IPC fine, but every timer dead for hours: no reminders, no bridge, no
+  // Spotify/Twitch commands). Timers run on Node's loop, IPC on Chromium's, so the HUD's stats poll can spot the loop dying.
+  let beat = Date.now(), stalled = false;
+  setInterval(() => { beat = Date.now(); }, 1000);
+  const stallCheck = () => {
+    if (stalled || Date.now() - beat < 30000) return;
+    stalled = true; recoverLog('main loop stalled: timers silent ' + Math.round((Date.now() - beat) / 1000) + 's');
+    win?.webContents.send('notice', 'My background clock has stalled, sir: reminders, Spotify and Twitch commands are dead until you quit me from the tray and launch me again.');
+  };
   let prev = cpuTimes();
   ipcMain.handle('stats', () => {
+    stallCheck();
     const now = cpuTimes(), busy = now.busy - prev.busy, total = now.total - prev.total;
     const cores = now.cores.map((c, i) => { const p = prev.cores[i], t = c.total - p.total; return t ? Math.round(100 * (c.busy - p.busy) / t) : 0; });
     prev = now;
@@ -455,7 +472,8 @@ app.whenReady().then(() => {
   ]));
   tray.on('click', show);
   createWindow();
-});
+  recoverLog('started ' + require('../../package.json').version + (process.argv.slice(1).join(' ') ? ' ' + process.argv.slice(1).join(' ') : ''));
+}).catch(e => recoverLog('startup failed: ' + (e?.stack || e)));
 function cpuTimes() {
   let busy = 0, total = 0; const cores = [];
   for (const c of os.cpus()) {
