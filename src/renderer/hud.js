@@ -486,6 +486,20 @@ function tick() {
 }
 setInterval(tick, 1000); tick();
 
+// NEXT UP (Systems panel): the next reminder or calendar event; hover lists the next few.
+const whenLbl = at => {
+  const d = new Date(at), days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  const t = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return days === 0 ? t : days === 1 ? 'TOMORROW ' + t : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase() + ' ' + t;
+};
+async function agenda() {
+  let a; try { a = await jarvis.agenda(); } catch { return; }
+  if (!Array.isArray(a)) return;                    // phone talking to an older app: leave the dash
+  $('next').textContent = a[0] ? `${whenLbl(a[0].at)} · ${a[0].text}` : 'NOTHING DUE';
+  $('next').title = a.map(x => `${whenLbl(x.at)} · ${x.text}`).join('\n');
+}
+setInterval(() => { if (anim !== 'off') agenda(); }, 60000); setTimeout(agenda, 5000);
+
 // hex stream: cosmetic telemetry noise, speeds up when busy
 setInterval(() => {
   const el = $('hex'); if (!el.offsetHeight || anim !== 'on') return;   // only while he's actually looking
@@ -727,7 +741,7 @@ jarvis.onTool(t => {
   setMode('thinking', 'Executing'); S.glitch = 0.3; S.energy = Math.min(1.3, S.energy + 0.6);
 });
 
-jarvis.onReminder(r => { const row = add('err', r.text).parentElement; row.classList.add('tool'); row.querySelector('b').textContent = 'REMINDER'; S.glitch = 0.4; S.energy = 1.2; });
+jarvis.onReminder(r => { agenda(); const row = add('err', r.text).parentElement; row.classList.add('tool'); row.querySelector('b').textContent = 'REMINDER'; S.glitch = 0.4; S.energy = 1.2; });
 
 // ---------- hands-free: always-on mic, VAD-segmented phrases, wake word "Jarvis" ----------
 const WAKE = /^\s*(?:hey|ok|okay|yo)?[\s,]*jarvis\b[\s,.!?:-]*(.*)$/i;
@@ -808,6 +822,7 @@ const Settings = (() => {
     $('sSpState').textContent = s.spotifyConnected ? 'Spotify connected' : 'not connected. Save your client ID, then Connect (a Spotify login window opens).';
     $('sTwState').textContent = s.twitchConnected ? 'Twitch connected' : s.twitchHasSecret ? 'secret saved; hit Connect to log in' : 'not connected';
     $('sNlIp').value = s.nanoleafIp; $('sNlState').textContent = s.nanoleafPaired ? 'Nanoleaf paired' : 'hold the Nanoleaf power button 5-7s until it flashes, then Pair within 30s';
+    $('sCalState').textContent = s.calendarConnected ? 'iCloud calendar connected' : 'not connected. The password is an app-specific one from account.apple.com, not your normal Apple password.'; $('sCalPw').value = '';
     $('sDcMute').value = s.discord.mute || ''; $('sDcDeaf').value = s.discord.deafen || ''; $('sDcLeave').value = s.discord.leave || '';
     $('sEngine').textContent = s.engine === 'elevenlabs' ? 'using ElevenLabs' : s.engine === 'piper' ? 'using local voice' : 'no voice available';
     $('sPtt').textContent = s.ptt ? 'On' : 'Off'; $('sPttKey').value = s.pttKey;
@@ -864,6 +879,11 @@ const Settings = (() => {
   for (const [btn, which] of [['sSpConn', 'spotify'], ['sTwConn', 'twitch'], ['sNlPair', 'nanoleaf'], ['sKlPair', 'keylight']]) $(btn).onclick = async () => {
     await $('sSave').onclick(); msg(which === 'keylight' ? 'Searching the network for Key Lights…' : 'Opening ' + which + ' login…');
     const r = await jarvis.connect(which); r.error ? msg(r.error, true) : msg(r.msg); refresh();
+  };
+  $('sCalConn').onclick = async () => {
+    if (!jarvis.calendarConnect) return msg('Connect the calendar from the PC, not the phone.', true);
+    msg('Signing in to iCloud…'); const r = await jarvis.calendarConnect($('sCalMail').value, $('sCalPw').value);
+    r.error ? msg(r.error, true) : msg(r.msg); refresh(); agenda();
   };
   return { refresh };
 })();

@@ -23,7 +23,7 @@ test('whisper junk on silence is dropped', () => {
 
 test('pc tool rejects unsafe or unknown input', async () => {
   const { run } = require('../src/tools/pc');
-  assert.throws(() => run('open', 'evil & calc'), /unknown app/);
+  assert.throws(() => run('open', 'evil | calc; rm'), /nothing called/);   // shell-looking input is never even looked up
   assert.throws(() => run('media', 'mute'), /media:/);
   assert.throws(() => run('rm', '-rf'), /actions:/);
   await assert.rejects(run('light', 'purple'), /light:|no Elgato Key Light/);   // no light configured on this PC

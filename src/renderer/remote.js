@@ -27,7 +27,7 @@
   })();
   window.jarvis = {
     status: call('status'), history: call('history'), send: call('send'), cancel: call('cancel'), stats: call('stats'),
-    memories: call('memories'), voice: call('voice'), say: call('say'), transcribe: call('transcribe'),
+    memories: call('memories'), agenda: call('agenda'), voice: call('voice'), say: call('say'), transcribe: call('transcribe'),
     getSettings: call('settings:get'), setSettings: call('settings:set'), connect: w => call('connect:' + w)(),
     quick: call('pc:quick'), core: () => {},
     onAudio: on('audio'), onTool: on('tool'), onReminder: on('reminder'), onUi: on('ui'), onNowPlaying: on('nowplaying'),

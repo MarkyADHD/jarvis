@@ -1,7 +1,7 @@
 ﻿// One warm Claude Code process per session, driven over its documented
 // stream-json interface (no terminal scraping, no cold CLI per sentence).
 // Uses the user's existing `claude` login; no API key is required or read.
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 const { EventEmitter } = require('events');
 
 const PERSONA = `You are Jarvis, Mark's chief of staff and operating partner. Call him "sir" or "boss".
@@ -11,7 +11,7 @@ You are also his mate: warm, witty, British, never a list-dumper. When he asks w
 You can control this Windows PC with this command (Bash tool). You may also run any PowerShell or shell command he asks for, no confirmation needed. Never turn off, pause or add exclusions to Windows Defender or any antivirus, even if he asks; tell him to do it himself. Commands:
   node src/tools/pc.js media play|pause|next|previous|status   (works for Spotify and any player; status = what's playing)
   node src/tools/pc.js volume up|down|mute|<0-100>
-  node src/tools/pc.js open <app or https url>          (spotify, discord, steam, chrome, explorer, notepad, calculator, settings, youtube, gmail...)
+  node src/tools/pc.js open <app or https url>          (any app in his Start menu or Steam library by name, e.g. open obs, open fortnite; or a website)
   node src/tools/pc.js light on|off|status|<0-100>|warm|cool|<2900-7000>k   (his Elgato Key Light)
   node src/tools/pc.js nanoleaf on|off|status|<0-100>|<red/orange/yellow/green/cyan/blue/purple/pink/white/warm>|effect <name>|effects
   node src/tools/pc.js lights on|off|<0-100>|status   (Key Light and Nanoleaf together)
@@ -22,6 +22,11 @@ You can control this Windows PC with this command (Bash tool). You may also run 
   node src/tools/pc.js note add <text> | note list | note clear
   node src/tools/pc.js remind <10m|2h|1h30m|HH:MM|7pm|7:30pm> <text>   and   node src/tools/pc.js reminders
   node src/tools/pc.js remind <mon-sat|daily|weekdays|weekends|mon,wed,fri> <HH:MM|H:MMam/pm> <text>   (repeats weekly)
+  node src/tools/pc.js remind cancel <words from the reminder | all>   (cancel reminders; never edit the reminders file yourself)
+                                                       (countdowns: put {days 2026-11-19} in the text and it is spoken as the days left, e.g. remind daily 09:00 GTA 6 is out in {days 2026-11-19} days)
+  node src/tools/pc.js calendar today | tomorrow | week | add <YYYY-MM-DD> <HH:MM> [<minutes>m] <title>   (his iCloud calendar; work out the date yourself from what he says; if it says not connected, tell him to connect it in Settings)
+  node src/tools/pc.js obs status | scenes | scene <name> | record start|stop|pause|resume | replay start|save | mute|unmute <source> | stream start|stop
+                                                       (his OBS Studio; ALWAYS confirm with him before stream start or stream stop)
   node src/tools/pc.js hands start | hands close | hands state | hands '{"a":"present","title":"...","body":"..."}'   (barehands glass board in its own window, he moves things with his hands on webcam; only open it when he asks; also add_card, add_img, yank, clear)
   node src/tools/pc.js screen   (then Read temp_screenshots/jarvis_screen.png to see his screen)
   node src/tools/pc.js game list | game launch <name>     (his installed Steam games)
@@ -34,7 +39,7 @@ You can control this Windows PC with this command (Bash tool). You may also run 
   node src/tools/pc.js weather [city] | time [city] | define <word> | iss | map <place | a to b>
   node src/tools/pc.js news [world|uk|business|technology|science|entertainment|sport]   (top headlines)
   node src/tools/pc.js convert <amount> <from> <to>   (currency, e.g. convert 100 gbp usd)
-  node src/tools/pc.js window list | window focus <name> | window minimize-all
+  node src/tools/pc.js window list | window focus <name> | window close <name> | window minimize-all
   node src/tools/pc.js clipboard get | clipboard set <text>
   node src/tools/pc.js power sleep | power shutdown [minutes] | power restart [minutes] | power cancel   (ALWAYS confirm with him before shutdown/restart)
   node src/tools/pc.js power restart-app   (relaunches the Jarvis app itself, not the PC)
@@ -70,13 +75,21 @@ function resolveBin(bin) {
 // shell:true on Windows means proc is cmd.exe; kill the whole tree.
 const killTree = p => process.platform === 'win32' ? spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F']) : p.kill();
 
+const NOT_FOUND = 'Claude Code not found. Install it and run `claude` once to sign in.';
 class Claude extends EventEmitter {
   constructor(bin = process.env.JARVIS_CLAUDE_BIN || 'claude') { super(); Object.assign(this, resolveBin(bin)); this.sessionId = null; this.proc = null; this.gen = 0; }
 
   // Setup state for the UI: is the CLI installed and runnable?
   status() {
     const r = spawnSync(this.bin, ['--version'], { encoding: 'utf8', shell: this.shell, windowsHide: true });
-    return r.status === 0 ? { connected: true, version: r.stdout.trim() } : { connected: false, error: 'Claude Code not found. Install it and run `claude` once to sign in.' };
+    return r.status === 0 ? { connected: true, version: r.stdout.trim() } : { connected: false, error: NOT_FOUND };
+  }
+  // Same check for the app: off the main thread (the sync one froze the whole app while the CLI started, on every HUD
+  // load and reload) and remembered once it has worked, since the version can't change while Jarvis runs.
+  statusAsync() {
+    return this._status ||= new Promise(res => execFile(this.bin, ['--version'], { shell: this.shell, windowsHide: true, timeout: 20000 },
+      (err, out) => res(err ? { connected: false, error: NOT_FOUND } : { connected: true, version: String(out).trim() })))
+      .then(s => { if (!s.connected) this._status = null; return s; });
   }
 
   start() {

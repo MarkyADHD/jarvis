@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('jarvis', {
   cancel: () => ipcRenderer.invoke('cancel'),
   stats: () => ipcRenderer.invoke('stats'),
   memories: () => ipcRenderer.invoke('memories'),
+  agenda: () => ipcRenderer.invoke('agenda'),
+  calendarConnect: (email, pw) => ipcRenderer.invoke('connect:calendar', email, pw),
   voice: on => ipcRenderer.invoke('voice', on),
   say: t => ipcRenderer.invoke('say', t),
   onAudio: f => ipcRenderer.on('audio', (_e, a) => f(a)),

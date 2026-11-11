@@ -114,6 +114,7 @@ Jarvis's own code -- both can be true in the same session.
 - `src/main/clips.js`, `thumbs.js` -- Clip Studio engine (FFmpeg, yt-dlp) and thumbnails.
 - `src/main/spotify.js`, `twitch.js`, `oauth.js` -- integrations; tokens encrypted with DPAPI.
 - `src/main/bridge.js` -- file bridge letting pc.js ask the running app to act (no network port).
+- `src/main/reminders.js`, `calendar.js`, `obs.js` -- reminder rules, iCloud calendar (CalDAV), OBS Studio (obs-websocket v5).
 - `src/tools/pc.js` -- the single command Claude may run.
 - `src/renderer/` -- the HUD (`hud.html`, `hud.js`, `clip.js`).
 - `docs/build-ledger.md` -- what's built and how it was tested. Keep it current.
@@ -178,5 +179,11 @@ is imported read-only, once.
   first newline.
 - **Cross-process actions** go through `bridge.js` with rename-then-read claiming; a read-then-delete
   sequence fired actions twice in the old app.
+- **A Claude desktop session does not see the real `%APPDATA%\jarvis`.** The Claude desktop app is a packaged
+  (MSIX) app, so a session reading or writing under `%APPDATA%` gets a private shadow copy: stale logs and settings,
+  and `pc.js` bridge calls or test reminders that the live app never receives. That looked like "Jarvis doesn't start
+  with Windows" and "every timer is dead" in Oct/Nov 2026; both were the shadow. Read the real folder through
+  `\\localhost\C$\Users\<user>\AppData\Roaming\jarvis\data`, and test against a scratch copy
+  (`JARVIS_USER_DATA=<dir>`; `backups/review-2026-11-11/scripts/harness.js` runs the real main.js invisibly and silently).
 - **Don't test against the live Claude session** from scripts while the app runs; spin up a separate
   `Claude` instance from `src/main/claude.js` instead.

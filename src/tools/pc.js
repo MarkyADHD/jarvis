@@ -12,12 +12,14 @@ const VK = { play: 0xB3, pause: 0xB3, playpause: 0xB3, next: 0xB0, previous: 0xB
 const APPS = {
   spotify: 'spotify:', discord: 'discord:', steam: 'steam:', chrome: 'chrome', edge: 'msedge', brave: 'brave',
   explorer: 'explorer', files: 'explorer', notepad: 'notepad', calculator: 'calc', calc: 'calc', settings: 'ms-settings:',
-  'task manager': 'taskmgr', taskmgr: 'taskmgr', obs: 'obs64', youtube: 'https://www.youtube.com', gmail: 'https://mail.google.com',
+  'task manager': 'taskmgr', taskmgr: 'taskmgr', youtube: 'https://www.youtube.com', gmail: 'https://mail.google.com',
 };
 
+// keys(vk, times) or keys([[vk, times], ...]): every press in ONE PowerShell (each launch costs about a second).
 function keys(vk, times = 1) {
+  const steps = (Array.isArray(vk) ? vk : [[vk, times]]).filter(([, n]) => n > 0);   // PowerShell's 1..0 would still press twice
   const ps = `Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern void keybd_event(byte v,byte s,int f,int e);' -Name K -Namespace W;` +
-    `1..${times}|%{[W.K]::keybd_event(${vk},0,1,0);[W.K]::keybd_event(${vk},0,3,0)}`;
+    steps.map(([k, n]) => `1..${n}|%{[W.K]::keybd_event(${k},0,1,0);[W.K]::keybd_event(${k},0,3,0)}`).join(';');
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });
 }
 
@@ -104,6 +106,21 @@ function parseDays(spec) {
   }
   const list = spec.split(',').map(s => DAY_NAMES.findIndex(d => s.startsWith(d)));
   return list.every(i => i >= 0) ? list : null;
+}
+
+// Every app in the Start menu, desktop and Store apps alike, as [{ Name, AppID }], straight from Windows.
+function startApps() {
+  try {
+    const j = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-StartApps | ConvertTo-Json -Compress'], { windowsHide: true, timeout: 15000 }).toString() || '[]');
+    return Array.isArray(j) ? j : [j];
+  } catch { return []; }
+}
+// Best match for what he said: exact name, then a whole word ("obs" is OBS Studio, not Obsidian), then starts-with, then
+// contains (shortest name wins); uninstallers and help links never win.
+function findApp(name, apps) {
+  const n = String(name).toLowerCase().trim(), ok = apps.filter(a => a.Name && a.AppID && !/uninstall|readme|help|manual|website|documentation|release notes/i.test(a.Name));
+  const by = f => n && ok.filter(a => f(a.Name.toLowerCase())).sort((a, b) => a.Name.length - b.Name.length)[0];
+  return by(x => x === n) || by(x => (' ' + x.replace(/[^a-z0-9]+/g, ' ') + ' ').includes(' ' + n + ' ')) || by(x => x.startsWith(n)) || by(x => x.includes(n)) || null;
 }
 
 function steamGames() {
@@ -212,6 +229,22 @@ async function hands(raw) {
   return require('../main/bridge').call(DATA, 'hands.open', [], 10000);   // the app opens its own board window
 }
 
+// His iCloud calendar, through the app (it holds the encrypted login): today | tomorrow | week | add <YYYY-MM-DD> <HH:MM> [<minutes>m] <title>
+function calendar(raw, timeoutMs = 30000) {
+  const br = require('../main/bridge'), [sub = 'today', ...rest] = (String(raw).trim() || 'today').split(/\s+/), what = sub.toLowerCase();
+  const day = n => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + n); return d; };
+  if (what === 'add') {
+    const m = /^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})\s+(?:(\d{1,4})m\s+)?(.+)$/.exec(rest.join(' ')), start = m && new Date(`${m[1]}T${m[2].padStart(5, '0')}:00`);
+    if (!m || isNaN(start)) throw new Error('calendar add <YYYY-MM-DD> <HH:MM> [<minutes>m] <title>');
+    return br.call(DATA, 'calendar.add', [{ title: m[4].trim(), start: start.toISOString(), durationMins: +m[3] || 60 }], timeoutMs);
+  }
+  const span = { today: [0, 1], tomorrow: [1, 2], week: [0, 7] }[what];
+  if (!span) throw new Error('calendar today | tomorrow | week | add <YYYY-MM-DD> <HH:MM> [<minutes>m] <title>');
+  const when = e => new Date(e.start).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', ...(e.allDay ? {} : { hour: '2-digit', minute: '2-digit' }) }) + (e.allDay ? ' (all day)' : '');
+  return br.call(DATA, 'calendar.events', [day(span[0]).toISOString(), day(span[1]).toISOString()], timeoutMs)
+    .then(ev => ev.length ? ev.map(e => `${when(e)}: ${e.title}`).join('\n') : `nothing in the calendar ${what === 'week' ? 'this week' : what}`);
+}
+
 function run(action, arg = '') {
   const raw = String(arg).trim();
   arg = String(arg).trim().toLowerCase();
@@ -223,14 +256,24 @@ function run(action, arg = '') {
     }
     case 'volume': {
       if (/^\d{1,3}$/.test(arg)) {                        // each key step is 2%
-        const pct = Math.min(100, +arg); keys(VK.down, 50); keys(VK.up, Math.round(pct / 2)); return `volume set to ~${pct}%`;
+        const pct = Math.min(100, +arg); keys([[VK.down, 50], [VK.up, Math.round(pct / 2)]]); return `volume set to ~${pct}%`;
       }
       if (!['up', 'down', 'mute'].includes(arg)) throw new Error('volume: up|down|mute|0-100');
       keys(VK[arg], arg === 'mute' ? 1 : 5); return `volume ${arg}`;
     }
     case 'open': {
       const target = APPS[arg] ?? (/^https?:\/\/[^\s"'&|<>^]+$/i.test(arg) ? arg : null);
-      if (!target) throw new Error(`open: unknown app "${arg}". Known: ${Object.keys(APPS).join(', ')}, or an https URL`);
+      if (!target) {                                    // not one of the shortcuts above: look in the Start menu, then his Steam library
+        const name = /^[\w .+&'()-]{2,60}$/.test(arg), app = name && findApp(arg, startApps());
+        if (app) {                                      // Steam and other link shortcuts carry a URL as their id; everything else opens from the Apps folder
+          const link = /^[a-z][\w+.-]*:\/\/[\w\/.?=%-]+$/i.test(app.AppID);
+          spawn(link ? 'cmd.exe' : 'explorer.exe', link ? ['/c', 'start', '""', app.AppID] : ['shell:AppsFolder\\' + app.AppID], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+          return `opened ${app.Name}`;
+        }
+        const g = name && steamGames().find(x => x.name.toLowerCase().includes(arg));
+        if (g) return run('game', 'launch ' + g.name);
+        throw new Error(`open: nothing called "${arg}" in the Start menu or his Steam games. It also takes an https URL.`);
+      }
       spawn('cmd.exe', ['/c', 'start', '""', target], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
       return `opened ${arg}`;
     }
@@ -242,27 +285,39 @@ function run(action, arg = '') {
       throw new Error('note: add <text> | list | clear');
     }
     case 'remind': {
-      const parts = raw.split(' ');
+      const parts = raw.split(' '), rem = require('../main/reminders');
+      if (/^(cancel|delete|remove)$/i.test(parts[0])) {   // remind cancel <words | all>: drops every pending reminder containing all the words
+        const words = parts.slice(1).join(' ').toLowerCase().split(/\s+/).filter(Boolean), now = new Date();
+        if (!words.length) throw new Error('remind cancel <words from the reminder | all>');
+        const live = readJsonl('reminders.jsonl').filter(r => r.repeatDays || new Date(r.at) > now);   // old one-shots are tidied away too
+        const keep = live.filter(r => !(words[0] === 'all' && words.length === 1) && !words.every(w => String(r.text).toLowerCase().includes(w)));
+        fs.writeFileSync(file('reminders.jsonl'), keep.map(r => JSON.stringify(r) + '\n').join(''));
+        return live.length - keep.length ? `${live.length - keep.length} reminder(s) cancelled` : `no pending reminder matches "${words.join(' ')}"`;
+      }
+      // The same reminder asked for twice is saved once (three copies of one weekly reminder were all being read out).
+      const save = r => {
+        if (readJsonl('reminders.jsonl').some(x => (x.repeatDays || new Date(x.at) > new Date()) && rem.key(x) === rem.key(r))) return false;
+        fs.appendFileSync(file('reminders.jsonl'), JSON.stringify({ id: rem.newId(), ...r }) + '\n'); return true;
+      };
       const days = parts.length > 2 ? parseDays(parts[0]) : null;
       if (days) {
         const t = /^(\d{1,2}):(\d{2})\s*(am|pm)?$/i.exec(parts[1] || ''), text = parts.slice(2).join(' ').trim();
         if (!t || !text) throw new Error('remind: <days: mon-sat|daily|weekdays|weekends> <HH:MM|H:MMam/pm> <text>');
         let h = +t[1]; if (t[3]) { h %= 12; if (/pm/i.test(t[3])) h += 12; }
-        const now = new Date(), base = new Date(now); base.setHours(h, +t[2], 0, 0);
-        let at = null;
-        for (let add = 0; add <= 7; add++) { const d = new Date(base.getTime() + add * 86400000); if (days.includes(d.getDay()) && d > now) { at = d; break; } }
-        fs.appendFileSync(file('reminders.jsonl'), JSON.stringify({ id: Date.now().toString(36), at: at.toISOString(), text, repeatDays: days }) + '\n');
+        const base = new Date(); base.setHours(h, +t[2], 0, 0);
+        const at = rem.nextRepeat({ at: base, repeatDays: days });
+        if (!save({ at: at.toISOString(), text, repeatDays: days })) return 'that reminder is already set';
         return `recurring reminder set for ${at.toLocaleString()} (repeats ${parts[0]})`;
       }
       const [spec = '', ...rest] = raw.split(' '); const text = rest.join(' ').trim(); const ms = whenMs(spec.toLowerCase());
       if (ms == null || !text) throw new Error('remind: <10m|2h|1h30m|HH:MM> <text>  |  remind <mon-sat|daily|weekdays|weekends> <HH:MM|H:MMam/pm> <text>');
       const at = new Date(Date.now() + ms);
-      fs.appendFileSync(file('reminders.jsonl'), JSON.stringify({ id: Date.now().toString(36), at: at.toISOString(), text }) + '\n');
+      if (!save({ at: at.toISOString(), text })) return 'that reminder is already set';
       return `reminder set for ${at.toLocaleString()}`;
     }
     case 'reminders': {
-      const up = readJsonl('reminders.jsonl').filter(r => new Date(r.at) > new Date());
-      return up.length ? up.map(r => `${new Date(r.at).toLocaleString()}: ${r.text}`).join('\n') : 'no upcoming reminders';
+      const rem = require('../main/reminders'), up = rem.dedupe(readJsonl('reminders.jsonl')).filter(r => new Date(r.at) > new Date()).sort((a, b) => new Date(a.at) - new Date(b.at));
+      return up.length ? up.map(r => `${new Date(r.at).toLocaleString()}: ${rem.fill(r.text)}${r.repeatDays ? ' (repeats ' + r.repeatDays.map(d => DAY_NAMES[d]).join(',') + ')' : ''}`).join('\n') : 'no upcoming reminders';
     }
     case 'spotify': {                     // real playback via the app's Spotify connection; falls back to opening a search
       const br = require('../main/bridge'), m = /^(play|queue|now|like|shuffle)\b\s*(.*)$/i.exec(raw);
@@ -323,6 +378,8 @@ function run(action, arg = '') {
       const parts = [await worldTime('')];
       parts.push(await weather(raw).catch(e => `weather unavailable (${e.message})`));
       parts.push('Reminders: ' + run('reminders', '').replace(/\n/g, '; '));
+      const cal = await calendar('today', 8000).catch(() => null);   // not connected or app not running: just leave it out
+      if (cal) parts.push('Calendar today: ' + cal.replace(/\n/g, '; '));
       try { const np = JSON.parse(run('media', 'status') || '{}'); if (np.title) parts.push(`Now playing: ${np.title}${np.artist ? ' by ' + np.artist : ''} (${np.status})`); } catch {}
       parts.push(`PC: ${Math.round(100 - os.freemem() / os.totalmem() * 100)}% RAM used, up ${(os.uptime() / 3600).toFixed(1)}h`);
       return parts.join('\n');
@@ -352,7 +409,13 @@ function run(action, arg = '') {
         if (!t) throw new Error(`no window matching "${q}"`); return `focused: ${t}`;
       }
       if (sub === 'minimize-all' || sub === 'desktop') { execFileSync('powershell.exe', ['-NoProfile', '-Command', '(New-Object -ComObject Shell.Application).MinimizeAll()'], { windowsHide: true }); return 'all windows minimised'; }
-      throw new Error('window: list | focus <name> | minimize-all');
+      if (sub === 'close' && q) {                       // asks the app to close, the same as clicking its X (it can still ask to save)
+        const ps = `$p = Get-Process | ? { $_.MainWindowTitle -and ($_.MainWindowTitle.ToLower().Contains('${q}') -or $_.ProcessName.ToLower().Contains('${q}')) } | select -First 1;` +
+          `if ($p) { $p.CloseMainWindow() | Out-Null; $p.MainWindowTitle } else { '' }`;
+        const t = execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { windowsHide: true }).toString().trim();
+        if (!t) throw new Error(`no window matching "${q}"`); return `closed: ${t}`;
+      }
+      throw new Error('window: list | focus <name> | close <name> | minimize-all');
     }
     case 'clip': {                        // clip [latest|<file>] [seconds=30] [crop|blur|split]: last N seconds -> 9:16 in Desktop\Jarvis Clips
       const clips = require('../main/clips');
@@ -437,6 +500,8 @@ function run(action, arg = '') {
         br.call(DATA, 'nanoleaf', [a], 8000).then(r => r, e => 'Nanoleaf: ' + e.message)];
       return Promise.all(jobs).then(r => r.join('\n'));
     }
+    case 'calendar': return calendar(raw);
+    case 'obs': return require('../main/obs').run(raw);   // OBS Studio over its built-in WebSocket server
     case 'hands': return hands(raw);      // barehands board (Jared Rhodenizer, AGPL-3.0, vendored in barehands/)
     case 'lock':
       spawn('rundll32.exe', ['user32.dll,LockWorkStation'], { detached: true, stdio: 'ignore' }).unref(); return 'locking the PC';
@@ -458,11 +523,11 @@ function run(action, arg = '') {
       return JSON.stringify({ host: os.hostname(), cpu: os.cpus()[0]?.model.trim(), cores: os.cpus().length,
         ramGB: +(os.totalmem() / 2 ** 30).toFixed(1), freeGB: +(os.freemem() / 2 ** 30).toFixed(1), uptimeH: +(os.uptime() / 3600).toFixed(1) });
     default:
-      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, business, context, health, doctor, lock, info');
+      throw new Error('actions: media, volume, open, spotify, game, light, note, remind, reminders, calendar, obs, screen, remember, briefing, weather, time, define, iss, news, convert, map, window, clipboard, power, clip, clipthat, vod, thumbnail, twitch, discord, hands, business, context, health, doctor, lock, info');
   }
 }
 
-module.exports = { run, APPS, whenMs, DATA };
+module.exports = { run, APPS, whenMs, DATA, findApp };
 if (require.main === module) {
   Promise.resolve().then(() => run(process.argv[2], process.argv.slice(3).join(' ')))
     .then(r => console.log(r), e => { console.error(e.message); process.exit(1); });

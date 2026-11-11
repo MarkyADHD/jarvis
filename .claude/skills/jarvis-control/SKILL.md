@@ -18,8 +18,10 @@ list of actions is in your system prompt. The ones people ask for most:
 - `media play|pause|next|previous|status`, `volume up|down|mute|<0-100>`
 - `spotify play [track|artist|album|playlist] <name>`, `spotify queue <song>`, `spotify now`
 - `light on|off|<0-100>|warm|cool`, `nanoleaf on|off|<colour>|effect <name>`, `lights on|off`
-- `open <app or https url>`, `window focus <name>`, `game launch <name>`
-- `remind <10m|2h|HH:MM|7:30pm> <text>`, `reminders`, `note add <text>`
+- `open <any app by name, or https url>`, `window focus <name>`, `window close <name>`, `game launch <name>`
+- `remind <10m|2h|HH:MM|7:30pm> <text>`, `remind cancel <words|all>`, `reminders`, `note add <text>`
+- `calendar today|tomorrow|week`, `calendar add <YYYY-MM-DD> <HH:MM> <title>` (his iCloud calendar)
+- `obs status|scenes|scene <name>|record start|stop|replay save|mute <source>` (confirm before `obs stream start|stop`)
 - `weather [city]`, `time [city]`, `news [topic]`, `convert 100 gbp usd`, `briefing`
 - `power sleep|shutdown|restart` (always confirm with him first), `lock`
 - `twitch status|clip|title <text>`, `clipthat`, `vod latest`

@@ -11,12 +11,15 @@ Jarvis v3 is a desktop app (Electron) with Claude as the brain, or any local AI 
 - **HUD:** animated arc-reactor interface with live CPU/RAM/disk telemetry, radar, memory core and now playing.
 - **Talk to him:** type, push-to-talk (MIC or Ctrl+Shift+Space), or hands-free ("Jarvis, ...").
   Replies stream in and are spoken sentence by sentence (ElevenLabs, or a local offline voice).
-- **Control your PC:** media, volume, apps and websites, windows, clipboard, sleep/shutdown (he asks first), lock.
+- **Control your PC:** media, volume, any app in your Start menu or Steam library, websites, windows, clipboard,
+  sleep/shutdown (he asks first), lock.
 - **Music and streaming:** Spotify playback (songs, artists, playlists), Twitch (live status, clips, ads,
-  title/category), Discord (mute/deafen/leave via your keybinds, server jumps), Elgato Key Light.
+  title/category), OBS Studio (scenes, recording, replay buffer, mute a source, start/stop the stream after he checks
+  with you), Discord (mute/deafen/leave via your keybinds, server jumps), Elgato Key Light.
 - **Clip Studio:** load a recording or a Twitch/YouTube link, find the best moments automatically, trim,
   pick a 9:16 layout (crop, blur fill, facecam split), auto-captions, export shorts; thumbnails too.
-- **Everyday stuff:** weather, world time, dictionary, maps, reminders, notes, a daily briefing,
+- **Everyday stuff:** weather, world time, dictionary, maps, reminders (repeating, countdowns, cancel by voice),
+  your iCloud calendar ("what's on today?", "add ... on Friday at 7"), notes, a daily briefing,
   screen awareness ("what's on my screen?"), Steam game launching, memory of what matters to you.
 - **Pick his brain:** Claude by default, with a local model as backup if Claude stops answering, or run fully on a
   local model. **Settings > Scan PC** lists every model in Ollama, LM Studio, llama.cpp, Jan, KoboldCpp or any
@@ -29,7 +32,8 @@ Jarvis v3 is a desktop app (Electron) with Claude as the brain, or any local AI 
 - [Claude Code](https://claude.com/claude-code) signed in to your own Claude account (the $20/mo Pro plan is enough),
   or a local AI app such as [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) for the free local brain
 - FFmpeg for Clip Studio (`winget install ffmpeg`)
-- Optional: Spotify, Twitch, ElevenLabs, Discord, Elgato Key Light
+- Optional: Spotify, Twitch, ElevenLabs, Discord, Elgato Key Light, OBS Studio 28+ (turn on Tools > WebSocket Server
+  Settings > Enable WebSocket server), an iCloud calendar (Settings, with an app-specific password)
 
 ## Getting it
 

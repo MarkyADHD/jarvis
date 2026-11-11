@@ -9,11 +9,13 @@ const vault = require('./vault');
 const { Speech, Sentencer } = require('./voice');
 const stt = require('./stt');
 const { longTimeout } = require('./timer');
+const rem = require('./reminders');
 const clips = require('./clips');
 const bridge = require('./bridge');
 const { Spotify } = require('./spotify');
 const { Twitch } = require('./twitch');
 const { Nanoleaf } = require('./nanoleaf');
+const { Calendar } = require('./calendar');
 
 // Dev: JARVIS_USER_DATA=<dir> runs a second, separate copy (own settings and lock) beside the live one, e.g. to measure the HUD.
 if (process.env.JARVIS_USER_DATA) app.setPath('userData', process.env.JARVIS_USER_DATA);
@@ -28,6 +30,9 @@ const root = path.join(__dirname, '..', '..');
 const res = app.isPackaged ? process.resourcesPath : root;
 let win, tray, db;
 const recoverLog = why => { try { fs.appendFileSync(path.join(app.getPath('userData'), 'data', 'hud-recovery.log'), new Date().toISOString() + ' ' + why + '\n'); } catch {} };
+// Every message to the HUD goes through here. At quit the window is destroyed before Claude's process exits, and its last
+// 'tasks' event then threw "Object has been destroyed" (five times in hud-recovery.log, Nov 2026).
+const send = (ch, a) => { if (win && !win.isDestroyed()) win.webContents.send(ch, a); };
 const claude = new Claude();
 // Phone access (src/main/phone.js) calls the same handlers the HUD uses, so remember them as they're registered.
 const handlers = {}; const ipcHandle = ipcMain.handle.bind(ipcMain);
@@ -39,7 +44,7 @@ let phone;
 // listeners below) can get stuck 'off' if those events fire oddly around a fullscreen app -- stuck
 // 'off' means the reactor's draw loop skips itself forever, showing as a permanent black circle.
 // Force both a repaint and an explicit 'on' on every show() so it always recovers.
-function show() { if (!win) createWindow(); win.show(); win.focus(); win.webContents.invalidate(); win.webContents.send('anim', 'on'); }
+function show() { if (!win || win.isDestroyed()) createWindow(); win.show(); win.focus(); win.webContents.invalidate(); send('anim', 'on'); }
 
 function createWindow() {
   win = new BrowserWindow({
@@ -58,7 +63,7 @@ function createWindow() {
   }, +process.env.JARVIS_DEBUG_SNAP_MS || 9000);
   win.on('close', e => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
   // Gaming: tell the HUD to stop animating when hidden/minimised; full speed whenever visible, focused or not (throttling itself stays off, see black-HUD note).
-  for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => win.webContents.send('anim', s));   // the event itself says visible/hidden; isVisible() lags inside 'show', which left the HUD stuck 'off' (frozen black reactor)
+  for (const [ev, s] of [['hide', 'off'], ['minimize', 'off'], ['show', 'on'], ['restore', 'on'], ['focus', 'on']]) win.on(ev, () => send('anim', s));   // the event itself says visible/hidden; isVisible() lags inside 'show', which left the HUD stuck 'off' (frozen black reactor)
   win.on('focus', () => showOverlay(null));
   // Black-HUD safety net: log why, then reload. Covers renderer/GPU crashes, sleep/display changes, and a silently stalled render loop.
   let lastRecover = 0;   // display changes fire in bursts (4 in 1s seen in the log): one reload per burst, not four
@@ -147,43 +152,46 @@ app.whenReady().then(() => {
   const say = s => {
     if (!voiceOn) return;
     const job = speech.speak(s), n = ++seq, gen = speech.gen;
-    chain = chain.then(() => job).then(r => { if (r && gen === speech.gen) win?.webContents.send('audio', { n, engine: r.engine, buf: r.buf }); }).catch(() => {});
+    chain = chain.then(() => job).then(r => { if (r && gen === speech.gen) send('audio', { n, engine: r.engine, buf: r.buf }); }).catch(() => {});
   };
   const sentences = new Sentencer(say);
   let lastErr = '';
-  speech.onError = msg => { if (msg !== lastErr) { lastErr = msg; win?.webContents.send('notice', `Voice: ${msg}. Using the local voice instead.`); } };
+  speech.onError = msg => { if (msg !== lastErr) { lastErr = msg; send('notice', `Voice: ${msg}. Using the local voice instead.`); } };
 
   // Reminders: written by `pc.js remind`, fired here (notification + spoken + shown in Comms).
   const remFile = path.join(app.getPath('userData'), 'data', 'reminders.jsonl');
   const firedFile = remFile.replace('.jsonl', '-fired.txt');
   const fired = new Set((() => { try { return fs.readFileSync(firedFile, 'utf8').split('\n').filter(Boolean); } catch { return []; } })()), timers = new Map();
+  const readRems = () => { try { return fs.readFileSync(remFile, 'utf8').split('\n').filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } }); } catch { return []; } };
+  const writeRems = rs => fs.writeFileSync(remFile, rs.map(x => JSON.stringify(x) + '\n').join(''));
+  // Marks a reminder done. A weekly repeat is swapped for its next occurrence under a fresh id, so the permanent 'fired'
+  // mark (meant for one-shots) doesn't silence it forever; counted from today, so a repeat missed for days doesn't replay each day.
+  const settle = r => {
+    fired.add(r.id); timers.delete(r.id); fs.appendFile(firedFile, r.id + '\n', () => {});
+    const next = r.repeatDays && rem.nextRepeat(r);
+    if (next) writeRems(readRems().filter(x => x.id !== r.id).concat([{ ...r, id: rem.newId(), at: next.toISOString() }]));
+  };
   const loadReminders = () => {
-    let rs = []; try { rs = fs.readFileSync(remFile, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
+    const all = readRems(), rs = rem.dedupe(all), missed = [];
+    if (rs.length < all.length) writeRems(rs);   // duplicates go for good, not just skipped this run
     for (const r of rs) {
+      if (!r.id || !r.text || isNaN(new Date(r.at)) || fired.has(r.id) || timers.has(r.id)) continue;
       const ms = new Date(r.at) - Date.now();
-      if (fired.has(r.id) || timers.has(r.id)) continue;
-      const missed = ms < -60000;   // came due while Jarvis was off: still tell him, flagged as missed (used to be dropped silently)
+      if (ms < -60000) { missed.push(r); continue; }   // came due while Jarvis was off
       timers.set(r.id, true); longTimeout(() => {
-        fired.add(r.id); timers.delete(r.id); fs.appendFile(firedFile, r.id + '\n', () => {});
-        new Notification({ title: missed ? 'Jarvis missed reminder' : 'Jarvis reminder', body: r.text }).show();
-        say(`${missed ? 'Missed reminder from ' + new Date(r.at).toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : 'Reminder'}, sir: ${r.text}`);
-        win?.webContents.send('reminder', r);
-        if (r.repeatDays) {
-          // Fires again next matching weekday: swap this occurrence out for a fresh id/time so
-          // the permanent `fired` mark (meant for one-shot reminders) doesn't suppress it forever.
-          // Counted from today at the same clock time, so a repeat missed for days doesn't replay every day it missed.
-          let next = null; const base = new Date(r.at), now = new Date(); base.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
-          for (let add = 0; add <= 7 && !next; add++) { const d = new Date(base.getTime() + add * 86400000); if (d > now && r.repeatDays.includes(d.getDay())) next = d; }
-          if (next) {
-            let rs = []; try { rs = fs.readFileSync(remFile, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
-            rs = rs.filter(x => x.id !== r.id).concat([{ ...r, id: Date.now().toString(36), at: next.toISOString() }]);
-            fs.writeFileSync(remFile, rs.map(x => JSON.stringify(x)).join('\n') + '\n');
-          }
-        }
+        if (!readRems().some(x => x.id === r.id)) return timers.delete(r.id);   // cancelled meanwhile (pc.js remind cancel)
+        settle(r); const text = rem.fill(r.text);
+        new Notification({ title: 'Jarvis reminder', body: text }).show(); say('Reminder, sir: ' + text); send('reminder', { ...r, text });
       }, ms);
     }
+    if (!missed.length) return;
+    missed.forEach(settle);
+    const line = rem.missedLine(missed);   // one notification and one sentence, however many there were
+    new Notification({ title: 'Jarvis missed reminder' + (missed.length > 1 ? 's' : ''), body: line.replace(/^.*?, sir: /, '') }).show(); say(line);
+    for (const r of missed) send('reminder', { ...r, text: rem.fill(r.text) });
   };
-  loadReminders(); fs.watchFile(remFile, { interval: 2000 }, loadReminders);
+  // Wait for the HUD to load first: a missed reminder spoken at launch used to be sent to a window that wasn't listening yet.
+  setTimeout(() => { loadReminders(); fs.watchFile(remFile, { interval: 2000 }, loadReminders); }, 8000);
   setTimeout(() => speech.piper.start(), 1500);
   setTimeout(() => { const e = speech.eleven; console.log('[jarvis] voice:', speech.engine(), '| elevenlabs enabled:', e.enabled, '| voice id set:', !!e.voiceId, '| key found:', e.enabled ? !!e.key() : 'not checked'); }, 500);   // warm the local voice so the first fallback is quick
   app.on('will-quit', () => speech.stop());
@@ -205,26 +213,26 @@ app.whenReady().then(() => {
     if (npBusy || !win?.isFocused()) return; npBusy = true;
     require('child_process').execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', npScript], { windowsHide: true, timeout: 8000 }, (err, out) => {
       npBusy = false; let np = {}; try { np = JSON.parse(String(out).trim() || '{}'); } catch {}
-      win?.webContents.send('nowplaying', np);
+      send('nowplaying', np);
     });
   };
   setInterval(nowPlaying, 8000); app.on('browser-window-focus', (_e, w) => { if (w === win) nowPlaying(); });
   // barehands ring mirrors Jarvis (thinking while working, idle when done); harmless if the board isn't running.
   const ring = s => fs.writeFile(path.join(root, 'barehands', 'state', 'state'), s, () => {});
-  claude.on('tool', t => { ring('thinking'); win?.webContents.send('tool', t); });
+  claude.on('tool', t => { ring('thinking'); send('tool', t); });
   // Work still running after the reply (Claude's background jobs + the app's own clip jobs) -> HUD "WORKING" light.
   let claudeWork = [];
-  const appWork = [], workNow = () => [...claudeWork, ...appWork], work = () => win?.webContents.send('work', workNow());
+  const appWork = [], workNow = () => [...claudeWork, ...appWork], work = () => send('work', workNow());
   const job = (label, p) => { appWork.push(label); work(); return p.finally(() => { appWork.splice(appWork.indexOf(label), 1); work(); }); };
   claude.on('tasks', t => { claudeWork = t; work(); });
   let reply = '';
-  claude.on('delta', t => { reply += t; sentences.push(t); win?.webContents.send('delta', t); });
+  claude.on('delta', t => { reply += t; sentences.push(t); send('delta', t); });
   claude.on('done', r => {
     ring('idle');
     if (r.error) sentences.reset(); else sentences.flush();
     const text = reply || r.text; reply = '';
     if (text) db.addChat('jarvis', text);
-    win?.webContents.send('done', { ...r, text });
+    send('done', { ...r, text });
   });
 
   // Phone access: the full HUD over Tailscale (see phone.js for the gate).
@@ -233,15 +241,19 @@ app.whenReady().then(() => {
     return handlers[ch]({ sender: null }, ...args);
   } });
 
-  ipcMain.handle('status', () => ({ claude: claude.status(), memories: vault.all().length, work: workNow() }));
+  ipcMain.handle('status', async () => ({ claude: await claude.statusAsync(), memories: vault.all().length, work: workNow() }));
   // Stall detector (seen 2026-11-04: window fine, IPC fine, but every timer dead for hours: no reminders, no bridge, no
   // Spotify/Twitch commands). Timers run on Node's loop, IPC on Chromium's, so the HUD's stats poll can spot the loop dying.
-  let beat = Date.now(), stalled = false;
-  setInterval(() => { beat = Date.now(); }, 1000);
+  // A single late beat is not a stall: after sleep, or one long blocking job (36 s seen 2026-11-06), the HUD's poll can land
+  // before the timer catches up, and the alarm used to stick for good. Only a beat still missing 10 s later counts, and it clears if the beat returns.
+  let beat = Date.now(), stalled = false, suspect = 0;
+  setInterval(() => { beat = Date.now(); suspect = 0; if (stalled) { stalled = false; recoverLog('main loop recovered'); } }, 1000);
   const stallCheck = () => {
     if (stalled || Date.now() - beat < 30000) return;
+    if (!suspect) suspect = Date.now();
+    if (Date.now() - suspect < 10000) return;
     stalled = true; recoverLog('main loop stalled: timers silent ' + Math.round((Date.now() - beat) / 1000) + 's');
-    win?.webContents.send('notice', 'My background clock has stalled, sir: reminders, Spotify and Twitch commands are dead until you quit me from the tray and launch me again.');
+    send('notice', 'My background clock has stalled, sir: reminders, Spotify and Twitch commands are dead until you quit me from the tray and launch me again.');
   };
   let prev = cpuTimes();
   ipcMain.handle('stats', () => {
@@ -276,9 +288,32 @@ app.whenReady().then(() => {
   const spotify = new Spotify(dataDir, () => readSet().spotifyClientId || process.env.JARVIS_SPOTIFY_CLIENT_ID || '');
   const twitch = new Twitch(dataDir, () => ({ id: readSet().twitchClientId || '', secret: loadSecret(twSecretFile)?.secret || '' }));
   const nanoleaf = new Nanoleaf(dataDir, () => (readSet().nanoleafIp || '').trim());
+  // iCloud calendar (calendar.js): login encrypted in dataDir like the others; pc.js calendar reaches it through the bridge.
+  const calendar = new Calendar(dataDir);
+  ipcMain.handle('connect:calendar', async (_e, email, pw) => {
+    if (typeof email !== 'string' || typeof pw !== 'string' || !/^\S+@\S+$/.test(email.trim()) || !pw.trim()) return { error: 'Enter your Apple ID email and an app-specific password.' };
+    try { const msg = await calendar.connect(email.trim(), pw.trim()); calAt = 0; return { msg }; }
+    catch { return { error: 'Apple refused that login. It needs an app-specific password from account.apple.com, not your normal one.' }; }
+  });
+  // NEXT UP on the HUD: pending reminders plus the next day of calendar. The calendar is asked at most every 15 min
+  // (6 h after a failure, so a dead login isn't retried all day) and never holds up the answer.
+  let calCache = [], calAt = 0;
+  ipcMain.handle('agenda', () => {
+    if (Date.now() > calAt && calendar.connected()) {
+      calAt = Date.now() + 15 * 60000;
+      calendar.events(new Date(), new Date(Date.now() + 86400000)).then(ev => { calCache = ev.filter(e => !e.allDay).map(e => ({ at: e.start, text: e.title, kind: 'calendar' })); },
+        e => { calAt = Date.now() + 6 * 3600e3; console.error('[jarvis] calendar:', e.message); });
+    }
+    return [...rem.dedupe(readRems()).filter(r => !fired.has(r.id)).map(r => ({ at: r.at, text: rem.fill(r.text), kind: 'reminder' })), ...calCache]
+      .filter(x => new Date(x.at) > Date.now()).sort((a, b) => new Date(a.at) - new Date(b.at)).slice(0, 5);
+  });
   ipcMain.handle('connect:nanoleaf', async () => { try { return { msg: await nanoleaf.pair() }; } catch (e) { return { error: e.message }; } });
   // Pair Key Light: scan the LAN for Elgato lights (pc.js light find) and save them where pc.js reads them.
-  ipcMain.handle('connect:keylight', async () => { try { return { msg: await require('../tools/pc').run('light', 'find') }; } catch (e) { return { error: e.message }; } });
+  // pc.js as its own process: run inside the app, its PowerShell calls (media keys, volume) froze everything for a second or more.
+  const runPc = (...argv) => new Promise((ok, fail) => require('child_process').execFile(process.execPath, [path.join(claude.cwd || root, 'src', 'tools', 'pc.js'), ...argv],
+    { cwd: claude.cwd || root, timeout: 60000, windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } },
+    (err, out, se) => err ? fail(new Error(String(se || err.message).trim())) : ok(String(out).trim())));
+  ipcMain.handle('connect:keylight', async () => { try { return { msg: await runPc('light', 'find') }; } catch (e) { return { error: e.message }; } });
   // Whole-VOD autopilot runs in the background; the result arrives as a notification.
   let vodBusy = false;
   // Custom layouts (Clip Studio's layout editor): { default: name|null, layouts: [{ name, bg, captionY, panels }] }.
@@ -296,7 +331,7 @@ app.whenReady().then(() => {
     vodBusy = true;
     job('Clipping a VOD', stt.load().catch(() => null)            // no Whisper model = clips without subtitles
       .then(asr => clips.autoVod(url, asr, { count: Math.min(25, +count || 25), facecam: readSet().facecam, captionStyle: style || 'bold', ...lay,
-        onProgress: (p, s) => win?.webContents.send('clips:status', { p, s }) }))
+        onProgress: (p, s) => send('clips:status', { p, s }) }))
       .then(r => { const ok = r.clips.filter(c => !c.startsWith('FAILED')).length;
         new Notification({ title: 'Jarvis VOD clips', body: `${ok} of ${r.clips.length} clips ranked by virality, with titles and hashtags in clips.txt (picked by ${r.how}).` }).show(); shell.openPath(r.dir); },
         e => new Notification({ title: 'Jarvis VOD clips', body: 'VOD clipping failed: ' + e.message }).show()))
@@ -350,28 +385,30 @@ app.whenReady().then(() => {
     'twitch.status': () => twitch.status(), 'twitch.clip': () => twitch.clip(), 'twitch.ad': s => twitch.ad(s),
     'twitch.title': t => twitch.title(t), 'twitch.category': c => twitch.category(c), 'twitch.vod': () => twitch.lastVod(),
     'clips.vod': (url, n, style, lay) => clipVod(url, n, style, lay), 'clips.live': () => clipThat(),
+    'calendar.events': (from, to) => calendar.events(new Date(from), new Date(to)),
+    'calendar.add': o => calendar.addEvent({ ...o, start: new Date(o.start) }).then(m => { calAt = 0; return m; }),
     // releaseSingleInstanceLock() first: relaunch() spawns the new process immediately, and without this
     // it loses the single-instance-lock race against the still-alive old one and quits itself silently.
     'app.restart': () => { setTimeout(() => { app.isQuitting = true; app.releaseSingleInstanceLock(); app.relaunch(); app.exit(0); }, 200); return 'restarting'; },
-    'health': () => ({ spotify: spotify.connected(), twitch: twitch.connected(), nanoleaf: nanoleaf.connected(), voice: speech.engine() }),
+    'health': () => ({ spotify: spotify.connected(), twitch: twitch.connected(), nanoleaf: nanoleaf.connected(), calendar: calendar.connected(), voice: speech.engine() }),
   });
   // HUD quick controls: only these tool actions can be triggered from the UI.
   const QUICK = { media: /^(play|pause|next|previous)$/, volume: /^(up|down|mute)$/, lights: /^(on|off|status)$/ };
   ipcMain.handle('pc:quick', async (_e, action, arg) => {
     if (!QUICK[action]?.test(String(arg))) return { error: 'not allowed' };
-    try { return { result: await require('../tools/pc').run(action, arg) }; } catch (e) { return { error: e.message }; }
+    try { return { result: await runPc(action, String(arg)) }; } catch (e) { return { error: e.message }; }
   });
   // Twitch live indicator, polled while connected.
   setInterval(async () => {
     if (!twitch.connected() || !win?.isVisible()) return;
-    try { const s = await twitch.status(); win.webContents.send('twitch', { live: s.startsWith('LIVE'), text: s }); } catch {}
+    try { const s = await twitch.status(); send('twitch', { live: s.startsWith('LIVE'), text: s }); } catch {}
   }, 120000);
   ipcMain.handle('connect:spotify', async () => { try { return { msg: await spotify.connect(win) }; } catch (e) { return { error: e.message }; } });
   ipcMain.handle('connect:twitch', async () => { try { return { msg: await twitch.connect(win) }; } catch (e) { return { error: e.message }; } });
   ipcMain.handle('settings:get', () => { const s = readSet(); return { city: s.city || '', voiceId: speech.eleven.voiceId || '', hasKey: fs.existsSync(keyFile), engine: speech.engine(),
     spotifyClientId: s.spotifyClientId || '', spotifyConnected: spotify.connected(), twitchClientId: s.twitchClientId || '', twitchHasSecret: fs.existsSync(twSecretFile), twitchConnected: twitch.connected(),
     discord: s.discord || {}, nanoleafIp: s.nanoleafIp || '', nanoleafPaired: nanoleaf.connected(), ptt: !!s.ptt, pttKey: s.pttKey || 'Home',
-    brain: s.brain || 'claude', localUrl: s.localUrl || '', localModel: s.localModel || '', stt: s.stt || 'cpu', sttEngine: stt.engine() }; });
+    calendarConnected: calendar.connected(), brain: s.brain || 'claude', localUrl: s.localUrl || '', localModel: s.localModel || '', stt: s.stt || 'cpu', sttEngine: stt.engine() }; });
   ipcMain.handle('local:models', (_e, extra) => require('./local').models(typeof extra === 'string' ? extra.trim() : ''));
   ipcMain.handle('settings:set', (_e, s = {}) => {
     const next = readSet();
@@ -419,16 +456,16 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('clips:facecam', async (_e, { file, start, end }) => { try { return { cam: await clips.findFacecam(file, start, end) }; } catch (e) { return { error: e.message }; } });
   ipcMain.handle('clips:export', async (_e, opts) => {
-    try { return { output: await clips.exportClip(opts, p => win?.webContents.send('clips:progress', p)) }; } catch (e) { return { error: e.message }; }
+    try { return { output: await clips.exportClip(opts, p => send('clips:progress', p)) }; } catch (e) { return { error: e.message }; }
   });
   ipcMain.handle('clips:moments', async (_e, file) => {
-    try { return { moments: await clips.findMoments(file, await stt.load(), { onProgress: (p, s) => win?.webContents.send('clips:status', { p, s }) }) }; }
+    try { return { moments: await clips.findMoments(file, await stt.load(), { onProgress: (p, s) => send('clips:status', { p, s }) }) }; }
     catch (e) { return { error: e.message }; }
   });
   ipcMain.handle('clips:download', async (_e, { url, section }) => {
     if (!section && /twitch\.tv\/videos\//i.test(url)) return { error: clipVod(String(url).trim()) };   // whole VOD: never download it all
     try {
-      const file = await clips.download(String(url || '').trim(), { section, onProgress: p => win?.webContents.send('clips:status', { p, s: 'downloading' }) });
+      const file = await clips.download(String(url || '').trim(), { section, onProgress: p => send('clips:status', { p, s: 'downloading' }) });
       return { file, url: require('url').pathToFileURL(file).href, ...(await clips.probe(file)) };
     } catch (e) { return { error: e.message }; }
   });
@@ -444,14 +481,14 @@ app.whenReady().then(() => {
     catch (e) { return { error: String(e.message || e) }; }
   });
   setTimeout(() => stt.voice().then(v => console.log('[jarvis] hearing ready:', v.name), e => console.error('[jarvis] hearing failed:', e.message)), 4000);   // warm the model in the background
-  globalShortcut.register('Control+Shift+Space', () => { show(); win.webContents.send('ptt'); });
+  globalShortcut.register('Control+Shift+Space', () => { show(); send('ptt'); });
   // Push-to-talk: globalShortcut has no key-up, so the renderer treats the key's auto-repeat as "still held".
   // ponytail: repeat-based hold detection; swap for a native key hook (uiohook-napi) if release lag bugs him.
   let pttKey = '';
   const applyPtt = s => {
     if (pttKey) globalShortcut.unregister(pttKey); pttKey = '';
     if (!s.ptt) return;
-    try { if (globalShortcut.register(s.pttKey || 'Home', () => win?.webContents.send('ptt-hold'))) pttKey = s.pttKey || 'Home'; } catch {}
+    try { if (globalShortcut.register(s.pttKey || 'Home', () => send('ptt-hold'))) pttKey = s.pttKey || 'Home'; } catch {}
   };
   applyPtt(readSet());
   app.on('will-quit', () => globalShortcut.unregisterAll());
@@ -461,12 +498,14 @@ app.whenReady().then(() => {
   tray.setToolTip('Jarvis');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Jarvis', click: show },
-    { label: 'Stop', click: () => { claude.cancel(); win?.webContents.send('ui', 'stop'); } },
+    { label: 'Stop', click: () => { claude.cancel(); send('ui', 'stop'); } },
     { type: 'separator' },
-    { label: 'Talk (Ctrl+Shift+Space)', click: () => { show(); win.webContents.send('ptt'); } },
-    { label: 'Hands board', click: () => openHands().catch(e => win?.webContents.send('notice', e.message)) },
-    { label: 'Toggle voice', click: () => win?.webContents.send('ui', 'voice') },
-    { label: 'Toggle hands-free', click: () => win?.webContents.send('ui', 'handsfree') },
+    { label: 'Talk (Ctrl+Shift+Space)', click: () => { show(); send('ptt'); } },
+    { label: 'Hands board', click: () => openHands().catch(e => send('notice', e.message)) },
+    { label: 'Toggle voice', click: () => send('ui', 'voice') },
+    // The chat is resumed across restarts for ever; this starts a clean one (the memory vault is not touched).
+    { label: 'New conversation', click: () => { claude.cancel(); claude.sessionId = null; claude.localHistory = []; fs.rm(sessFile, { force: true }, () => {}); send('notice', 'Fresh conversation started, sir. Everything in my memory core is still there.'); } },
+    { label: 'Toggle hands-free', click: () => send('ui', 'handsfree') },
     { type: 'separator' },
     { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
   ]));
@@ -482,8 +521,11 @@ function cpuTimes() {
   }
   return { busy, total, cores };
 }
+let diskAt = 0, diskC = [];
 function disks() {
-  return ['C:\\', 'E:\\'].flatMap(d => {
+  if (Date.now() - diskAt < 30000) return diskC;   // disk space barely moves: ask Windows every 30 s, not on every 1.5 s stats poll
+  diskAt = Date.now();
+  return diskC = ['C:\\', 'E:\\'].flatMap(d => {
     try { const s = require('fs').statfsSync(d); const tot = s.blocks * s.bsize; return [{ name: d[0], used: Math.round(100 * (1 - s.bavail / s.blocks)), totalGB: Math.round(tot / 2 ** 30) }]; }
     catch { return []; }
   });
