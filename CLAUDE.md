@@ -185,5 +185,8 @@ is imported read-only, once.
   with Windows" and "every timer is dead" in Oct/Nov 2026; both were the shadow. Read the real folder through
   `\\localhost\C$\Users\<user>\AppData\Roaming\jarvis\data`, and test against a scratch copy
   (`JARVIS_USER_DATA=<dir>`; `backups/review-2026-11-11/scripts/harness.js` runs the real main.js invisibly and silently).
+- **Jarvis's brain must not load his coding plugins.** His user-level Claude Code settings enable ponytail and
+  superpowers, whose start-up hooks were injected into Jarvis's own session ("you are a lazy senior developer").
+  `claude.js` passes `--setting-sources project,local` to keep them out; keep that flag.
 - **Don't test against the live Claude session** from scripts while the app runs; spin up a separate
   `Claude` instance from `src/main/claude.js` instead.

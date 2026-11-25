@@ -168,8 +168,9 @@ app.whenReady().then(() => {
   // mark (meant for one-shots) doesn't silence it forever; counted from today, so a repeat missed for days doesn't replay each day.
   const settle = r => {
     fired.add(r.id); timers.delete(r.id); fs.appendFile(firedFile, r.id + '\n', () => {});
-    const next = r.repeatDays && rem.nextRepeat(r);
-    if (next) writeRems(readRems().filter(x => x.id !== r.id).concat([{ ...r, id: rem.newId(), at: next.toISOString() }]));
+    const next = r.repeatDays && rem.nextRepeat(r), all = readRems();
+    // Done one-shots leave the file too (they used to pile up in it for ever).
+    if (all.some(x => x.id === r.id)) writeRems(all.filter(x => x.id !== r.id).concat(next ? [{ ...r, id: rem.newId(), at: next.toISOString() }] : []));
   };
   const loadReminders = () => {
     const all = readRems(), rs = rem.dedupe(all), missed = [];
@@ -200,7 +201,9 @@ app.whenReady().then(() => {
   claude.context = vault.boot();
   // Pick the conversation back up across restarts (like backtalk's resume_last_session).
   const sessFile = path.join(app.getPath('userData'), 'data', 'claude-session.txt');
-  try { claude.sessionId = fs.readFileSync(sessFile, 'utf8').trim() || null; } catch {}
+  // ...but only the same day's. A conversation left for 12 hours starts clean: the old one was a single thread running
+  // since October, re-read on every launch and dragging stale chatter into every answer. Long-term memory is the vault's job.
+  try { if (Date.now() - fs.statSync(sessFile).mtimeMs < 12 * 3600e3) claude.sessionId = fs.readFileSync(sessFile, 'utf8').trim() || null; } catch {}
   claude.on('done', () => { if (claude.sessionId) fs.writeFile(sessFile, claude.sessionId, () => {}); });
   // Warm the Claude CLI at launch (like piper.start() above) so the first message of a session
   // doesn't pay its cold-start cost -- proc is already up by the time send() is first called.
@@ -504,7 +507,7 @@ app.whenReady().then(() => {
     { label: 'Hands board', click: () => openHands().catch(e => send('notice', e.message)) },
     { label: 'Toggle voice', click: () => send('ui', 'voice') },
     // The chat is resumed across restarts for ever; this starts a clean one (the memory vault is not touched).
-    { label: 'New conversation', click: () => { claude.cancel(); claude.sessionId = null; claude.localHistory = []; fs.rm(sessFile, { force: true }, () => {}); send('notice', 'Fresh conversation started, sir. Everything in my memory core is still there.'); } },
+    { label: 'New conversation', click: () => { claude.cancel(true); claude.sessionId = null; claude.localHistory = []; fs.rm(sessFile, { force: true }, () => {}); send('notice', 'Fresh conversation started, sir. Everything in my memory core is still there.'); } },
     { label: 'Toggle hands-free', click: () => send('ui', 'handsfree') },
     { type: 'separator' },
     { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
@@ -530,4 +533,4 @@ function disks() {
     catch { return []; }
   });
 }
-app.on('before-quit', () => { app.isQuitting = true; claude.cancel(); });
+app.on('before-quit', () => { app.isQuitting = true; claude.cancel(true); });

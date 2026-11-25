@@ -90,6 +90,15 @@ function whenMs(spec, now = new Date()) {
   return ms;
 }
 
+// A clock time on a named day: ('tomorrow' | 'today' | 'YYYY-MM-DD', 'HH:MM' | '7pm' | '7:30pm') -> Date, or null.
+function whenAt(day, time, now = new Date()) {
+  const t = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(time || ''); if (!t || (!t[2] && !t[3])) return null;
+  let h = +t[1]; if (t[3]) { h %= 12; if (/pm/i.test(t[3])) h += 12; }
+  const d = /^\d/.test(day) ? new Date(day + 'T00:00:00') : new Date(now); if (isNaN(d)) return null;
+  if (/^tomorrow$/i.test(day)) d.setDate(d.getDate() + 1);
+  d.setHours(h, +(t[2] || 0), 0, 0); return d;
+}
+
 // "mon-sat" | "mon,wed,fri" | "daily" | "weekdays" | "weekends" -> array of Date.getDay() values, or null.
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 function parseDays(spec) {
@@ -299,6 +308,13 @@ function run(action, arg = '') {
         if (readJsonl('reminders.jsonl').some(x => (x.repeatDays || new Date(x.at) > new Date()) && rem.key(x) === rem.key(r))) return false;
         fs.appendFileSync(file('reminders.jsonl'), JSON.stringify({ id: rem.newId(), ...r }) + '\n'); return true;
       };
+      if (/^(today|tomorrow|\d{4}-\d{2}-\d{2})$/i.test(parts[0])) {   // one-off on a named day: remind tomorrow 9am <text> | remind 2026-12-01 15:00 <text>
+        const at = whenAt(parts[0], parts[1]), text = parts.slice(2).join(' ').trim();
+        if (!at || !text) throw new Error('remind <tomorrow|YYYY-MM-DD> <HH:MM|7pm|7:30pm> <text>');
+        if (at <= new Date()) throw new Error('that time has already gone');
+        if (!save({ at: at.toISOString(), text })) return 'that reminder is already set';
+        return `reminder set for ${at.toLocaleString()}`;
+      }
       const days = parts.length > 2 ? parseDays(parts[0]) : null;
       if (days) {
         const t = /^(\d{1,2}):(\d{2})\s*(am|pm)?$/i.exec(parts[1] || ''), text = parts.slice(2).join(' ').trim();
@@ -310,7 +326,7 @@ function run(action, arg = '') {
         return `recurring reminder set for ${at.toLocaleString()} (repeats ${parts[0]})`;
       }
       const [spec = '', ...rest] = raw.split(' '); const text = rest.join(' ').trim(); const ms = whenMs(spec.toLowerCase());
-      if (ms == null || !text) throw new Error('remind: <10m|2h|1h30m|HH:MM> <text>  |  remind <mon-sat|daily|weekdays|weekends> <HH:MM|H:MMam/pm> <text>');
+      if (ms == null || !text) throw new Error('remind: <10m|2h|1h30m|HH:MM> <text>  |  remind <tomorrow|YYYY-MM-DD> <HH:MM|7pm> <text>  |  remind <mon-sat|daily|weekdays|weekends> <HH:MM|H:MMam/pm> <text>');
       const at = new Date(Date.now() + ms);
       if (!save({ at: at.toISOString(), text })) return 'that reminder is already set';
       return `reminder set for ${at.toLocaleString()}`;
@@ -510,7 +526,7 @@ function run(action, arg = '') {
       const app = await require('../main/bridge').call(DATA, 'health').catch(e => ({ error: e.message }));
       if (app.error) return `Jarvis app: unreachable (${app.error}). Everything else can't be checked without it.`;
       const line = (name, ok) => `${name}: ${ok ? 'OK' : 'not connected'}`;
-      return [claudeOk.connected ? 'Claude CLI: OK' : `Claude CLI: ${claudeOk.error}`, line('Spotify', app.spotify), line('Twitch', app.twitch), line('Nanoleaf', app.nanoleaf), `Voice engine: ${app.voice}`].join('\n');
+      return [claudeOk.connected ? 'Claude CLI: OK' : `Claude CLI: ${claudeOk.error}`, line('Spotify', app.spotify), line('Twitch', app.twitch), line('Nanoleaf', app.nanoleaf), line('Calendar', app.calendar), `Voice engine: ${app.voice}`].join('\n');
     })();
     case 'doctor': {                      // doctor [check] | optimise | undo | startup enable|disable <app>
       const d = require('../main/pcdoctor'), [sub = 'check', ...rest] = raw.split(' ');
@@ -527,7 +543,7 @@ function run(action, arg = '') {
   }
 }
 
-module.exports = { run, APPS, whenMs, DATA, findApp };
+module.exports = { run, APPS, whenMs, whenAt, DATA, findApp };
 if (require.main === module) {
   Promise.resolve().then(() => run(process.argv[2], process.argv.slice(3).join(' ')))
     .then(r => console.log(r), e => { console.error(e.message); process.exit(1); });

@@ -27,3 +27,12 @@ test('a reminder 40 days out waits for its time', t => {
   t.mock.timers.tick(10 * DAY); assert.strictEqual(fired, 1);
   let soon = 0; longTimeout(() => soon++, 5000); t.mock.timers.tick(5000); assert.strictEqual(soon, 1);
 });
+
+test('a reminder can be set for a named day', () => {
+  const { whenAt } = require('../src/tools/pc'), now = new Date('2026-11-25T18:00:00');
+  assert.strictEqual(whenAt('tomorrow', '9am', now).toISOString(), new Date('2026-11-26T09:00:00').toISOString());
+  assert.strictEqual(whenAt('2026-12-01', '15:30', now).toISOString(), new Date('2026-12-01T15:30:00').toISOString());
+  assert.strictEqual(whenAt('today', '7:15pm', now).toISOString(), new Date('2026-11-25T19:15:00').toISOString());
+  assert.strictEqual(whenAt('tomorrow', '9', now), null);        // a bare number is not a time
+  assert.strictEqual(whenAt('2026-13-45', '9am', now), null);
+});

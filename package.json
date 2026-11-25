@@ -1,6 +1,6 @@
 {
   "name": "jarvis",
-  "version": "3.2.8",
+  "version": "3.2.9",
   "private": true,
   "description": "Jarvis desktop assistant (Electron rebuild, no Python)",
   "main": "src/main/main.js",

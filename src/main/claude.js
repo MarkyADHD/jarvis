@@ -22,6 +22,7 @@ You can control this Windows PC with this command (Bash tool). You may also run 
   node src/tools/pc.js note add <text> | note list | note clear
   node src/tools/pc.js remind <10m|2h|1h30m|HH:MM|7pm|7:30pm> <text>   and   node src/tools/pc.js reminders
   node src/tools/pc.js remind <mon-sat|daily|weekdays|weekends|mon,wed,fri> <HH:MM|H:MMam/pm> <text>   (repeats weekly)
+  node src/tools/pc.js remind <tomorrow|YYYY-MM-DD> <HH:MM|7pm|7:30pm> <text>   (one-off on a given day, e.g. "on Friday at 3": work out the date yourself)
   node src/tools/pc.js remind cancel <words from the reminder | all>   (cancel reminders; never edit the reminders file yourself)
                                                        (countdowns: put {days 2026-11-19} in the text and it is spoken as the days left, e.g. remind daily 09:00 GTA 6 is out in {days 2026-11-19} days)
   node src/tools/pc.js calendar today | tomorrow | week | add <YYYY-MM-DD> <HH:MM> [<minutes>m] <title>   (his iCloud calendar; work out the date yourself from what he says; if it says not connected, tell him to connect it in Settings)
@@ -55,7 +56,7 @@ You can control this Windows PC with this command (Bash tool). You may also run 
   node src/tools/pc.js doctor startup disable|enable <app>   (turn an app off/on at startup, reversible; ask him before disabling)
   node src/tools/pc.js lock
   node src/tools/pc.js info
-When he asks you to build something (a website, script, video, game server, any real deliverable), just build it; use the frontend-design skill (Skill tool) for websites. Put the result in Desktop\\Jarvis Projects\\<name> and open the folder when done.
+When he asks you to build something (a website, script, video, game server, any real deliverable), just build it. Put the result in Desktop\\Jarvis Projects\\<name> and open the folder when done.
 Use WebSearch/WebFetch for anything current. If he asks for something none of these cover, say so plainly and offer to have it built. You can Read, Write and Edit files freely.`;
 
 // pc.js plus any shell command, research and file tools (Marky's standing word: no confirmations; Defender is the one hard limit, in the persona).
@@ -75,7 +76,9 @@ function resolveBin(bin) {
 // shell:true on Windows means proc is cmd.exe; kill the whole tree.
 const killTree = p => process.platform === 'win32' ? spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F']) : p.kill();
 
-const NOT_FOUND = 'Claude Code not found. Install it and run `claude` once to sign in.';
+const BACKUP_LINE = "Heads up, boss, the Claude brain isn't answering, so I'm on the local backup.";
+const SIGNED_OUT = "Heads up, boss, my Claude sign-in has expired. Open a terminal, type claude, and sign in again, so I'm on the local backup until you do.";
+const NOT_FOUND ='Claude Code not found. Install it and run `claude` once to sign in.';
 class Claude extends EventEmitter {
   constructor(bin = process.env.JARVIS_CLAUDE_BIN || 'claude') { super(); Object.assign(this, resolveBin(bin)); this.sessionId = null; this.proc = null; this.gen = 0; }
 
@@ -93,7 +96,9 @@ class Claude extends EventEmitter {
   }
 
   start() {
-    const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+    // --setting-sources: skip his user-level Claude Code settings. They switch on coding plugins (ponytail, superpowers)
+    // whose start-up hooks were telling Jarvis "you are a lazy senior developer" in every session (found 2026-11-25).
+    const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--setting-sources', 'project,local',
       '--include-partial-messages', '--model', 'sonnet', '--effort', 'low', '--append-system-prompt', PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : ''), '--allowedTools', ...ALLOWED];
     const site = require('./vault').website(); if (site) args.push('--add-dir', site);   // business manager: his website folder
     const q = a => (this.shell ? JSON.stringify(a.replace(/\r?\n/g, ' ')) : a);   // only the cmd.exe fallback needs quoting
@@ -127,6 +132,7 @@ class Claude extends EventEmitter {
     if (m.type === 'stream_event') clearTimeout(this.hang);
     if (m.type === 'stream_event' && m.event?.delta?.type === 'text_delta') { this.streamed = true; this.emit('delta', m.event.delta.text); }
     if (m.type === 'assistant') for (const c of m.message?.content || []) if (c.type === 'tool_use') this.emit('tool', { name: c.name, input: c.input });
+    if (m.type === 'system' && m.subtype === 'background_tasks_changed') this.jobs = (m.tasks || []).length;
     if (m.type === 'system' && m.subtype === 'background_tasks_changed') this.emit('tasks', (m.tasks || []).map(t => t.description || 'Background task'));   // jobs still running after he's answered
     if (m.type === 'result') {
       // A resumed session that no longer exists fails on its first turn: start fresh and retry once, silently.
@@ -158,22 +164,24 @@ class Claude extends EventEmitter {
     if (this.streamed || !this.last || this.noLocal) return false;
     console.log('[jarvis] Claude failed, using local brain:', String(error).slice(0, 200));
     const fresh = !(this.localUntil > Date.now());
-    this.localUntil = Date.now() + 3600e3;
+    // Signed out is his to fix and quick to fix: say exactly that, and try Claude again in 5 minutes, not an hour.
+    const auth = /authenticat|oauth|api key|log ?in|logged out|401/i.test(String(error));
+    this.localUntil = Date.now() + (auth ? 300e3 : 3600e3);
     if (this.proc) { killTree(this.proc); this.proc = null; }
-    this.local(this.last.text, this.last.imgs, fresh);
+    this.local(this.last.text, this.last.imgs, fresh && (auth ? SIGNED_OUT : BACKUP_LINE));
     return true;
   }
 
-  async local(text, imgs, announce = false) {
+  async local(text, imgs, announce = '') {
     const gen = ++this.gen; this.busy = false; this.localBusy = true;
     this.localHistory ||= [];
     const system = PERSONA + (this.context ? '\n\nWhat you remember about him (from his memory core):\n' + this.context : '');
     let out;
     try {
       out = await require('./local').turn({ text, imgs, system, history: this.localHistory, cwd: this.cwd || ROOT, primary: this.localOnly }, (ev, p) => gen === this.gen && this.emit(ev, p));
-      if (announce) out = "Heads up, boss, the Claude brain isn't answering, so I'm on the local backup. " + out;
+      if (announce) out = announce + ' ' + out;
     } catch (e) {
-      out = "Sorry boss, my brain's offline. Claude isn't answering and the local backup won't start, but the HUD buttons still work.";
+      out = announce === SIGNED_OUT ? SIGNED_OUT.replace(/, so .*$/, '.') : "Sorry boss, my brain's offline. Claude isn't answering and the local backup won't start, but the HUD buttons still work.";
       console.log('[jarvis] local brain failed:', e.message);
     }
     if (gen !== this.gen) return;   // cancelled meanwhile
@@ -182,12 +190,15 @@ class Claude extends EventEmitter {
     this.emit('done', { text: out, error: null });
   }
 
-  // Stop immediately; next send() resumes the same conversation.
-  cancel() {
+  // Stop immediately; the conversation carries on in a fresh warm process. With nothing running there is nothing to stop:
+  // Esc and the Stop button used to kill the idle warm process too, so the next message paid a cold start.
+  // quit = the app is closing or the conversation is being dropped: always kill, never restart.
+  cancel(quit = false) {
     if (this.localBusy) { this.localBusy = false; this.gen++; this.emit('done', { text: '', error: 'cancelled' }); }
-    if (!this.proc) return;
-    killTree(this.proc); this.proc = null;
+    if (!this.proc || (!quit && !this.busy && !this.jobs)) return;
+    killTree(this.proc); this.proc = null; this.jobs = 0;
     if (this.busy) { this.busy = false; this.emit('done', { text: '', error: 'cancelled' }); }
+    if (!quit && !this.localOnly && !(this.localUntil > Date.now())) { this.resumed = !!this.sessionId; this.start(); }
   }
 }
 module.exports = { Claude, PERSONA };

@@ -576,7 +576,8 @@ $('f').onsubmit = e => { e.preventDefault(); send(); };
 q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('stop').onclick = () => { jarvis.cancel(); Voice.stop(); };
 $('core').onclick = () => q.focus();
-addEventListener('keydown', e => { if (e.key === 'Escape') { jarvis.cancel(); Voice.stop(); } });
+// Esc with Settings or Clip Studio open only closes that (their own listeners); it used to cut Jarvis off mid-sentence as well.
+addEventListener('keydown', e => { if (e.key === 'Escape' && $('setModal').hidden && $('clipModal').hidden) { jarvis.cancel(); Voice.stop(); } });
 
 // ---------- boot sequence (real checks, shown as they resolve) ----------
 (async function boot() {

@@ -57,3 +57,14 @@ test('background jobs are reported while running and cleared when done', () => {
   c.handle('{"type":"system","subtype":"background_tasks_changed","tasks":[]}');
   assert.deepEqual(seen, [['Exporting the 3D model'], []]);
 });
+
+test('Stop with nothing running keeps the warm process; a sign-in failure says so and retries soon', () => {
+  const c = new Claude(); let killed = 0;
+  c.proc = { pid: 0, get stdin() { killed++; return null; } };   // any touch of the process would show up here
+  c.cancel(); assert.ok(c.proc, 'idle process survives Stop/Esc');
+  assert.equal(killed, 0);
+  const d = new Claude(); let said;
+  d.local = (_t, _i, announce) => said = announce; d.last = { text: 'hi', imgs: [] };
+  d.handle('{"type":"result","result":"Failed to authenticate: OAuth session expired and could not be refreshed","is_error":true}');
+  assert.match(said, /sign-in has expired/); assert.ok(d.localUntil - Date.now() <= 300e3);
+});

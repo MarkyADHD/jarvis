@@ -37,7 +37,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg)}
 body{color:var(--text);font:14px var(--disp);letter-spacing:.02em;
-  display:grid;grid-template-columns:minmax(260px,21%) minmax(0,1fr) minmax(280px,22%);grid-template-rows:64px 1fr 220px;
+  display:grid;grid-template-columns:minmax(260px,21%) minmax(0,1fr) minmax(280px,22%);grid-template-rows:64px minmax(0,1fr) clamp(220px,32vh,400px);
   grid-template-areas:"top top top" "left core right" "left chat right";gap:14px;padding:14px 16px 16px}
 #bg,#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
 #bg{z-index:-2} #fx{z-index:50}
@@ -60,12 +60,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:49;
   background:linear-gradient(180deg,transparent,rgba(var(--c-rgb),.07),transparent);animation:scan 6s linear infinite;animation-delay:var(--d,0s)}
 @keyframes scan{to{top:100%}}
 .ptitle{font:600 11px var(--mono);letter-spacing:.3em;color:var(--cyan);text-transform:uppercase;
-  display:flex;align-items:center;gap:9px;margin-bottom:12px}
+  display:flex;align-items:center;gap:9px;margin-bottom:12px;white-space:nowrap}
 .ptitle::before{content:"";width:7px;height:7px;background:var(--cyan);box-shadow:0 0 10px var(--cyan);animation:blink 2.4s steps(1) infinite}
 @keyframes blink{50%{opacity:.25}}
-.ptitle em{font-style:normal;color:var(--muted);letter-spacing:.15em}
-.ptitle span{margin-left:auto;color:var(--muted);letter-spacing:.12em;font-weight:400}
-.ptitle::after{content:"";flex:0 0 40px;height:1px;background:linear-gradient(90deg,var(--cyan),transparent);order:3}
+.ptitle em{font-style:normal;color:var(--muted);letter-spacing:.15em;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ptitle span{margin-left:auto;color:var(--muted);letter-spacing:.12em;font-weight:400;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ptitle:has(span)::after{display:none}   /* a title with a value on the right has no room for the rule as well */
+.ptitle::after{content:"";flex:0 1 40px;height:1px;background:linear-gradient(90deg,var(--cyan),transparent);order:3}
 
 /* ---------- top ---------- */
 #top{grid-area:top;display:flex;align-items:center;gap:26px;padding:0 22px;position:relative;opacity:0}
@@ -136,7 +137,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:49;
 .m .h time{color:var(--muted);letter-spacing:.1em}
 .m.user{color:var(--user)} .m.user .h b{color:var(--muted);font-weight:400}
 .m.jarvis{color:var(--reply);text-shadow:0 0 6px rgba(var(--c-rgb),.25)} .m.jarvis .h b{color:var(--cyan);font-weight:400}
-.m.tool{color:var(--gold)} .m.tool .h b{color:var(--gold)} .m.err{color:#ff9a82} .m.err .h b{color:var(--amber);font-weight:400}
+.m.err{color:#ff9a82} .m.err .h b{color:var(--amber);font-weight:400} .m.tool{color:var(--gold)} .m.tool .h b{color:var(--gold)}
 .caret{display:inline-block;width:8px;height:15px;background:var(--cyan);vertical-align:-2px;margin-left:2px;animation:blink .8s steps(1) infinite;box-shadow:0 0 8px var(--cyan)}
 form{display:flex;gap:10px;margin-top:8px;align-items:stretch}
 .inwrap{flex:1;position:relative}
@@ -203,7 +204,7 @@ button:hover{background:rgba(var(--c-rgb),.3);color:#fff;text-shadow:0 0 8px var
 .cap input{background:transparent;border:1px solid rgba(var(--c-rgb),.2);color:var(--text);font:12px var(--mono);padding:4px}
 .cap input.t{color:var(--muted)} .cap button{padding:0;height:auto;font-size:11px;clip-path:none}
 .bar{height:6px;background:rgba(var(--c-rgb),.12);position:relative}.bar i{position:absolute;inset:0;width:0;background:var(--cyan);box-shadow:0 0 10px var(--cyan);transition:width .2s}
-.setp{max-height:90vh;overflow-y:auto;width:min(760px,94vw);opacity:1;transform:none;filter:none;animation:holo .5s forwards}
+.setp{max-height:90vh;overflow-y:auto;overflow-x:hidden;width:min(760px,94vw);opacity:1;transform:none;filter:none;animation:holo .5s forwards}
 .srow{display:grid;grid-template-columns:170px 1fr auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px dashed rgba(var(--c-rgb),.13)}
 .srow label{font:11px var(--mono);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
 .srow small{font:10.5px var(--mono);color:var(--muted);letter-spacing:.08em}
@@ -341,7 +342,7 @@ body.private #mems,body.private #log,body.private #npPanel .npt,body.private #ne
   <div class="srow"><label>Theme</label><select id="sTheme"><option value="default">Default</option><option value="vice">Vice City</option></select><small>colours only, same layout</small></div>
   <div class="srow"><label>Voice</label><button type="button" id="sVoice"></button><small id="sEngine"></small></div>
   <div class="srow"><label>Hands-free</label><button type="button" id="sHf"></button><small>say "Jarvis ..."</small></div>
-  <div class="srow"><label>Push-to-talk</label><button type="button" id="sPtt"></button><input id="sPttKey" placeholder="Home" title="Click, then press a key"><small>hold to talk, release to send</small></div>
+  <div class="srow" style="grid-template-columns:170px 1fr 130px auto"><label>Push-to-talk</label><button type="button" id="sPtt"></button><input id="sPttKey" placeholder="Home" title="Click, then press a key"><small>hold to talk, release to send</small></div>
   <div class="srow"><label>Speech recognition</label><select id="sStt"><option value="cpu">CPU (fastest on most PCs)</option><option value="gpu">GPU (falls back to CPU)</option></select><small id="sSttState"></small></div>
   <div class="srow"><label>Home city</label><input id="sCity" placeholder="e.g. Manchester"><small>weather and briefings</small></div>
   <div class="srow"><label>Brain</label><select id="sBrain"><option value="claude">Claude, local model as backup</option><option value="local">Local model only</option></select><small id="sBrainState"></small></div>
